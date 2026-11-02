@@ -280,6 +280,146 @@ sort.Strings(keys)
 
 ---
 
+## 9.9 空列表不会触发 Room Flow 重新发射
+
+> **症状**：空文件夹永远显示「正在读取…」，进度条一直转。
+>
+> **时间**：D3 阶段（2026-11），真实账号上的「空文件夹」复现。
+
+### 根因
+
+代码把「首次加载完成」的判定放在了 `Flow.collect` 里：
+
+```kotlin
+observeChildren(id).collect { children ->
+    state = state.copy(items = children, isInitialLoading = false)  // ← 不会执行
+}
+```
+
+**Room 只在表变化时通知 Flow。** 空文件夹的 `replaceChildren` 删 0 行、插 0 行，
+表根本没变，所以 Flow **不会发射第二个值**，`isInitialLoading` 永远不置 false。
+
+有内容的文件夹看不出这个问题，因为它至少会插入几行。
+
+### 正确写法
+
+**网络请求的结果才是「首个答案已到达」的权威**，不是 Flow：
+
+```kotlin
+refreshJob = launch {
+    try {
+        repository.refreshFolder(id)
+    } finally {
+        // 放 finally，取消和异常都不会把转圈卡住
+        state = state.copy(isInitialLoading = false)
+    }
+}
+```
+
+Flow 继续负责保持 `items` 最新，但不再负责判定「加载完了」。
+
+### 两个附带坑
+
+**① 先服务端确认，再改逻辑。**
+本轮先探针确认了空文件夹的真实响应（`200` / `items: []` / `status: "OK"`），
+才确定问题不在解析层。否则很容易去改一个本来正确的 mapper。
+
+**② `catch (Exception)` 会把协程取消当错误。**
+`poll` 里加了 `refreshJob?.cancel()` 后，日志里出现一片 `E/DriveRepository: JobCancellationException`。
+取消是正常控制流，必须单独 `catch (e: CancellationException) { throw e }`。
+否则真实的错误会被这些噪音淹没。
+
+### 自检清单
+
+- [ ] 任何「首次加载」标志位，是否依赖 Flow 发射？
+- [ ] 置位是否在 `finally` 而不是 try 末尾？
+- [ ] 空列表路径是否单独跑过？
+- [ ] `catch (Exception)` 是否误吞了 `CancellationException`？
+
+---
+
+## 9.10 带 Origin 的请求会被 CDN 拒绝（503）
+
+> **症状**：所有下载都报 `HTTP 503: Bad Gateway`，但拿 URL 的请求完全正常。
+>
+> **时间**：D4 阶段（2026-11），真机复现。
+
+### 根因
+
+`Session.NewRequest` 会给每个请求盖上：
+
+```go
+req.Header.Set("Origin", s.Origin)      // https://www.icloud.com
+req.Header.Set("Referer", s.Referer)    // https://www.icloud.com/
+```
+
+这对 API 主机是必需的（校验来源），但对 **已签名的 CDN 直链是致命的**：
+签名已在 query 里，多一个外部 Origin 反而被当成越权请求。
+
+### 定位过程（值得复用）
+
+1. 先确认 `download/by_id` 正常 → 排除端点问题
+2. 怀疑 User-Agent → **加了 UA 仍然 503** → 排除了
+3. 写探针对比多种头部组合，其中 **“完全裸请求” 返回 200 且拿到真实字节**
+4. 对比探针与正式代码的差异 → 发现唯一区别是 `s.NewRequest` vs `http.NewRequest`
+
+> [!IMPORTANT]
+> **“裸请求能过”是最强的线索。** 它直接指向“你发了不该发的头”，
+> 比逐个试头部快得多。以后碰到 CDN 类 4xx/5xx，先试裸请求。
+
+### 修法与自检
+
+```go
+// ✓ 下载路径用标准库构造，不带 Cookie/Origin/Referer
+req, _ := http.NewRequest(http.MethodGet, signedURL, nil)
+```
+
+- [ ] 这个请求是否需要会话身份？不需要就不应该用 `s.NewRequest`
+- [ ] 有没有单元测试断言“不该出现的头确实没出现”？
+
+---
+
+## 9.11 下载落盘不要“先删后写”
+
+> **时间**：D4 阶段（2026-11）。
+
+### 问题
+
+为了让重复下载不产生 `(1)` 副本，最初的实现是：
+
+```kotlin
+resolver.delete(旧的同名行)   // ①
+val uri = resolver.insert(新行) // ②
+```
+
+这有两个危害：
+
+1. **②失败 = 旧文件也没了**。用户原本好好的文档，既没更新成功也没了。
+2. **静默覆盖本地修改**。用户编辑后再下载，改动无声消失。
+
+### 正确做法：永不删除，只追加
+
+```kotlin
+val finalName = uniqueDisplayName(...)  // report.pdf -> report (1).pdf
+resolver.insert(finalName, ...)         // 新开一行
+```
+
+### 两个容易写错的细节
+
+**① 后缀要在扩展名之前。**
+`report.pdf (1)` 会丢掉文件类型，系统不再为它提供 PDF 打开方式。
+
+**② 不要依赖 MediaStore 的去重行为。**
+平台确实会给重名文件加 `(1)`，但**这不是 API 契约**，不同 OEM、不同 provider 的行为并不一致。自己算后缀才是确定的。
+
+### 自检清单
+
+- [ ] 任何“保存到本地”的操作，失败时会不会弄丢已存在的文件？
+- [ ] 删除是否发生在写入**之前**？
+- [ ] 重名处理是自己算的还是托给平台的？
+
+---
+
 ## 10. 惰性布局嵌套（LazyColumn 内嵌 LazyVerticalGrid）
 
 > 详细案例见 [ISS-027](CHANGELOG_ISSUES.md#iss-027-paging-3-remotemediator-导致深翻页跳顶改用月分组本地分页根治)

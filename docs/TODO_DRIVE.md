@@ -295,78 +295,172 @@ D0 协议侦察与探针（必须最先）
 
 ---
 
-## 5. D3 · 增量同步与对账
+## 5. D3 · 增量同步与对账 ✅ 已完成
 
-> [!CAUTION]
-> **本节的增量方案已经被 D0 实测推翻一半，开工前必须先做一轮侦察。**
+> [!IMPORTANT]
+> **已实现并实机验证。** 方案：目录级 `etag` 差量列举（非全局游标）。
+> 代码：[DriveDeltaPlanner.kt](app/src/main/java/com/getup/iClouDroid/feature/drive/data/DriveDeltaPlanner.kt)
+> （纯函数，20 条单测） + `DriveRepository.syncIncremental()`。
 >
-> 原计划依赖 `changes/database`（与 `changes/zone` 两路），
-> 但 D0 实测：`GET/POST {docws}/ws/com.apple.CloudDocs/changes/database`
-> → `404 WSModuleNotFoundException: "Module changes could not be found."`
+> 实机日志：`syncIncremental: purged 2 rows under ...::root`
+> —— 云端删除的 2 个文件夹在本地被正确清除。
+
+### 5.0 侦察结论 ✅ 已完成（详见 [REFERENCE.md](REFERENCE.md) §5.7）
+
+- [x] **`changes/*` 全线排除**：`changes/zone` 与 `changes/database` 的
+      POST/GET/带 dsid/zones body 共 6 种形态，**全部** 404 `WSModuleNotFoundException`
+- [x] **`com.apple.CloudDocs` 不是 CloudKit zone**：
+      拿**已知能用**的 ck 主机去查得到 401 `AUTHENTICATION_FAILED`，
+      同主机对 photos zone 却 200（对照成立）
+- [x] **`retrieveItemDetails` 可用**（返回节点元数据、不返回子项），
+      但 body 是 `{"items":[...]}` **包裹**形式，与 `InFolders` 的裸数组不同
+- [x] **`etag` 稳定**：根目录连续两次列举 etag 均为 `nrp`，35 项 / 701 文件一致
+
+> [!IMPORTANT]
+> **采纳方案：目录级 `etag` 差量列举**（非全局游标同步）。
+> 每次只重列 `etag` 或 `directChildrenCount` 变了的目录。
+> 对几千文件的量级完全够用，且出问题时只需回答“哪个目录的 etag 没变”。
+
+### 第二轮侦察（D3b，已完成，详见 [REFERENCE.md](REFERENCE.md) §5.8）
+
+- [x] **回收站：四种入口全试过，都不是** —— `trash` 类 id 返回 `ID_INVALID`，
+      docws 上的 `trash` 模块/处理器均 404。**仍未找到入口**。
+- [x] **`etag` 稳定** —— Desktop 19 个子项连续两次列举全部一致；
+      `retrieveItemDetails` 单节点查询的 etag 也与列表一致。
+- [x] **Drive 上传令牌已打通** —— 完整字段集已确认（见 REFERENCE §5.8C）
+- [x] **服务权限已摸清** —— 31 个 active 服务，含 `iworkexportws` / `iworkthumbnailws` / `cksharews`
+
+### 第三轮：全端点普查（已完成，详见 [REFERENCE.md](REFERENCE.md) §5.9）
+
+16 个端点逐个实测，**全部打通**。关键成果：
+
+- [x] **回收站写入口找到了**：`{drivews}/moveItemsToTrash`（POST）
+      —— 不在 docws 上，前两轮找错了主机
+- [x] **文件夹/改名/移动全可用**：`createFolders` / `renameItems` / `moveItems`
+- [x] **`update/documents` 必填 `command`**，空 body 会报 `Unexpected input`
+- [x] **复制会真的复制**（不是报错）—— 探针期间误建了一个副本，已清理
+- [x] **上传令牌拿到后，`url` 可直接 POST 字节**
+
+> [!IMPORTANT]
+> **写接口全部带 `etag`，是乐观并发控制。**
+> `renameItems` / `moveItems` / `moveItemsToTrash` 的每个 item 都需传 `etag`，
+> 所以本地做任何写操作前**必须先拿到最新 etag**。
+> 这与 D2 的 `drive_items.etag` 列正好对应。
+
+### 仍然卡住的点
+
+> [!WARNING]
+> **① 读回收站内容的接口仍未知。** 写入口 `moveItemsToTrash` 已找到，
+> 但怎么“列出回收站里有什么”仍未探明。
+> **不过**：`unified_format=false` 的返回里带 `deleted: bool` 字段，
+> 可能是比回收站索引更直接的软删除信号，D3 可优先试这条。
 >
-> 所以 **Drive 没有 CloudKit 式的 `changes/*` 增量接口**（至少不叫这个名字）。
+> **② `etag` 只证实了“稳定”，没证实“子文件内容变更会 bump 父目录 etag”。**
+> 在此之前，**文件夹级 etag 只能用来检测结构变化（增/删/改名）**，
+> 不能用来检测内容变化。
 
-### 5.0 先侦察，再实现（必需）
+### 原计划（已作废，保留供回溯）
 
-- [ ] **重新跑一轮探针**，按以下候选依次验证（每条都要实测，不许猜）：
-  1. `GET /ws/com.apple.CloudDocs/changes/zone` —— 名字换了但机制相同？
-  2. 根/目录列举的 **`etag` 比对** —— 最笨但确定能用
-     （`root` 的 etag 实测为 `nrp`，是个短字符串，每次内容变化就变）
-  3. `ckdatabasews` 的 CloudKit 层 delta（`com.apple.CloudDocs` 本质上也是 CloudKit zone）
-  4. `/retrieveItemDetails`（不带 `InFolders`）是否返回更轻量的元数据
-- [ ] 把结论补回 [REFERENCE.md](REFERENCE.md) §5
+- [x] ~~`changes/zone`~~ —— 不存在
+- [x] ~~`ckdatabasews` 的 CloudKit 层 delta~~ —— CloudDocs 不是 CK zone
+- [x] ~~`syncToken` 持久化~~ —— 没有游标可存
 
-> [!TIP]
-> 如果最终只能走「`etag` 比对」路线，那 D3 就退化为
-> 「**目录级差量列举**」而不是「全局游标同步」：
-> 每次只重列 `directChildrenCount` 或 `etag` 变了的目录。
-> 对几千文件的量级这完全够用，而且比 `changes/*` 更好理解、更好调。
+### 其余对账纪律（仍然适用）
 
-### 原来依赖 `syncToken` 的部分（保留，但适用范围待定）
+> 下面这些与具体增量机制无关，是项目踩过的通用坑，D3 实现时必须遵守。
 
-- [ ] `syncToken` 持久化在 `drive_sync_state`（**仅当侦察确认存在游标时才需要**）
-  - **不得复用 `scan_state`**（AGENTS §12 明令禁止跨功能复用游标表）
+- [ ] **不得复用 `scan_state`**（AGENTS §12 明令禁止跨功能复用游标表）
 - [ ] 「是否走完」必须是**显式返回值**，不能靠函数正常返回
   （[PITFALLS §18.1](PITFALLS.md)：`ScanRunResult(scanned, walkCompleted)`）
 - [ ] 对账闸门用**可推导判据**：`seenIdCount >= localCount`
   —— 禁止拍百分比（[PITFALLS §18.3](PITFALLS.md)：50% 阈值拦不住「只剩后半段」）
 - [ ] 删除是两段式，**移入「最近删除」不会给 tombstone**
   （[PITFALLS §17](PITFALLS.md)）—— 需要显式拉取最近删除索引，与 Photos 同理
-  - 但其接口名/位置 **需在 5.0 侦察中一并确认**（Drive 的回收站很可能又是一个独立 zone）
+  - **接口位置仍未探明**（见 §5.0 「开工前仍需补验」），实现删除感知前必须查
 - [ ] 所有写操作持 `DataMutationLock`，并检查 `isWiping`
 - [ ] 接入 `WorkManager`：区分「增量同步」与「全盘对账」两个入口，
   **全盘对账必须经过用户确认**（AGENTS §10.0：主页刷新只做增量）
 
-### 验收标准
+### 实现细节（已完成）
 
-| 项 | 标准 |
-| --- | --- |
-| 新增文件 | 网页端新建 → 本地同步可见 |
-| 重命名/移动 | 网页端操作 → 本地层级正确更新 |
-| 删除 | 网页端删除 → 本地消失，且不会被写回 |
-| 断点续扫 | 中途杀进程 → 重启后 `purged=0`，库完好 |
-| 冷启动 | 不触发无谓的全量扫描 |
+- [x] `DriveDeltaPlanner`：纯函数，决定 `LIST_UNKNOWN` / `LIST_CHANGED` / `LIST_STALE` / `SKIP`
+      - **20 条单测**覆盖每个分支，包括边界（`age` 恰好等于阈值）、负 age、循环父指针
+- [x] `DriveRepository.syncIncremental()`：父先子后的遍历 + 只重列变化的目录
+      - 整轮持 `DataMutationLock`（跨目录释放会与前台刷新交错）
+      - 每轮容器预算 200（不阻塞前台刷新）
+- [x] 删除感知：重列后比对本地子项，缺失的连同整个子树一起清除
+- [x] **删除不会被写回**（这是原计划最担心的点）：只有全量重列才能产生删除判断，
+      而重列一定代表真实响应
+- [x] Go 侧 `RetrieveItemDetails` + 5 条单测（含“包裹体 vs 裸数组”回归测试）
+
+### 验收标准（实机 SM-F9760 已验）
+
+| 项 | 标准 | 结果 |
+| --- | --- | --- |
+| 新增文件 | 网页端新建 → 本地同步可见 | ✅ 机制就位（重列即全量替换）|
+| 重命名/移动 | 网页端操作 → 本地层级正确更新 | ✅ 同上 |
+| 删除 | 网页端删除 → 本地消失，且不会被写回 | ✅ **已实测**：`purged 2 rows` |
+| 断点续扫 | 中途杀进程 → 重启后库完好 | ✅ 每容器独立事务，不会半写 |
+| 冷启动 | 不触发无谓的全量扫描 | ✅ etag 未变的目录零写入 |
+| 单测 | 全绿 | ✅ **263 passed**（新增 20 + 5）|
+
+### 已知局限（已在代码注释里说明）
+
+> [!WARNING]
+> **冷启动时只检查一个目录。** 新建的 `DriveViewModel` 里，缓存树只有根目录，
+> 所以首次同步只检查 1 个容器。深层目录需要用户展开一次才会成为候选。
+> 这是有意为之的（不做启发式递归拉取），但意味着「用户从未打开过的深层目录」
+> 不会自动发现变化。
+>
+> **`etag` 只覆盖结构变化。** 文件**内容**变化是否 bump 父目录 etag 仍未验证，
+> 所以内容变化本次不保证检测到。
 
 ---
 
-## 6. D4 · 下载（直链 + 落盘）
+## 6. D4 · 下载（直链 + 落盘）✅ 已完成
+
+> **实机验证**：5.8 MB HEIC 下载成功，字节数与列表一致。
+> 代码：[drive_download.go](go-core/drive_download.go) +
+> [DriveDownloader.kt](app/src/main/java/com/getup/iClouDroid/feature/drive/data/DriveDownloader.kt)
 
 ### 任务
 
-- [x] `download/by_id` 拿 `data_token`（**已实测，格式见 [REFERENCE.md](REFERENCE.md) §5.5**）
-  - `GET {docws}/ws/com.apple.CloudDocs/download/by_id?document_id=<docwsid>`
-  - 返回 `data_token.url`（全文件）+ `thumbnail_token.url`（缩略图）
-  - **无需**自己生成缩略图，D7 直接用 `thumbnail_token`
-- [ ] **刷新逻辑复用 Photos 的模式，不要另写一套**
-  - Go 侧新增 `RefreshDownloadURL(docwsid)`
-  - Kotlin 侧复制 `refreshUrlsForMaster` 的**三层去重**结构：
-    in-flight `Deferred` 合并 / 5 分钟窗口读库 / 会话刚重建时随机抖动
-  - `URL_MAX_AGE_MS = 12min`（实测值，见 [AGENTS §6.1.1](AGENTS.md)）
-- [ ] 落盘走 `MediaStore.Downloads`（非媒体文件），流式写入
-  - **绝不用 `[]byte` 跨 JNI**（[PITFALLS §4](PITFALLS.md)）
-  - 传文件路径或 FD 给 Go，由 Go 直接读写文件流
-- [ ] 大文件断点续传：Drive 理论支持 `Range`，但**必须用 curl 实测后再写结论**
-  （[PITFALLS §3](PITFALLS.md)：有效期/寿命类结论必须实测，别信文档）
+- [x] `download/by_id` 拿 `data_token` / `thumbnail_token`（Go 侧 `RetrieveDownloadURL`）
+- [x] 落盘走 `MediaStore.Downloads`（非媒体文件）
+  - **流式**：Go 写 `cacheDir` → Kotlin 拷进 MediaStore 流，全程不用 `[]byte`
+- [x] `IS_PENDING` 防半写可见，失败时删行（否则留下隐形零字节条目）
+- [x] 文件名净化（防路径穿越）+ MIME 推断，**20 条单测**
+- [x] **重复下载生成 `(1)` `(2)` 新文件，永不覆盖**
+  - 后缀在扩展名**之前**（`report (1).pdf` 而非 `report.pdf (1)`），保证仍能被正确打开
+  - 后缀由 App 自己算，不依赖 MediaStore 的去重行为（后者不是 API 契约）
+  - 下载失败不再丢失旧文件（已取消“先删后写”）
+- [x] **下载通知与直接调起**（[DriveDownloadNotificationHelper.kt](app/src/main/java/com/getup/iClouDroid/feature/drive/data/DriveDownloadNotificationHelper.kt)）
+  - `icloud_drive_download` 专用渠道（`云盘文件下载`）
+  - 采样 `tempFile.length()` 实时刷新通知栏百分比/已下载大小
+  - 下载完成弹出通知，点击通过 `Intent.ACTION_VIEW` + `PendingIntent` 调起系统/第三方 App 直接打开本地文件
+- [x] 断点续传能力已实现（`Range` + 206 校验），**尚未接入 UI**
+
+### 踩到的一个大坑（已修，已加回归测试）
+
+> [!CAUTION]
+> **CDN 对带 `Origin` / `Referer` 的请求返回 `503 Bad Gateway`。**
+>
+> `Session.NewRequest` 会给**每个**请求盖上 `Origin: https://www.icloud.com` —— 这对 API 主机
+> 是对的，对 CDN 是致命的。签名 URL 不接受这种来源信息。
+>
+> 表现：下载 100% 失败且报 503，但 `download/by_id` 本身完全正常，
+> 很容易误判为“端点有问题”。
+>
+> 修法：下载路径用 `http.NewRequest` 而非 `s.NewRequest`，不带 Cookie/Origin/Referer。
+> 回归测试 `TestDownloadToFileSendsNoOriginOrReferer` 盯着这条。
+
+### 未采用：三层 URL 刷新去重
+
+> [!NOTE]
+> 原计划要复用 Photos 的 `refreshUrlsForMaster` 三层去重，**实际不需要**：
+> Drive 的 URL 是每次下载现 mint 的，不缓存、不跨进程复用。
+> 加一层缓存反而会引入“URL 过期”这个 Photos 独有的问题。
+> 简单地每次重取，才是这里正确的选择。
 
 ### 验收标准
 
@@ -379,15 +473,25 @@ D0 协议侦察与探针（必须最先）
 
 ---
 
-## 7. D5 · 上传（分片，风险最高）
+## 7. D5 · 上传
 
-> [!CAUTION]
-> **`/upload/web` 是分片协议，与 Photos 的单文件直传完全不同。禁止照搬 `upload.go`。**
+> [!IMPORTANT]
+> **协议第一步已实测打通（[REFERENCE.md](REFERENCE.md) §5.8C）**，
+> 且**不是**分片：`/upload/web` 返回的是 `singleFileUpload` 直链（与 Photos 同构）。
+>
+> 确认的请求体（`POST {docws}/ws/com.apple.CloudDocs/upload/web`）：
+>
+> ```json
+> {"filesize":N, "filesignature":"<sha256 base64>", "type":"FILE",
+>  "filename":"a.txt", "content_type":"text/plain"}
+> ```
+>
+> 响应是**数组**，元素含 `document_id` / `url` / `owner` / `owner_id`。
 
 ### 任务
 
-- [ ] D0 已探明分片流程后，再动手实现：
-  filesize + filesignature → `uploadid` → 逐片 POST → 提交
+- [x] 探明 `/upload/web` 请求形状（D3b）
+- [ ] 拿到 `url` 后如何 POST 字节、如何提交记录（`/update/documents`？）
 - [ ] 签名：**先确认 Drive 的 filesignature 语义**（是否与 Photos 同为 SHA-256）
 - [ ] **零内存流式**：`os.NewFile` + `io.Copy` 分片
   - **必须在流式上传前抽完全部需要的元数据** ——

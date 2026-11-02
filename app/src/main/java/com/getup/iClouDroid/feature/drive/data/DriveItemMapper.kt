@@ -42,6 +42,26 @@ object DriveItemMapper {
         }
     }
 
+    /**
+     * Parses the single-node response from `retrieveItemDetails`.
+     *
+     * That endpoint wraps its payload (`{"items":[{…}]}`) while `retrieveItemDetailsInFolders`
+     * returns a bare array — the one shape difference between two otherwise identical calls
+     * (REFERENCE.md §5.7). Getting it wrong produces a 400 from the server rather than a parse
+     * error here, which is why the wrapper is handled explicitly instead of by a generic helper.
+     *
+     * @return the node, or null when the payload is not a successful single-item response.
+     */
+    fun parseSingleItem(json: JSONObject): DriveItemEntity? {
+        if (!json.optBoolean("success", false)) return null
+        val items = json.optJSONArray("items") ?: return null
+        if (items.length() == 0) return null
+        val obj = items.optJSONObject(0) ?: return null
+        // No parent fallback: a probe is about the node itself, and inventing a parent here would
+        // make an unreachable row look reachable.
+        return parseItem(obj, parentDrivewsidFallback = obj.optString("parentId"))
+    }
+
     /** Parses a single node. Returns null when the row could not be addressed (no `drivewsid`). */
     fun parseItem(
         obj: JSONObject,

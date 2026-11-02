@@ -68,6 +68,15 @@ data class DriveItemEntity(
     /** `true` when this node can be descended into. `FILE` cannot. */
     val isContainer: Boolean get() = type == TYPE_FOLDER || type == TYPE_APP_LIBRARY
 
+    /**
+     * `true` when this node can be downloaded.
+     *
+     * Only plain `FILE`s. A `FOLDER` has no bytes, and an `APP_LIBRARY` is an app's document
+     * *container* — `download/by_id` answers 200 with no `data_token.url` for one, which surfaces
+     * to the user as a confusing "download failed" on something that was never a file.
+     */
+    val isDownloadable: Boolean get() = type == TYPE_FILE
+
     companion object {
         const val TYPE_FOLDER = "FOLDER"
         const val TYPE_FILE = "FILE"

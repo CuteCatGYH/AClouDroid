@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -106,18 +107,40 @@ fun DriveScreen(
         DriveHeader(
             state = state,
             onCrumbClick = viewModel::navigateTo,
-            onRefresh = viewModel::refresh
+            onRefresh = viewModel::refresh,
+            onSync = viewModel::syncIncremental
         )
 
+        // Deliberately shows only for the folder refresh, not for the background sync walk.
+        // A refresh is a short action the user just triggered; the incremental walk can run for
+        // a while over a large tree, and a bar that stays on for minutes reads as a hang rather
+        // than as progress. The walk's outcome is reported in `lastSyncSummary` instead.
         if (state.isRefreshing) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+
+        state.lastSyncSummary?.let { summary ->
+            Text(
+                text = summary,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(start = 20.dp, end = 20.dp, bottom = 6.dp)
+            )
         }
 
         state.errorMessage?.let { message ->
             DriveErrorBanner(message = message, onDismiss = viewModel::dismissError)
         }
 
+        state.downloadMessage?.let { message ->
+            DriveNoticeBanner(message = message, onDismiss = viewModel::dismissDownloadMessage)
+        }
+
         when {
+            // Only before the FIRST answer. Once that has arrived an empty folder renders the
+            // empty state below — which is a real result, not a pending one.
             state.isInitialLoading && state.items.isEmpty() -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator()
@@ -126,11 +149,23 @@ fun DriveScreen(
 
             state.items.isEmpty() -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        text = if (state.isRefreshing) "正在读取…" else "此文件夹为空",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "此文件夹为空",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        // A re-check in progress is a footnote on the empty state, not a
+                        // replacement for it: "empty" is already known to be true.
+                        if (state.isRefreshing) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = "正在重新检查…",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.outline
+                            )
+                        }
+                    }
                 }
             }
 
@@ -140,7 +175,14 @@ fun DriveScreen(
                         DriveItemRow(
                             item = item,
                             imageLoader = imageLoader,
-                            onClick = { viewModel.open(item) }
+                            // A folder descends; a file downloads. Those are different
+                            // affordances and the row must not do the wrong one silently.
+                            onClick = {
+                                if (item.isContainer) viewModel.open(item)
+                                else viewModel.download(item)
+                            },
+                            isDownloading = state.downloadingDrivewsid == item.drivewsid,
+                            downloadProgress = state.downloadProgress
                         )
                         HorizontalDivider(
                             modifier = Modifier.padding(start = 72.dp),
@@ -157,7 +199,8 @@ fun DriveScreen(
 private fun DriveHeader(
     state: DriveUiState,
     onCrumbClick: (Int) -> Unit,
-    onRefresh: () -> Unit
+    onRefresh: () -> Unit,
+    onSync: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -172,6 +215,12 @@ private fun DriveHeader(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
             )
+            // Two distinct actions, and the distinction is the whole point of D3:
+            // refresh re-lists this folder, sync walks the whole cached tree and re-lists only
+            // the folders whose etag moved. Labeling them the same would be a lie.
+            IconButton(onClick = onSync, enabled = !state.isSyncing) {
+                Icon(Icons.Default.Sync, contentDescription = "增量同步")
+            }
             IconButton(onClick = onRefresh, enabled = !state.isRefreshing) {
                 Icon(Icons.Default.Refresh, contentDescription = "刷新")
             }
@@ -249,20 +298,77 @@ private fun DriveErrorBanner(message: String, onDismiss: () -> Unit) {
     }
 }
 
+/**
+ * Neutral confirmation banner, used for "saved to Downloads".
+ *
+ * Deliberately not the error banner in a different colour: a successful download is not a
+ * warning, and reusing the error container would train the user to dismiss both without reading.
+ */
+@Composable
+private fun DriveNoticeBanner(message: String, onDismiss: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "好",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(onClick = onDismiss)
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+        }
+    }
+}
+
 @Composable
 private fun DriveItemRow(
     item: DriveItemEntity,
     imageLoader: coil.ImageLoader,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    isDownloading: Boolean = false,
+    downloadProgress: Int = 0
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = item.isContainer, onClick = onClick)
+            // Both containers and files are actionable now: a folder opens, a file downloads.
+            // Leaving `enabled = item.isContainer` here made every file silently untappable.
+            .clickable(enabled = !isDownloading, onClick = onClick)
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        DriveItemIcon(item = item, imageLoader = imageLoader)
+        if (isDownloading) {
+            // A determinate ring in the icon slot keeps the row's height and alignment stable
+            // while the download runs, so the list does not jump.
+            Box(modifier = Modifier.size(40.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(
+                    progress = { downloadProgress / 100f },
+                    modifier = Modifier.size(32.dp),
+                    strokeWidth = 3.dp
+                )
+            }
+        } else {
+            DriveItemIcon(item = item, imageLoader = imageLoader)
+        }
 
         Spacer(Modifier.width(16.dp))
 

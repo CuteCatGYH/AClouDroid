@@ -76,6 +76,51 @@ interface DriveItemDao {
     @Query("SELECT * FROM drive_items WHERE type IN ('FOLDER', 'APP_LIBRARY')")
     suspend fun getAllContainers(): List<DriveItemEntity>
 
+    /**
+     * Every container the sync walk is allowed to judge.
+     *
+     * Excludes the synthetic root row only when it has never been listed, so a first run still
+     * fetches it. `ORDER BY` is absent on purpose: [DriveDeltaPlanner.orderParentsFirst] decides
+     * the visit order, and having SQL guess it too would make the two disagree.
+     */
+    @Query("SELECT * FROM drive_items WHERE type IN ('FOLDER', 'APP_LIBRARY')")
+    suspend fun containersForSync(): List<DriveItemEntity>
+
+    /**
+     * Refreshes only the container's own metadata, leaving its children untouched.
+     *
+     * Used by the sync walk to stamp a fresh `etag` on a container it decided not to re-list,
+     * so the next pass has an up-to-date tag to compare against.
+     */
+    @Query(
+        """
+        UPDATE drive_items
+        SET etag = :etag,
+            directChildrenCount = :childCount,
+            lastSyncedAt = :now
+        WHERE drivewsid = :drivewsid
+        """
+    )
+    suspend fun updateProbeResult(drivewsid: String, etag: String?, childCount: Int, now: Long)
+
+    /**
+     * Replaces a container's children **without** marking it fetched.
+     *
+     * Identical to [replaceChildren] except for the `childrenFetched` stamp, which the sync walk
+     * applies separately once it has confirmed the listing was complete.
+     */
+    @Transaction
+    suspend fun replaceChildrenRaw(parentDrivewsid: String, items: List<DriveItemEntity>) {
+        deleteChildren(parentDrivewsid)
+        if (items.isNotEmpty()) {
+            upsertAll(items)
+        }
+    }
+
+    /** Ids of everything currently cached as a direct child of [parentDrivewsid]. */
+    @Query("SELECT drivewsid FROM drive_items WHERE parentDrivewsid = :parentDrivewsid")
+    suspend fun childIdsOf(parentDrivewsid: String): List<String>
+
     /** Root marker — inserted lazily so the UI has something to subscribe to on first launch. */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertRootIfMissing(root: DriveItemEntity)

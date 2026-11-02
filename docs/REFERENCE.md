@@ -435,19 +435,294 @@ GET https://pXX-docws.icloud.com[.cn]/ws/com.apple.CloudDocs/download/by_id?docu
 
 > [!WARNING]
 > 这**推翻**了 `docs/TODO_DRIVE.md` §5（D3）里「`changes/zone` + `changes/database` 两路增量」的设计前提。
-> D3 必须重新找 Drive 的结构增量机制。候选方向：
-> 1. 根/目录列举比 `etag`（最笨但确定可用）
-> 2. `ckdatabasews` 的 CloudKit 层 delta
-> 3. 是否有 `retrieveItemDetails` 之外的 listing 变体
->
-> **开工 D3 前必须先侦察，不要照着原计划写。**
+> D3 已重新侦察完毕，结论见 §5.7。
 
-### 5.7 尚未验证（D3~D7 的前置）
+### 5.7 结构增量机制（D3 侦察结论）
+
+> **来源**：2026-11，同一真实账号，`androidTest` 进程内探针。探针代码已删除。
+
+#### 结论：Drive 没有全局游标 delta，**用 `etag` 轮询**
+
+共尝试了 13 种请求形态，全部有对照实验（用已知可用的 CloudKit 主机做 control）。
+
+| 候选 | 结果 | 判定 |
+| --- | --- | --- |
+| `changes/zone` POST（空 token） | 404 `WSModuleNotFoundException` | ❌ 不存在 |
+| `changes/zone` POST（zones body） | 404 同上 | ❌ |
+| `changes/zone` GET | 404 同上 | ❌ |
+| `changes/database` GET | 404 同上 | ❌ |
+| `changes/database` POST + dsid | 404 同上 | ❌ |
+| `records/changes` on CloudDocs zone | 401 `AUTHENTICATION_FAILED: no auth method found` | ❌ 无此 zone |
+| `zones/list` on ck host for CloudDocs | 401 同上 | ❌ 无此 zone |
+| docws + CloudKit 路径 | 401 空 body | ❌ docws **不是** CloudKit DB |
+| **对照**：ck 主机 `zones/list` | **200 / 469 B** | ✅ 证明探针本身没写错 |
+| **`retrieveItemDetails`** | **200 / 284 B**（`{"items":[...]}` 包裹） | ✅ **可用** |
+| 根目录重列两次比 `etag` | `nrp` vs `nrp`，35 项 / 701 文件均一致 | ✅ **稳定** |
+
+#### 三条硬结论
+
+**① `changes/*` 这条线彻底死透。** 不是名字问题：
+所有形态（POST/GET、空 token / zones body / dsid）都返回同一个
+`WSModuleNotFoundException`。Drive **没有** CloudKit 式的全局变更游标。
+
+**② `com.apple.CloudDocs` 不是 CloudKit zone。**
+拿**已知能用**的 CloudKit 主机（Photos 的 `ckdatabasews`）去查它，得到
+`401 AUTHENTICATION_FAILED: no auth method found`；同主机对 `com.apple.photos.cloud` 却返回 200。
+对照成立，所以这是真的“不存在这个 zone”，不是路径拼错。
+
+**③ `retrieveItemDetails` 是那个“轻量变体”，但 body 形状不同（又是个坑）。**
+
+| 端点 | body 形状 |
+| --- | --- |
+| `retrieveItemDetailsInFolders` | **裸数组** `[{...}]` |
+| `retrieveItemDetails` | **包裹** `{"items":[{...}]}` |
+
+> [!CAUTION]
+> 两个端点只差个名字，body 形状却不同。用裸数组打 `retrieveItemDetails`
+> 得到的是 `400 {"errorReason":"Bad Request","wantDiagnostics":true}` ——
+> 是**处理层解析失败**，不是端点不存在。这个 400 和“端点没有”很难区分。
+
+#### 落地到 D3 的设计
+
+**采用「目录级 etag 差量列举」，而不是全局游标同步：**
+
+1. 只在 **`etag` 变化**（或 `directChildrenCount` 变化）时重列该目录
+2. `etag` 存在每个节点上（`FOLDER` / `FILE` / `APP_LIBRARY` 都有），
+   而且稳定（同内容两次列举完全一致）
+3. `retrieveItemDetails` 不返回子项，正好用来**廉价地探一个节点的当前 etag**
+
+> [!TIP]
+> 对几千文件的量级这完全够用，且比游标同步更好调：
+> 出问题时只需回答“哪个目录的 etag 没变”这一个问题。
+> 代价是**发现不了“从未展开过的目录里新增的文件”** —— 但那类目录本来就没缓存，
+> 展开时必然全量拉，不丢东西。
+
+#### 仍未验证
+
+- **删除**的表示方式：Drive 的“最近删除”很可能是个独立 zone（类似 Photos 的回收站），
+  未在本轮探明。D3 实现删除感知前需补一轮。
+- `etag` 的**作用域**：目前只验证了它稳定，未验证“子文件内容变化是否会 bump 父目录 etag”。
+  若不会，则内容变化检测仍需要 `retrieveItemDetails` 逐节点比对。
+
+---
+
+### 5.8 第二轮侦察：回收站 / etag / 上传（D3b）
+
+> **来源**：2026-11，同一账号，`androidTest` 进程内探针（两轮）。探针代码已删除。
+
+#### A. 回收站：仍然没找到入口
+
+| 尝试 | 结果 |
+| --- | --- |
+| `trash` / `Trash` / `root_trash` 作为 `drivewsid` | `200`，但每项 `{"items":[],"status":"ID_INVALID"}` |
+| `/ws/com.apple.CloudDocs/trash/items` | 404 `Module trash could not be found` |
+| `/ws/com.apple.CloudDocs/list/trash` | 404 `WSHandlerNotFoundException: could not find handler for endpoint 'POST trash'` |
+| `/ws/com.apple.CloudDocs/changes/trash` | 404 同上（changes） |
+
+> [!IMPORTANT]
+> 注意 `ID_INVALID` 和 `WSHandlerNotFoundException` 的**区别**：
+> 前者说明“路径对了、id 不存在”（`retrieveItemDetailsInFolders` 正常工作只是找不到这个 id），
+> 后者说明“这个 handler 压根没有”。
+> 两条信息指向同一个结论：Drive 回收站**不是** docws 上的一个模块。
+>
+> **仍未找到入口。** 可能路径：网页端的回收站走的是另一个前端专用 endpoint，
+> 或者在 `ckdatabasews` 的某个 zone 里。D3 若不做删除感知，可以绕开；
+> 要做就必须再从网页端抓一次包。
+
+#### B. `etag` 作用域：稳定，但只证实了前半句
+
+样本：`Desktop` 目录，19 个子项，连续两次列举（间隔 250ms）：
+
+```
+etag compare: 19 children, all etags identical across 2 listings
+```
+
+`retrieveItemDetails` 单独查该目录返回 `etag=hnz`，与列表里的一致。
+
+> [!WARNING]
+> **只证明了“没变化时 etag 稳定”。**
+> “子文件内容变了会不会 bump 父目录 etag” **没验** —— 那需要真去改一个文件。
+> 因此在验证之前，**文件夹级 etag 轮询不能用来检测文件内容变化**，
+> 只能用来检测「目录结构（增/删/改名）」的变化。
+
+#### C. 上传：令牌已打通，请求形状是逐个字段试出来的
+
+服务端**按固定顺序**校验字段，每次只报第一个缺失项。这反而是最快的探明方式：
+
+| 尝试 | 服务端原话 |
+| --- | --- |
+| `{filesize, filesignature}` | `must specify document type in upload request` |
+| `+ type:FILE` | `filename field required to upload file` |
+| `+ filenameEnc`（base64） | 仍然报 `filename field required` —— **`filenameEnc` 不认，要明文 `filename`** |
+| `+ filename`（明文） | `content_type field required to upload file` |
+| **`+ content_type`** | **✅ 200 —— 拿到上传令牌** |
+
+**最终可用请求体**（`POST {docws}/ws/com.apple.CloudDocs/upload/web`）：
+
+```json
+{
+  "filesize": 44,
+  "filesignature": "<SHA-256 base64>",
+  "type": "FILE",
+  "filename": "probe_upload.txt",
+  "content_type": "text/plain"
+}
+```
+
+**响应**：
+
+```json
+[{
+  "document_id": "99509BE9-...",
+  "url": "https://cws.icloud-content.com.cn:443/20118126497/singleFileUpload?tk=...&ref=...&c=com.apple.clouddocs&z=com.apple.CloudDocs&uuid=...&dataclass=com.app",
+  "owner": "20118126497",
+  "owner_id": "_b7c0d2c4..."
+}]
+```
+
+> [!IMPORTANT]
+> **字段名踩坑记录：**
+>
+> | 直觉 | 实际 |
+> | --- | --- |
+> | `filenameEnc`（呼应 Photos 的 `filenameEnc`） | ❌ 不认，要**明文** `filename` |
+> | `content_type` 可省 | ❌ 必填 |
+> | `type` 填 UTI（`public.plain-text`） | 用 `FILE` 就够了（v7 成功）；UTI 未单独测 |
+>
+> `url` 与 Photos 的 `/assets/upload` 同构（都是 `cws` / `singleFileUpload`），
+> **但 Drive 返回的是一个数组**，而 Photos 返回的是 `singleFileUpload` 对象。
+
+#### D. 服务权限（为系统文件选择器做准备）
+
+本账号 `status == active` 的 31 个服务（节选相关）：
+
+```
+docws, drivews, ckdatabasews, cksharews, ubiquity,
+iworkexportws, iworkthumbnailws, keyvalue,
+notes, photos, photosupload, sharedlibrary, sharedstreams
+```
+
+> [!TIP]
+> `iworkexportws` + `iworkthumbnailws` 存在，意味着 iWork 文档包
+> **有服务端提供的导出/缩略图接口**，不必客户端自己解包。
+> `cksharews` 存在，意味着共享文件有独立的 CloudKit 入口。
+
+---
+
+### 5.9 全部端点逐个实测（第三轮）
+
+> 对照 rclone 的 16 个端点逐一实测。**全部亲自验过**，不依赖第三方仓库。
+
+#### 总表
+
+| # | 端点 | 方法 | 结果 |
+| --- | --- | --- | --- |
+| 1 | `{drivews}/retrieveItemDetails` | POST | ✅ 200（`{"items":[…]}` 包裹） |
+| 2 | `{drivews}/retrieveItemDetailsInFolders` | POST | ✅ 200（**裸数组**） |
+| 3 | `{docws}/ws/com.apple.CloudDocs/list/lookup_by_path?unified_format=true` | POST | ✅ 200，body 是 **JSON 字符串** `"/Documents"` |
+| 4 | 同上 `?unified_format=false` | POST | ✅ 200，返回另一套字段（`document_id` / `mtime` / `deleted`…）|
+| 5 | `{docws}/v1/item/{item_id}` | GET | ✅ 200，含 `item_info.urls.url_download` |
+| 6 | `{docws}/v1/enumerate/{item_id}?limit=N` | GET | ✅ 200，但返回 **`{}`**（该 id 是文件不是目录） |
+| 7 | `{docws}/ws/com.apple.CloudDocs/download/by_id?document_id=` | GET | ✅ 200，`data_token.url` |
+| 8 | `data_token.url`（`cvws` CDN） | GET | ✅ **206**（`Range: bytes=0-0`） |
+| 9 | `{drivews}/moveItemsToTrash` | POST | ✅ **200 —— 回收站入口找到了** |
+| 10 | `{drivews}/createFolders` | POST | ✅ 200，返回新文件夹含 `drivewsid`/`etag` |
+| 11 | `{drivews}/renameItems` | POST | ✅ 200，`etag` 递增 |
+| 12 | `{drivews}/moveItems` | POST | ✅ 200 |
+| 13 | `{docws}/v1/item/copy/{item_id}` | POST | ✅ 200（**会真的复制**） |
+| 14 | `{docws}/ws/com.apple.CloudDocs/upload/web` | POST | ✅ 200，拿到上传令牌 |
+| 16 | `{docws}/ws/com.apple.CloudDocs/update/documents` | POST | ✅ 200（`command` 必填） |
+
+#### 关键结论
+
+**① 回收站入口是 `{drivews}/moveItemsToTrash`（POST）。**
+前两轮在 docws 上找 `trash` 模块全部 404，因为它根本不在 docws 上。
+
+```json
+{"items":[{"drivewsid":"...","etag":"...","clientId":"..."}]}
+```
+
+**② 写接口全部要带 `etag`。** `renameItems` / `moveItems` / `moveItemsToTrash`
+的 body 里每个 item 都含 `etag` —— 这是 **乐观并发控制**。
+tag 不对时服务端会拒绝，所以本地必须每次写前先拿到最新 etag。
+
+**③ `lookup_by_path` 的 body 是一个 JSON 字符串，不是对象。**
+
+```json
+"/Documents"
+```
+
+而 `unified_format=true` / `false` 返回**两套完全不同的字段结构**：
+
+| 格式 | 返回形态 | 典型字段 |
+| --- | --- | --- |
+| `true` | 与 `retrieveItemDetails` 同构 | `drivewsid` / `zone` / `type` / `etag` |
+| `false` | 文档层视图 | `document_id` / `mtime` / `ctime` / `btime` / `size` / `deleted` |
+
+**④ `update/documents` 必填 `command`。** 传 `{}` 得到
+`Unexpected input at [line: 1, column: 2]`；传 `{"command":"add_file",…}` 则 200。
+
+**⑤ 写接口的 body 形状不对称，易错：**
+
+| 端点 | body |
+| --- | --- |
+| `retrieveItemDetails` | `{"items":[…]}` 包裹 |
+| `retrieveItemDetailsInFolders` | 裸数组 |
+| `lookup_by_path` | **裸字符串** |
+| `createFolders` | `{destinationDrivewsId, folders:[…]}` |
+| 其余写接口 | `{items:[…]}` |
+
+> [!CAUTION]
+> **`/v1/item/copy/{id}` 会真的复制文件。** 本想用它探明“缺字段会怎么报错”，
+> 结果它成功了并且在 `/Documents` 里创建了一份「`.localized` 2」。
+> 已用 `moveItemsToTrash` 清掉（并把原 `.localized` 一并处理，
+> 该文件是 macOS 的自动生成垃圾文件）。
+> **做这类探针时，先假定写接口会成功，不要假定它会报错。**
+
+#### 服务端字段的额外发现
+
+`unified_format=false` 的返回里带了客户端能直接用的时间戳（秒这里毫秒）：
+
+| 字段 | 含义 |
+| --- | --- |
+| `mtime` / `ctime` / `btime` | ms 时间戳（修改/创建/备份） |
+| `size` | 目录为 `-1` |
+| `deleted` | bool，**软删除标记** |
+| `etag` | 形如 `npq::`（带后缀） |
+| `status.status_code` | `0` 表示 OK |
+
+> [!TIP]
+> `unified_format=false` 返回的 `deleted` 字段可能比 `moveItemsToTrash` 更容易用于删除检测，
+> 但本轮的回收站列表接口仍未找到 —— `moveItemsToTrash` 只能**写**，
+> **读回收站内容**的接口仍缺失。
+
+---
+
+### 5.11 CDN 直链 Header 约束与下载通知（D4 实测结论）
+
+#### A. CDN 直链 503 避坑
+- `Session.NewRequest` 会给请求自动注入 `Origin: https://www.icloud.com` 与 `Referer: https://www.icloud.com/`，对 `cws`/`cvws` 签名下载直链会导致 **HTTP 503 Bad Gateway**。
+- 下载必须通过标准的 `http.NewRequest` 构造纯净请求，不带 `Origin` / `Referer` / Cookie。
+
+#### B. 同名文件不覆盖策略
+- 本地下载采用非破坏性命名逻辑：同名文件自动累加 `name (1).ext`、`name (2).ext` 后缀，后缀保留在扩展名之前。
+- 取消“先删后写”流程，防止下载失败时弄丢本地已有文件。
+
+#### C. 下载通知与点击调起
+- 使用 `icloud_drive_download` 专用通知渠道。
+- 采样 `tempFile.length()` 实时刷新通知栏百分比/已下载大小。
+- 下载完成通知挂载 `PendingIntent`（`Intent.ACTION_VIEW` + `FLAG_GRANT_READ_URI_PERMISSION`），点击直接唤起系统或第三方应用打开本地 `content://` 文件。
+
+---
+
+### 5.10 尚未验证（D5~D7 的前置）
 
 | 问题 | 归属阶段 |
 | --- | --- |
-| Drive 直链的真实寿命 | D4（curl `Range` 实测） |
-| `/upload/web` 分片流程与 filesignature 语义 | D5 |
+| Drive 直链的**真实寿命**（已验 206，未验多久后失效） | D4（curl 定时实测）|
+| 上传令牌拿到后，字节怎么 POST、怎么提交记录 | D5 |
+| **读回收站内容的接口**（写入口 `moveItemsToTrash` 已找到） | 删除感知 |
+| **子文件内容变更是否 bump 父目录 `etag`** | 内容变更检测 |
 | 同名文件冲突语义 | D6 |
-| iWork 文档包（`.pages`）是否显示为 FILE | D2 前需再验一次 |
-| 共享文件（`share` / `shareID` 已在 3/41 项出现）的权限模型 | D6 之后 |
+| iWork 文档包（`.pages`）是否显示为 FILE | D2 后补验 |
+| 共享文件（`share` / `shareID`）的权限模型 | D6 之后 |
