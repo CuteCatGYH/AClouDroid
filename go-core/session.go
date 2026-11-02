@@ -40,8 +40,13 @@ type Session struct {
 	UpdatedCookies bool
 
 	// Extracted credentials
-	DSID            string
-	CKDatabaseURL   string
+	DSID          string
+	CKDatabaseURL string
+	// DrivewsURL is the CloudDocs (`drivews`) endpoint from /validate, used by the Drive
+	// feature (Phase 5). It lives here rather than in a Drive-only struct for the same reason
+	// CKDatabaseURL does: any in-process caller must be able to build a Drive URL without a
+	// round trip through Kotlin (ISS-029).
+	DrivewsURL      string
 	AccountInfoJSON string
 
 	// ClientID identifies this client to CloudKit. It must be stable for the whole session:
@@ -261,4 +266,3 @@ func (s *Session) HasCookieIgnoreCase(name string) bool {
 	}
 	return false
 }
-

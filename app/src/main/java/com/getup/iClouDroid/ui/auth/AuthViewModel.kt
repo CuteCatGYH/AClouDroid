@@ -380,12 +380,21 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
             // 1. Block new network work and stop the paging pipeline.
             repository.beginWipe()
+            // Drive is blocked in the same phase, *before* any table is cleared. Its rows are
+            // keyed by CloudKit ids belonging to the account being destroyed, so keeping them
+            // across a re-login leaves a tree whose every entry fails to fetch (AGENTS §5.5).
+            container.driveRepository.beginWipe()
 
             try {
                 // 2. Room: photo rows + sync cursor.
                 val dbCleared = repository.wipeAllData()
                 if (!dbCleared) {
                     Log.w(AUTH_LOG_TAG, "Photo database wipe failed, continuing teardown")
+                }
+
+                val driveCleared = container.driveRepository.wipeAllData()
+                if (!driveCleared) {
+                    Log.w(AUTH_LOG_TAG, "Drive database wipe failed, continuing teardown")
                 }
 
                 // 3. Coil: memory + disk thumbnails keyed by foreign recordNames.
@@ -404,7 +413,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 Log.i(
                     AUTH_LOG_TAG,
                     "Logout complete (region=${if (currentRegion) "cn" else "global"}) " +
-                        "db=$dbCleared coil=$cachesCleared"
+                        "db=$dbCleared drive=$driveCleared coil=$cachesCleared"
                 )
             } catch (e: Exception) {
                 // Teardown must never crash the app; a partial wipe is recoverable by logging out
@@ -413,6 +422,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 // Always release the guards, otherwise the next login could never sync.
                 repository.endWipe()
+                container.driveRepository.endWipe()
 
                 // Keep the credential guard up until the login page has finished reloading, so
                 // the probe never reads a half-deleted cookie set. `removeAllCookies` completing

@@ -13,6 +13,7 @@
 | [CHANGELOG_ISSUES.md](CHANGELOG_ISSUES.md) | **已修复问题案例库**（根因分析、修复方案、验证记录） |
 | [docs/REFERENCE.md](REFERENCE.md) | 核心参考开源项目与源码对照表 |
 | [docs/PITFALLS.md](PITFALLS.md) | 关键工程避坑指南（必读） |
+| [docs/TODO_DRIVE.md](TODO_DRIVE.md) | **iCloud Drive 开发路线图**（Phase 5，D0~D8 阶段拆分） |
 | [docs/ARCHIVE_PHASE1.md](ARCHIVE_PHASE1.md) | Phase 1 详细过程记录与修复方向存档 |
 
 ---
@@ -322,6 +323,32 @@
   - [x] **下载（iCloud → 安卓）**：`CPLMaster` 含 `resOriginalVidComplRes` 时同时下载图+视频，按 Google/三星 Motion Photo 规范插入 APP1 XMP (`GCamera:MotionPhoto="1"`) 拼接单文件，全量复制 EXIF 并将 Bitmap 物理旋转至正向（详见 [ISS-037](CHANGELOG_ISSUES.md#iss-037-实况照片单文件-motion-photo-打包与-exif-防旋转对齐)）
 - [ ] **折叠屏与大屏自适应布局**
   - [ ] `WindowSizeClass` 适配：外屏单栏底部导航 / 内屏与平板 `NavigationRail` + 双栏详情
+
+---
+
+### Phase 5: iCloud Drive（云盘浏览与同步）⏳ 未开始
+
+> **详细拆分见 [docs/TODO_DRIVE.md](TODO_DRIVE.md)（D0 ~ D8）。**
+
+> [!IMPORTANT]
+> **iCloud Drive 与 Photos 是两套完全不同的协议栈。**
+> 只有 Cookie / Header / 会话握手可复用；
+> 元数据模型（真实目录树 vs 时间线平铺）、增量同步（`changes/zone` + `changes/database` 两路）、
+> 上传（`/upload/web` 分片 vs 单文件直传）、下载（`data_token` vs `cvws` 直链）
+> **全部不能照搬**。
+
+- [ ] **Phase 5.0: 协议侦察与探针**（必须最先，禁止读代码猜字段）
+  - [ ] 探明 `webservices.drivews` 端点与字段字典 → 补充 [REFERENCE.md](REFERENCE.md) §5
+  - [ ] 逐字段 diff「普通文件夹」与「iWork 文档包」
+- [ ] **Phase 5.1: Go 协议底座**（`drive.go` + `Session.DrivewsURL` 回写 + 目录列举）
+- [ ] **Phase 5.2: 数据层与目录浏览 UI**（`DriveDatabase` 独立库 + `feature/drive/` + 面包屑列表）
+- [ ] **Phase 5.3: 增量同步与对账**（`changes/zone` + `changes/database`、显式 `walkCompleted`、可推导闸门）
+- [ ] **Phase 5.4: 下载**（`download/by_id` → `ws/download`，直链刷新复用三层去重）
+- [ ] **Phase 5.5: 上传**（`/upload/web` 分片，零内存流式，独立上传队列）
+- [ ] **Phase 5.6: 目录操作与冲突处理**（本地优先 + 乐观更新 + 失败回滚）
+- [ ] **Phase 5.7: 预览与分享**（图片/视频复用 Coil + ExoPlayer；PDF；iWork 缩略图）
+- [ ] **Phase 5.8: 跨功能收尾**（登出四阶段清洗扩展到 Drive、设置项、文档归档）
+- [ ] **前置重构**：`dataMutationMutex` 从 `PhotoRepository` 提取为中立设施（Drive 必须共用，不得另起一把）
 
 ---
 

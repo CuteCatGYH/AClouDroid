@@ -28,7 +28,57 @@ type SessionInitResult struct {
 	ErrorMessage  string `json:"errorMessage,omitempty"`
 	DSID          string `json:"dsid,omitempty"`
 	CKDatabaseURL string `json:"ckDatabaseUrl,omitempty"`
-	IsChina       bool   `json:"isChina"`
+	// DrivewsURL is the CloudDocs endpoint ("drivews") reported by /validate, with its
+	// scheme normalised. Empty when the account has no Drive service enabled.
+	DrivewsURL string `json:"drivewsUrl,omitempty"`
+	IsChina    bool   `json:"isChina"`
+}
+
+// handleValidateResponse applies a successful /validate (or /accountLogin) response body to the
+// session and builds the result struct.
+//
+// This exists so the two success paths cannot drift apart: /validate and /accountLogin returned
+// the same fields, and both previously duplicated the DSID / CKDatabaseURL extraction. Adding a
+// third routing field (drivews, for Phase 5) is exactly the kind of change that would otherwise
+// be applied to one copy and forgotten in the other.
+func (s *Session) handleValidateResponse(bodyBytes []byte, isChina bool) (*SessionInitResult, error) {
+	var validateResp ValidateResponse
+	if err := json.Unmarshal(bodyBytes, &validateResp); err != nil {
+		return nil, fmt.Errorf("failed to parse validate JSON: %w", err)
+	}
+
+	s.mu.Lock()
+	s.DSID = validateResp.DSInfo.DSID
+	if ckWS, ok := validateResp.Webservices["ckdatabasews"]; ok {
+		s.CKDatabaseURL = ckWS.URL
+	}
+	if driveWS, ok := validateResp.Webservices["drivews"]; ok {
+		s.DrivewsURL = normalizeDrivewsURL(driveWS.URL)
+	}
+	s.AccountInfoJSON = string(bodyBytes)
+	result := &SessionInitResult{
+		Success:       true,
+		DSID:          s.DSID,
+		CKDatabaseURL: s.CKDatabaseURL,
+		DrivewsURL:    s.DrivewsURL,
+		IsChina:       isChina,
+	}
+	s.mu.Unlock()
+
+	return result, nil
+}
+
+// normalizeDrivewsURL strips the explicit `:443` port Apple includes in the `drivews` entry.
+//
+// CloudKit's `ckdatabasews` entry carries the same suffix and our Photos code tolerates it, but
+// Drive requests carry the full path and query in one shot, so keeping a redundant port only
+// makes logs and URL comparisons harder to read. Empty input stays empty.
+func normalizeDrivewsURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	return strings.TrimSuffix(raw, ":443")
 }
 
 // generateClientID generates a random UUID-like string for iCloud client identification
@@ -134,25 +184,7 @@ func (s *Session) doValidate() (*SessionInitResult, error) {
 	}
 
 	if resp.StatusCode == http.StatusOK {
-		var validateResp ValidateResponse
-		if err := json.Unmarshal(bodyBytes, &validateResp); err != nil {
-			return nil, fmt.Errorf("failed to parse validate JSON: %w", err)
-		}
-
-		s.mu.Lock()
-		s.DSID = validateResp.DSInfo.DSID
-		if ckWS, ok := validateResp.Webservices["ckdatabasews"]; ok {
-			s.CKDatabaseURL = ckWS.URL
-		}
-		s.AccountInfoJSON = string(bodyBytes)
-		s.mu.Unlock()
-
-		return &SessionInitResult{
-			Success:       true,
-			DSID:          s.DSID,
-			CKDatabaseURL: s.CKDatabaseURL,
-			IsChina:       isChina,
-		}, nil
+		return s.handleValidateResponse(bodyBytes, isChina)
 	}
 
 	// Unmarshal error response to check if Apple returned updated trustTokens
@@ -240,23 +272,9 @@ func (s *Session) TryAccountLoginRemediation() (*SessionInitResult, error) {
 		return nil, fmt.Errorf("accountLogin HTTP %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	var validateResp ValidateResponse
-	if err := json.Unmarshal(bodyBytes, &validateResp); err != nil {
+	result, err := s.handleValidateResponse(bodyBytes, s.IsChinaMainland)
+	if err != nil {
 		return nil, fmt.Errorf("failed to parse accountLogin response: %w", err)
 	}
-
-	s.mu.Lock()
-	s.DSID = validateResp.DSInfo.DSID
-	if ckWS, ok := validateResp.Webservices["ckdatabasews"]; ok {
-		s.CKDatabaseURL = ckWS.URL
-	}
-	s.AccountInfoJSON = string(bodyBytes)
-	s.mu.Unlock()
-
-	return &SessionInitResult{
-		Success:       true,
-		DSID:          s.DSID,
-		CKDatabaseURL: s.CKDatabaseURL,
-		IsChina:       s.IsChinaMainland,
-	}, nil
+	return result, nil
 }

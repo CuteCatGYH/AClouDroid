@@ -986,6 +986,7 @@ totalDragX > 0  →  右滑  →  上一张
 | [CHANGELOG_ISSUES.md](CHANGELOG_ISSUES.md) | 已修复问题案例库（ISS-001 ~），含现象/日志证据/根因/方案/验证 |
 | [list.md](list.md) | 待修复问题清单（含推荐方案），修完迁往 CHANGELOG |
 | [TODO.md](TODO.md) | 分阶段路线图 |
+| [TODO_DRIVE.md](TODO_DRIVE.md) | iCloud Drive 开发路线图（Phase 5，协议与 Photos 完全不同） |
 | [docs/PITFALLS.md](PITFALLS.md) | 工程避坑指南 |
 | [docs/REFERENCE.md](REFERENCE.md) | 参考开源项目源码对照 |
 

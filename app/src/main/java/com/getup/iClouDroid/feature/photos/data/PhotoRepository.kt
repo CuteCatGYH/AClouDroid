@@ -3,6 +3,7 @@ package com.getup.iClouDroid.feature.photos.data
 import android.content.Context
 import android.util.Log
 import com.getup.iClouDroid.BuildConfig
+import com.getup.iClouDroid.data.lock.DataMutationLock
 import com.getup.iClouDroid.data.session.SessionManager
 import com.getup.iClouDroid.feature.photos.data.db.MonthCoverRow
 import com.getup.iClouDroid.feature.photos.data.db.PhotoAssetEntity
@@ -232,7 +233,15 @@ class PhotoRepository(
      * Held as the application context, so this is not a leak and does not tie the repository to
      * any Activity.
      */
-    private val appContext: Context
+    private val appContext: Context,
+    /**
+     * The app-wide mutation lock (see [DataMutationLock]).
+     *
+     * Injected rather than owned because Drive's sync/upload workers write concurrently with
+     * photos' reconcile walk. Two separate locks would each look correct and still let the two
+     * features interleave — AGENTS §12 requires one shared lock.
+     */
+    private val dataMutationLock: DataMutationLock = DataMutationLock()
 ) {
     private val photoDao = database.photoDao()
     private val syncStateDao = database.syncStateDao()
@@ -274,9 +283,13 @@ class PhotoRepository(
      * Today that is the full reconciliation walk, the incremental sync and the "Recently Deleted"
      * sweep. They all read-then-delete, so letting two of them interleave would let one delete rows
      * the other just proved alive. The same lock is what a future user-initiated delete must take
-     * (see the delete note below), which is why it lives here rather than inside the scan engine.
+     * (see the delete note below).
+     *
+     * Now the *shared* [DataMutationLock] rather than a private `Mutex`: Drive writes to its own
+     * database but contends for the same session and the same account, so it has to wait behind
+     * a photo reconcile — and vice versa.
      */
-    private val dataMutationMutex = Mutex()
+    private val dataMutationMutex: DataMutationLock get() = dataMutationLock
 
     /**
      * Assets CloudKit has confirmed are gone, remembered across restarts.

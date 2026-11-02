@@ -225,7 +225,12 @@ private fun MainContentArea(
                 contentPadding = contentPadding
             )
         }
-        AppDestination.Drive -> FeatureWebViewScreen(url = "https://www.icloud.com.cn/iclouddrive/")
+        // Native browser (D2). Replaces the old WebView placeholder: a real directory tree
+        // cannot be rendered usefully through the web UI, and the point of the Drive work is
+        // to stop relying on it.
+        AppDestination.Drive -> com.getup.iClouDroid.feature.drive.ui.DriveEntry(
+            contentPadding = contentPadding
+        )
         AppDestination.Notes -> FeatureWebViewScreen(url = "https://www.icloud.com.cn/notes/")
         AppDestination.Reminders -> FeatureWebViewScreen(url = "https://www.icloud.com.cn/reminders/")
         AppDestination.FindMy -> FeatureWebViewScreen(url = "https://www.icloud.com.cn/find/")

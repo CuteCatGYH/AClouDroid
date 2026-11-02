@@ -152,7 +152,7 @@ iCloud 照片服务
 
 ## 🤝 致谢
 
-本项目在协议逆向与实现过程中参考了以下开源项目：
+本项目在开发过程中参考了以下开源项目：
 
 - [rclone/rclone](https://github.com/rclone/rclone) —— HTTP 会话与网络通信底座
 - [icloud-photos-downloader/icloud_photos_downloader](https://github.com/icloud-photos-downloader/icloud_photos_downloader) —— CloudKit 协议结构与字段对照参考

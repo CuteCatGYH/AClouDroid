@@ -1,7 +1,10 @@
 package com.getup.iClouDroid.di
 
 import android.content.Context
+import com.getup.iClouDroid.data.lock.DataMutationLock
 import com.getup.iClouDroid.data.session.SessionManager
+import com.getup.iClouDroid.feature.drive.data.DriveDatabase
+import com.getup.iClouDroid.feature.drive.data.DriveRepository
 import com.getup.iClouDroid.data.settings.AppSettings
 import com.getup.iClouDroid.feature.photos.data.MonthScanEngine
 import com.getup.iClouDroid.feature.photos.data.PhotoDatabase
@@ -37,12 +40,23 @@ class AppContainer(private val appContext: Context) {
     /** App context, for the schedulers that need it without holding an Activity. */
     val context: Context get() = appContext
 
+    /**
+     * The one lock every data-mutating background path takes — photos and drive alike.
+     *
+     * App-scoped on purpose: two feature-local locks would each look correct and still let a
+     * photo reconcile and a drive upload interleave against the same iCloud account
+     * (AGENTS §12, "上传任务必须共用这把，不得另起").
+     */
+    val dataMutationLock: DataMutationLock by lazy {
+        DataMutationLock()
+    }
+
     val photoDatabase: PhotoDatabase by lazy {
         PhotoDatabase.getInstance(appContext)
     }
 
     val photoRepository: PhotoRepository by lazy {
-        PhotoRepository(photoDatabase, sessionManager, appSettings, appContext)
+        PhotoRepository(photoDatabase, sessionManager, appSettings, appContext, dataMutationLock)
     }
 
     /**
@@ -60,7 +74,14 @@ class AppContainer(private val appContext: Context) {
         com.getup.iClouDroid.feature.local.data.LocalAlbumRepository(appContext)
     }
 
+    val driveDatabase: DriveDatabase by lazy {
+        DriveDatabase.getInstance(appContext)
+    }
+
+    val driveRepository: DriveRepository by lazy {
+        DriveRepository(driveDatabase, sessionManager, dataMutationLock, appContext)
+    }
+
     // Future features plug in here:
-    // val driveRepository: DriveRepository by lazy { DriveRepository(...) }
     // val notesRepository: NotesRepository by lazy { NotesRepository(...) }
 }

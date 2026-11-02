@@ -29,16 +29,18 @@ func GetSessionStateSummary() string {
 	}
 
 	summary := map[string]interface{}{
-		"isChina":        s.IsChinaMainland,
-		"baseURL":        s.BaseURL,
-		"dsid":           s.DSID,
-		"ckDatabaseURL":  s.CKDatabaseURL,
-		"cookieCount":    len(s.CookieMap),
-		"cookieNames":    cookieKeys,
-		"hasAuthToken":   s.HasCookieIgnoreCase("X-APPLE-WEBAUTH-TOKEN"),
-		"hasHsaTrust":    s.HasCookieIgnoreCase("X-APPLE-WEBAUTH-HSA-TRUST"),
-		"hasPcsCloudKit": s.HasCookieIgnoreCase("X-APPLE-WEBAUTH-PCS-CloudKit"),
-		"hasPcsPhotos":   s.HasCookieIgnoreCase("X-APPLE-WEBAUTH-PCS-Photos"),
+		"isChina":          s.IsChinaMainland,
+		"baseURL":          s.BaseURL,
+		"dsid":             s.DSID,
+		"ckDatabaseURL":    s.CKDatabaseURL,
+		"drivewsURL":       s.DrivewsURL,
+		"hasDriveEndpoint": s.DrivewsURL != "",
+		"cookieCount":      len(s.CookieMap),
+		"cookieNames":      cookieKeys,
+		"hasAuthToken":     s.HasCookieIgnoreCase("X-APPLE-WEBAUTH-TOKEN"),
+		"hasHsaTrust":      s.HasCookieIgnoreCase("X-APPLE-WEBAUTH-HSA-TRUST"),
+		"hasPcsCloudKit":   s.HasCookieIgnoreCase("X-APPLE-WEBAUTH-PCS-CloudKit"),
+		"hasPcsPhotos":     s.HasCookieIgnoreCase("X-APPLE-WEBAUTH-PCS-Photos"),
 	}
 	bytes, _ := json.Marshal(summary)
 	return string(bytes)
@@ -95,6 +97,9 @@ func InitSession(cookieStr string, isChinaMainland bool) string {
 	}
 	if result.CKDatabaseURL != "" {
 		session.CKDatabaseURL = result.CKDatabaseURL
+	}
+	if result.DrivewsURL != "" {
+		session.DrivewsURL = result.DrivewsURL
 	}
 	session.mu.Unlock()
 

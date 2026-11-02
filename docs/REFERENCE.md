@@ -278,3 +278,176 @@ P3 用它读 `DateTimeOriginal` 正好。
 - **备选参考**：Android 官方 `ExifInterface` XMP 规范
 - **参考价值**：处理三星等 Android 设备的 Motion Photo（单文件尾部追加 MP4 封装）与苹果 Live Photo（`HEIC/JPG` + `.MOV` 双文件通过 `ContentIdentifier` 绑定）之间的容器拆解与 XMP 元数据解析。
 - **本项目用途**：Phase 4 跨生态动态照片互转
+
+---
+
+## 5. iCloud Drive 实测字段字典 (D0 探针结论)
+
+> **来源**：2026-11，真实账号（云上贵州，`dsid=20118126497`）
+> 一次性 `androidTest` 探针（进程内调用，因为 Cookie 在加密存储里）。
+> **探针代码已删除**（PITFALLS §15），结论保留于此。
+> 完整报文与逐步结果存档在 `.artifacts/drive-d0-findings.artifact.md`。
+
+### 5.0 端点
+
+| 服务 | 端点 | 用途 |
+| --- | --- | --- |
+| `drivews` | `https://pXX-drivews.icloud.com[.cn]` | 目录列举（`retrieveItemDetailsInFolders`） |
+| `docws` | `https://pXX-docws.icloud.com[.cn]` | 下载（`/ws/com.apple.CloudDocs/download/by_id`） |
+| `ckdatabasews` | 同 Photos | CloudKit 层（D3 可能用得上） |
+
+两者都从 `/validate` 的 `webservices` 直接取得，**不需要额外握手**。
+`Session.DrivewsURL` 已落地（`account.go` 的 `handleValidateResponse`）。
+
+### 5.1 节点类型：用 `type`，没有 `bundleType`
+
+> [!CAUTION]
+> **`bundleType` 字段不存在。** 41 个子项中一个都没有。
+> 任何「用 bundleType 区分文件夹与文档包」的设计都必须作废。
+
+| `type` | 含义 | 可否下钻 |
+| --- | --- | --- |
+| `FOLDER` | 普通文件夹 | ✅ |
+| `FILE` | 文件 | ❌ |
+| `APP_LIBRARY` | **App 文档容器**（列在根目录，带 App 图标） | ✅ |
+
+**`APP_LIBRARY` 不是 iWork 文档包**，而是第三方/系统 App 的 iCloud 同步目录。
+实测样本：Keynote、Preview、GarageBand、Shortcuts、Shadowrocket、Days Matter、StressWatch。
+
+特征：
+
+| 特征 | 值 |
+| --- | --- |
+| `docwsid` | 恒为字面量 **`"documents"`** |
+| `zone` | 应用自己的容器（`com.apple.Keynote` 等），**不是** `com.apple.CloudDocs` |
+| `icons[]` | App 图标，走 `https://pXX-drivews.../getIcons?id=<zone>&field=icon120x120_iOS` |
+| `supportedTypes` / `supportedExtensions` | 该 App 支持的类型 |
+
+### 5.2 `drivewsid` 格式（最重要的约定）
+
+```
+<TYPE>::<zone>::<docwsid>
+```
+
+| 例子 | 说明 |
+| --- | --- |
+| `FOLDER::com.apple.CloudDocs::root` | 根目录，`docwsid` 是字面量 `root` |
+| `FOLDER::com.apple.CloudDocs::<UUID>` | 普通文件夹 |
+| `FILE::com.apple.CloudDocs::<UUID>` | 普通文件 |
+| `FOLDER::com.apple.Keynote::documents` | Keynote 的 App 容器 |
+
+> [!IMPORTANT]
+> `parentId` 存的是**完整的 `drivewsid`**，不是裸 UUID。
+> 发请求时也只接受完整形式 —— 传裸 `"root"` 会得到 `{"errorReason":"Bad Request"}`。
+
+### 5.3 节点字段覆盖度（41 个子项统计）
+
+| 字段 | 覆盖 | 适用 | 说明 |
+| --- | --- | --- | --- |
+| `drivewsid` / `docwsid` / `zone` / `name` / `parentId` / `etag` / `type` / `dateCreated` | 41/41 | 全部 | 通用 |
+| `item_id` | 34/41 | FOLDER + FILE | CloudKit 内部 id |
+| `size` / `dateModified` / `dateChanged` | 24/41 | FILE | 字节数 / 时间戳 |
+| `extension` | 23/41 | FILE | 扩展名（无点） |
+| `lastOpenTime` | 20/41 | FILE | 最近打开时间 |
+| `assetQuota` / `fileCount` / `shareCount` / `shareAliasCount` / `directChildrenCount` | 10/41 | FOLDER | 目录统计 |
+| `maxDepth` / `icons` / `supportedTypes` / `supportedExtensions` | 7/41 | APP_LIBRARY | 容器元数据 |
+
+> [!NOTE]
+> `dateCreated` 格式为 ISO8601 UTC（`2026-02-05T05:57:15Z`）。
+> 与 Photos 的 epoch 毫秒完全不同 —— 不要复用 `assetDate` 的解析函数。
+
+### 5.4 zone 分布（真实账号）
+
+| zone | 数量 |
+| --- | --- |
+| `com.apple.CloudDocs` | 34（用户自己的 Drive） |
+| `com.apple.Keynote` / `com.apple.Preview` | 各 1 |
+| `iCloud.is.workflow.my.workflows` | 1（快捷指令） |
+| `iCloud.com.<vendor>.<app>` | 4（第三方 App） |
+
+**产品结论**：根目录应当是「用户文件夹 + 一列 App 容器」，两者视觉上要区分开。
+
+### 5.5 已实测通过的请求格式
+
+#### 列举目录
+
+```
+POST https://pXX-drivews.icloud.com[.cn]/retrieveItemDetailsInFolders
+Content-Type: application/json
+
+[{"drivewsid":"FOLDER::com.apple.CloudDocs::root","partialData":false,"includeHierarchy":false}]
+```
+
+> [!CAUTION]
+> **三个已验证的坑：**
+> 1. 加 `/ws/com.apple.CloudDocs/` 前缀 → **400 且 body 长度为 0**
+>    （网关层直接拒绝，连 handler 都没进）
+> 2. `drivewsid` 只写 `"root"` → `{"errorReason":"Bad Request"}`
+> 3. 响应是**顶层数组**，不是 `{"items":[...]}`
+>    （按后者解析会得到空列表且**不报错** —— 与 PITFALLS §16 同一类失效）
+
+响应结构：
+
+```json
+[{
+  "drivewsid": "FOLDER::com.apple.CloudDocs::root",
+  "docwsid": "root",
+  "zone": "com.apple.CloudDocs",
+  "type": "FOLDER",
+  "directChildrenCount": 35,
+  "items": [ /* 直接子项，同结构但无 items */ ]
+}]
+```
+
+> [!NOTE]
+> **无 query 参数**：不需要 `dsid`、`clientId`、`clientBuildNumber`。
+> 账号完全由 Cookie 识别。（Photos 的 CloudKit 接口全都需要，别照抄。）
+
+#### 下载令牌
+
+```
+GET https://pXX-docws.icloud.com[.cn]/ws/com.apple.CloudDocs/download/by_id?document_id=<docwsid>
+```
+
+```json
+{
+  "document_id": "<docwsid>",
+  "item_id": "CKH_...",
+  "owner_dsid": "...",
+  "data_token":      { "url": "https://cvws.icloud-content.com[.cn]/B/...", "token": "...", "signature": "...", "wrapping_key": "...", "reference_signature": "..." },
+  "thumbnail_token": { "url": "...", "token": "...", "signature": "...", "wrapping_key": "...", "reference_signature": "..." },
+  "double_etag": "gqp::gm9"
+}
+```
+
+> [!IMPORTANT]
+> `data_token.url` 落在 **`cvws.icloud-content.com[.cn]`**，与 Photos 是**同一个 CDN**。
+> 因此 AGENTS §6 的 `URL_MAX_AGE_MS = 12min` 与三层刷新去重**大概率可直接复用** ——
+> 但寿命结论**必须先在 D4 用 curl 实测**（PITFALLS §3：这类结论不许猜）。
+>
+> `thumbnail_token` 是白送的：D7 的缩略图不需要自己生成。
+
+### 5.6 已确认**不存在**的能力
+
+| 能力 | 证据 |
+| --- | --- |
+| `changes/database`（结构增量） | `404 WSModuleNotFoundException: "Module changes could not be found."` |
+
+> [!WARNING]
+> 这**推翻**了 `docs/TODO_DRIVE.md` §5（D3）里「`changes/zone` + `changes/database` 两路增量」的设计前提。
+> D3 必须重新找 Drive 的结构增量机制。候选方向：
+> 1. 根/目录列举比 `etag`（最笨但确定可用）
+> 2. `ckdatabasews` 的 CloudKit 层 delta
+> 3. 是否有 `retrieveItemDetails` 之外的 listing 变体
+>
+> **开工 D3 前必须先侦察，不要照着原计划写。**
+
+### 5.7 尚未验证（D3~D7 的前置）
+
+| 问题 | 归属阶段 |
+| --- | --- |
+| Drive 直链的真实寿命 | D4（curl `Range` 实测） |
+| `/upload/web` 分片流程与 filesignature 语义 | D5 |
+| 同名文件冲突语义 | D6 |
+| iWork 文档包（`.pages`）是否显示为 FILE | D2 前需再验一次 |
+| 共享文件（`share` / `shareID` 已在 3/41 项出现）的权限模型 | D6 之后 |
