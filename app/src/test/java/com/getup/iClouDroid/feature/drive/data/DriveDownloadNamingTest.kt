@@ -177,4 +177,15 @@ class DriveDownloadNamingTest {
         assertEquals("application/octet-stream", DriveDownloader.mimeTypeFor(null))
         assertEquals("application/octet-stream", DriveDownloader.mimeTypeFor(""))
     }
+
+    // ---- formatDownloadError -------------------------------------------------------------
+
+    @Test
+    fun `formatDownloadError formats technical errors to user-friendly text`() {
+        assertEquals("该文件类型（如 iWork 包）暂不支持直接下载", DriveDownloader.formatDownloadError("no data_token.url in response"))
+        assertEquals("iCloud 登录凭证已过期，请重新登录", DriveDownloader.formatDownloadError("No active session"))
+        assertEquals("文件在云端不存在或已被删除", DriveDownloader.formatDownloadError("HTTP 404: NOT_FOUND"))
+        assertEquals("云端服务暂不可用，请稍后重试", DriveDownloader.formatDownloadError("HTTP 503 Bad Gateway"))
+        assertEquals("其他系统错误", DriveDownloader.formatDownloadError("其他系统错误"))
+    }
 }

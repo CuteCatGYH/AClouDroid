@@ -320,3 +320,31 @@ func TestDownloadToFileEmptyURL(t *testing.T) {
 		t.Fatal("empty URL must not be success")
 	}
 }
+
+func TestDownloadToFileCancellation(t *testing.T) {
+	started := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		// Block until context cancellation closes connection
+		<-r.Context().Done()
+	}))
+	defer ts.Close()
+
+	newDownloadSession(t, ts.URL)
+	dest := filepath.Join(t.TempDir(), "out.bin")
+
+	go func() {
+		<-started
+		CancelDownload("test-doc-id")
+	}()
+
+	var res DriveDownloadResult
+	json.Unmarshal([]byte(DownloadToFileWithID(ts.URL+"/file", dest, 0, "test-doc-id")), &res)
+
+	if res.Success {
+		t.Fatal("cancelled download must not succeed")
+	}
+	if !strings.Contains(res.ErrorMessage, "cancelled") {
+		t.Errorf("errorMessage = %q, want cancelled", res.ErrorMessage)
+	}
+}

@@ -3,6 +3,7 @@ package com.getup.iClouDroid.feature.drive.data
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -10,7 +11,12 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.getup.iClouDroid.R
+import com.getup.iClouDroid.di.appContainer
+import com.getup.icloudcore.Icloudcore
 import java.util.Locale
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
 
 /**
  * Handles notification bar progress and completion alerts for iCloud Drive file downloads.
@@ -40,6 +46,10 @@ object DriveDownloadNotificationHelper {
         channelReady = true
     }
 
+    const val ACTION_CANCEL_DOWNLOAD = "com.getup.iClouDroid.ACTION_CANCEL_DOWNLOAD"
+    const val EXTRA_DRIVEWSID = "drivewsid"
+    const val EXTRA_NOTIFICATION_ID = "notificationId"
+
     /**
      * Shows or updates downloading progress in the notification bar.
      *
@@ -47,13 +57,15 @@ object DriveDownloadNotificationHelper {
      * @param filename Display name of the file being downloaded
      * @param progressPercent Progress (0 to 100), or -1 for indeterminate progress
      * @param downloadedBytes Bytes downloaded so far
+     * @param drivewsid Optional item ID for adding a "Cancel" action button
      */
     fun showProgress(
         context: Context,
         notificationId: Int,
         filename: String,
         progressPercent: Int,
-        downloadedBytes: Long = 0L
+        downloadedBytes: Long = 0L,
+        drivewsid: String? = null
     ) {
         ensureChannel(context)
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
@@ -72,7 +84,7 @@ object DriveDownloadNotificationHelper {
             }
         }
 
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("iCloud 云盘下载")
             .setContentText(text)
@@ -87,10 +99,24 @@ object DriveDownloadNotificationHelper {
                     setProgress(0, 0, true)
                 }
             }
-            .build()
+
+        if (!drivewsid.isNullOrBlank()) {
+            val cancelIntent = Intent(ACTION_CANCEL_DOWNLOAD).apply {
+                setPackage(context.packageName)
+                putExtra(EXTRA_DRIVEWSID, drivewsid)
+                putExtra(EXTRA_NOTIFICATION_ID, notificationId)
+            }
+            val cancelPendingIntent = PendingIntent.getBroadcast(
+                context,
+                notificationId,
+                cancelIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            builder.addAction(0, "取消", cancelPendingIntent)
+        }
 
         try {
-            manager.notify(notificationId, notification)
+            manager.notify(notificationId, builder.build())
         } catch (e: Exception) {
             Log.w(TAG, "Failed to post download progress notification: ${e.message}")
         }
@@ -192,5 +218,35 @@ object DriveDownloadNotificationHelper {
         if (mb < 1024) return String.format(Locale.getDefault(), "%.1f MB", mb)
         val gb = mb / 1024.0
         return String.format(Locale.getDefault(), "%.2f GB", gb)
+    }
+}
+
+class DriveDownloadReceiver : BroadcastReceiver() {
+    @OptIn(DelicateCoroutinesApi::class)
+    override fun onReceive(context: Context?, intent: Intent?) {
+        if (context == null || intent == null) return
+        if (intent.action == DriveDownloadNotificationHelper.ACTION_CANCEL_DOWNLOAD) {
+            val drivewsid = intent.getStringExtra(DriveDownloadNotificationHelper.EXTRA_DRIVEWSID)
+            val notifId = intent.getIntExtra(DriveDownloadNotificationHelper.EXTRA_NOTIFICATION_ID, 0)
+            val docwsid = drivewsid?.let { if (it.contains("::")) it.substringAfterLast("::") else it }
+
+            Log.i("DriveDownloadReceiver", "Cancelling download for drivewsid=$drivewsid, docwsid=$docwsid")
+
+            if (!docwsid.isNullOrBlank()) {
+                Icloudcore.cancelDownload(docwsid)
+            }
+            if (!drivewsid.isNullOrBlank()) {
+                Icloudcore.cancelDownload(drivewsid)
+                runCatching {
+                    val repository = context.appContainer().driveRepository
+                    GlobalScope.launch {
+                        repository.cancelDownload(drivewsid)
+                    }
+                }
+            }
+            if (notifId != 0) {
+                DriveDownloadNotificationHelper.cancel(context, notifId)
+            }
+        }
     }
 }

@@ -1,15 +1,26 @@
 package com.getup.iClouDroid.feature.drive.data
 
+import android.content.ContentUris
 import android.content.Context
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
 import com.getup.iClouDroid.BuildConfig
 import com.getup.iClouDroid.data.lock.DataMutationLock
 import com.getup.iClouDroid.data.session.SessionManager
 import com.getup.iClouDroid.feature.drive.data.db.DriveItemEntity
+import com.getup.iClouDroid.feature.drive.data.db.DriveUploadEntity
 import com.getup.icloudcore.Icloudcore
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -521,6 +532,46 @@ class DriveRepository(
     private fun wipeBlocked(): Exception? =
         if (isWiping) Exception("正在退出登录，已暂停 iCloud Drive 同步") else null
 
+    val uploadQueue = DriveUploadQueue(database.driveUploadDao())
+    private val scope = kotlinx.coroutines.CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+
+    /**
+     * Deletes cached copies in `cacheDir/drive_uploads` that no live queue row references.
+     *
+     * Uploads stage the whole file here before streaming (AGENTS §3 forbids passing bytes through
+     * JNI), so a rejected or crashed upload can leave a full-size copy behind — the failure path
+     * used to skip cleanup entirely and 5.3 GB accumulated from four failed attempts.
+     *
+     * A sweep at startup is the only way to reclaim copies orphaned by a process death, where no
+     * `finally` block ever runs. Live rows are protected by path, and QUEUED/UPLOADING rows are
+     * still going to be streamed, so they are kept.
+     */
+    suspend fun sweepOrphanedUploadCache() = withContext(Dispatchers.IO) {
+        runCatching {
+            val dir = File(appContext.cacheDir, "drive_uploads")
+            if (!dir.isDirectory) return@runCatching
+
+            val livePaths = database.driveUploadDao().getPendingUploads()
+                .map { it.localPath }
+                .toSet()
+
+            var removed = 0
+            var freed = 0L
+            dir.listFiles()?.forEach { file ->
+                if (file.isFile && file.absolutePath !in livePaths) {
+                    val len = file.length()
+                    if (file.delete()) {
+                        removed++
+                        freed += len
+                    }
+                }
+            }
+            if (removed > 0) {
+                Log.i(TAG, "sweepOrphanedUploadCache: removed $removed file(s), freed ${formatSize(freed)}")
+            }
+        }.onFailure { Log.w(TAG, "sweepOrphanedUploadCache failed: ${it.message}") }
+    }
+
     /**
      * Drops every cached Drive row.
      *
@@ -532,10 +583,327 @@ class DriveRepository(
     suspend fun wipeAllData(): Boolean = withContext(Dispatchers.IO) {
         try {
             dao.clearAll()
+            uploadQueue.clearCompleted()
             true
         } catch (e: Exception) {
             Log.e(TAG, "wipeAllData failed", e)
             false
+        }
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // D5 — upload
+    // ----------------------------------------------------------------------------------------
+
+    suspend fun enqueueUpload(
+        uri: Uri,
+        targetFolderDrivewsId: String,
+        targetFolderPath: String
+    ): Result<Long> = withContext(Dispatchers.IO) {
+        wipeBlocked()?.let { return@withContext Result.failure(it) }
+
+        try {
+            var filename = "upload_file"
+            var filesize = 0L
+            var mimeType = "application/octet-stream"
+
+            appContext.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                    val sizeIdx = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                    if (nameIdx >= 0) {
+                        cursor.getString(nameIdx)?.takeIf { it.isNotBlank() }?.let { filename = it }
+                    }
+                    if (sizeIdx >= 0) {
+                        filesize = cursor.getLong(sizeIdx)
+                    }
+                }
+            }
+
+            appContext.contentResolver.getType(uri)?.let { mimeType = it }
+
+            val uploadDir = File(appContext.cacheDir, "drive_uploads")
+            if (!uploadDir.exists()) {
+                uploadDir.mkdirs()
+            }
+
+            val localFile = File(uploadDir, "upload_${System.currentTimeMillis()}_$filename")
+            appContext.contentResolver.openInputStream(uri)?.use { input ->
+                localFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            } ?: return@withContext Result.failure(Exception("无法读取选择的文件"))
+
+            if (filesize <= 0L) {
+                filesize = localFile.length()
+            }
+
+            val uploadEntity = DriveUploadEntity(
+                localPath = localFile.absolutePath,
+                targetFolderDrivewsId = targetFolderDrivewsId.ifBlank { DriveItemEntity.ROOT_DRIVEWSID },
+                targetFolderPath = targetFolderPath.ifBlank { "/" },
+                filename = filename,
+                filesize = filesize,
+                mimeType = mimeType
+            )
+
+            val id = uploadQueue.enqueue(uploadEntity)
+            Log.i(TAG, "Enqueued upload #$id for $filename into $targetFolderPath")
+            // NOTE: deliberately does NOT start a processor here.
+            //
+            // It used to call triggerUploadProcessor() while DriveViewModel.uploadFiles() also
+            // called DriveUploadWorker.enqueue() — two engines draining the same queue. Observed on
+            // device: upload #20 claimed simultaneously by both, hashed and streamed twice, and the
+            // WorkManager copy restarting from zero after being cancelled.
+            //
+            // DriveUploadWorker is now the single drain engine (it survives process death, which the
+            // in-process coroutine does not). Keeping the trigger here would only reintroduce the
+            // race, and the shared drain mutex would then make the UI path block for no benefit.
+            Result.success(id)
+        } catch (e: Exception) {
+            Log.e(TAG, "enqueueUpload failed", e)
+            Result.failure(e)
+        }
+    }
+
+    private val isUploadProcessing = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Serialises the whole drain loop across every processor (in-process trigger and WorkManager).
+     *
+     * ## Why a process-wide flag was not enough
+     *
+     * [isUploadProcessing] only guarded `triggerUploadProcessor` against re-entering itself. It could
+     * not see [DriveUploadWorker], which runs in the same process but reached `executeUpload`
+     * directly. Observed symptom on device: two engines claimed upload #20 simultaneously
+     * (`Processor executing upload #20` and `DriveUploadWorker processing upload #20` in the same
+     * second), both hashed and streamed the same 300 MB file, and the WorkManager copy restarting
+     * from zero after being cancelled.
+     *
+     * [dataMutationLock] does not help: it guards writes to local tables, and is taken *inside*
+     * `executeUpload`, so by then both callers have already decided to upload.
+     *
+     * A suspend [Mutex] is the right primitive here: a second processor blocks and then finds an
+     * empty queue, instead of duplicating work.
+     */
+    private val uploadDrainMutex = kotlinx.coroutines.sync.Mutex()
+
+    fun triggerUploadProcessor() {
+        scope.launch(Dispatchers.IO) {
+            if (!isUploadProcessing.compareAndSet(false, true)) return@launch
+            try {
+                uploadDrainMutex.withLock {
+                    uploadQueue.resetUploadingToQueued()
+                    while (isActive) {
+                        val pending = uploadQueue.getNextPending() ?: break
+                        Log.i(TAG, "Processor executing upload #${pending.id}: ${pending.filename}")
+                        executeUpload(pending.id)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Upload processor encountered error", e)
+            } finally {
+                isUploadProcessing.set(false)
+            }
+        }
+    }
+
+    /**
+     * Drain entry point for [com.getup.iClouDroid.feature.drive.work.DriveUploadWorker].
+     *
+     * Shares [uploadDrainMutex] with [triggerUploadProcessor] so the two engines take turns rather
+     * than race. Returns the number of files uploaded so the worker can report progress.
+     */
+    suspend fun drainUploadQueue(): Pair<Int, Int> = withContext(Dispatchers.IO) {
+        var succeeded = 0
+        var failed = 0
+        uploadDrainMutex.withLock {
+            uploadQueue.resetUploadingToQueued()
+            while (true) {
+                val pending = uploadQueue.getNextPending() ?: break
+                Log.i(TAG, "Worker executing upload #${pending.id}: ${pending.filename}")
+                if (executeUpload(pending.id).isSuccess) succeeded++ else failed++
+            }
+        }
+        succeeded to failed
+    }
+
+    suspend fun cancelUpload(uploadId: Long): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val upload = database.driveUploadDao().getById(uploadId)
+            if (upload != null) {
+                runCatching { File(upload.localPath).delete() }
+                uploadQueue.delete(uploadId)
+                Log.i(TAG, "Cancelled upload #$uploadId for ${upload.filename}")
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "cancelUpload failed for #$uploadId", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun executeUpload(uploadId: Long): Result<String> = withContext(Dispatchers.IO) {
+        wipeBlocked()?.let { return@withContext Result.failure(it) }
+
+        val upload = database.driveUploadDao().getById(uploadId)
+            ?: return@withContext Result.failure(Exception("上传任务 #$uploadId 不存在"))
+
+        val sessionCheck = ensureGoSession()
+        if (sessionCheck.isFailure) {
+            val err = sessionCheck.exceptionOrNull() ?: Exception("会话建立失败")
+            uploadQueue.markFailed(uploadId, err.message ?: "会话建立失败")
+            return@withContext Result.failure(err)
+        }
+
+        val wipeErr = wipeBlocked()
+        if (wipeErr != null) {
+            return@withContext Result.failure(wipeErr)
+        }
+
+        // Mark status as UPLOADING immediately so UI shows "传输中..." while waiting for lock / streaming
+        uploadQueue.markUploading(uploadId)
+
+        coroutineScope {
+            dataMutationLock.withLock {
+                // Per-phase stopwatch rather than one global clock.
+                //
+                // A single startTime produced a nonsensical speed the moment the phase changed:
+                // right after the hash finished, `read` reset to 0 for the upload phase, but the
+                // elapsed time still included the whole hash, so the first upload samples read as
+                // "0 MB/s" (or an absurdly low rate) until the average caught up.
+                var phaseStartMs = System.currentTimeMillis()
+                var lastPhase = ""
+
+                val pollJob = launch {
+                    while (isActive) {
+                        kotlinx.coroutines.delay(250)
+                        val pObj: JSONObject = runCatching {
+                            JSONObject(Icloudcore.getDriveUploadProgress(upload.localPath))
+                        }.getOrNull() ?: continue
+
+                        val read = pObj.optLong("bytesUploaded", 0L)
+                        val total = pObj.optLong("totalBytes", upload.filesize)
+                        val phase = pObj.optString("phase", "UPLOAD")
+                        val now = System.currentTimeMillis()
+
+                        if (phase != lastPhase) {
+                            lastPhase = phase
+                            phaseStartMs = now
+                        }
+
+                        // The hash phase hashes the whole file *before* any network traffic, so a
+                        // 178 MB APK spends a real, measurable amount of time there. Previously
+                        // this window reported `read == 0` and the UI fell back to a static
+                        // "传输中..." for minutes, which read as "stuck".
+                        val pct = if (total > 0) ((read * 100) / total).toInt().coerceIn(0, 100) else 0
+                        val speedText = when (phase) {
+                            "HASH" -> "校验中 $pct%"
+                            "COMMIT" -> "正在写入云盘..."
+                            else -> {
+                                val elapsedSec = ((now - phaseStartMs) / 1000.0).coerceAtLeast(0.001)
+                                val bps = (read / elapsedSec).toLong()
+                                "${formatSpeed(bps)} ($pct%)"
+                            }
+                        }
+
+                        uploadQueue.updateProgressAndSpeed(uploadId, read, speedText)
+                    }
+                }
+
+                try {
+                    var jsonResult = Icloudcore.uploadDriveItemByPath(
+                        upload.localPath,
+                        upload.filename,
+                        upload.mimeType,
+                        upload.targetFolderPath
+                    )
+
+                    var obj = JSONObject(jsonResult)
+                    if (!obj.optBoolean("success", false) && isAuthError(jsonResult)) {
+                        Log.w(TAG, "executeUpload got auth error, forcing session rebuild…")
+                        val rebuildCheck = ensureGoSession(force = true)
+                        if (rebuildCheck.isSuccess) {
+                            jsonResult = Icloudcore.uploadDriveItemByPath(
+                                upload.localPath,
+                                upload.filename,
+                                upload.mimeType,
+                                upload.targetFolderPath
+                            )
+                            obj = JSONObject(jsonResult)
+                        }
+                    }
+
+                    val uploadElapsedSec = ((System.currentTimeMillis() - phaseStartMs) / 1000.0).coerceAtLeast(0.001)
+                    val speedText = formatSpeed((upload.filesize / uploadElapsedSec).toLong())
+
+                    if (obj.optBoolean("success", false)) {
+                        val docId = obj.optString("documentId", "")
+                        uploadQueue.updateProgressAndSpeed(uploadId, upload.filesize, speedText)
+                        uploadQueue.markSuccess(uploadId, docId)
+                        Log.i(TAG, "Upload #$uploadId succeeded for ${upload.filename}, documentId=$docId, speed=$speedText")
+
+                        // Clean up cached upload copy
+                        runCatching { File(upload.localPath).delete() }
+
+                        // Trigger folder refresh to update current directory listing
+                        refreshFolder(upload.targetFolderDrivewsId)
+
+                        Result.success(docId)
+                    } else {
+                        val rawErrMsg = obj.optString("errorMessage", "文件上传失败")
+
+                        // Always log the server's verbatim message before rewriting it.
+                        //
+                        // The friendly-text branch below replaces the payload with a Chinese string,
+                        // which is exactly how the real cause of a large-file rejection became
+                        // undiagnosable: the log said "文件过大 … 服务端拒绝了本次上传" with no
+                        // indication of WHICH endpoint refused or with what code.
+                        Log.w(TAG, "Upload #$uploadId failed raw: status=${obj.optInt("httpStatus", 0)} " +
+                            "code=${obj.optString("errorCode", "?")} size=${upload.filesize} msg=$rawErrMsg")
+
+                        val displayErr = when {
+                            // CloudDocs rejects a second file with the same name in the same folder
+                            // with 409 UNIQUE_FIELD_FAILURE.
+                            rawErrMsg.contains("UNIQUE_FIELD_FAILURE") -> "同名文件已存在：${upload.filename}"
+                            rawErrMsg.contains("413") || rawErrMsg.contains("Too Large") ->
+                                "文件过大 (${formatSize(upload.filesize)})，服务端拒绝了本次上传"
+                            else -> rawErrMsg
+                        }
+                        uploadQueue.markFailed(uploadId, displayErr)
+                        Log.w(TAG, "Upload #$uploadId failed for ${upload.filename}: $displayErr")
+
+                        // Drop the cached copy on failure too.
+                        //
+                        // Only the success path used to delete it, so every rejected large file
+                        // left a full-size copy in cacheDir forever. Four failed attempts (1.4 GB
+                        // drone clips + 1.2 GB test files) accumulated 5.3 GB on the device before
+                        // anyone noticed — and the most likely uploads to fail are exactly the
+                        // biggest ones.
+                        //
+                        // The row keeps its metadata, so the user can still see what failed and
+                        // retry, but the bytes are gone.
+                        runCatching { File(upload.localPath).delete() }
+
+                        Result.failure(Exception(displayErr))
+                    }
+                } catch (ce: kotlinx.coroutines.CancellationException) {
+                    // WorkManager cancels the worker when the OS reclaims it or when the unique work
+                    // is replaced. The Go call is a blocking JNI call, so it does NOT stop when the
+                    // coroutine is cancelled — it keeps streaming until it returns or the socket
+                    // dies, and we lose the result.
+                    //
+                    // Leaving the row in UPLOADING is the failure mode that caused #21 to be
+                    // uploaded twice: the next drain pass called resetUploadingToQueued(), saw it as
+                    // an orphaned in-flight row, and restarted it from byte 0. Park it back to QUEUED
+                    // explicitly so that the restart decision is at least recorded and visible.
+                    Log.w(TAG, "executeUpload #$uploadId cancelled mid-flight; returning it to QUEUED")
+                    runCatching { uploadQueue.markQueued(uploadId) }
+                    throw ce
+                } finally {
+                    pollJob.cancel()
+                }
+            }
         }
     }
 
@@ -562,6 +930,89 @@ class DriveRepository(
      * resumes ten minutes later. Minting costs one small request; a stale URL costs a failed
      * multi-megabyte download.
      */
+    private val downloadQueue = DriveDownloadQueue()
+    val downloadQueueTasks: StateFlow<Map<String, DriveDownloadTaskState>> = downloadQueue.tasks
+
+    /** Enqueues a file for background download via [DriveDownloadQueue]. */
+    suspend fun enqueueDownload(drivewsid: String) {
+        val item = dao.getById(drivewsid) ?: return
+        if (item.type != DriveItemEntity.TYPE_FILE) return
+        downloadQueue.enqueue(item) { taskItem, onProgress ->
+            downloadFile(taskItem.drivewsid, onProgress)
+        }
+    }
+
+    /** Cancels an active or queued download task. */
+    suspend fun cancelDownload(drivewsid: String) {
+        downloadQueue.cancel(drivewsid)
+    }
+
+    /**
+     * Checks if a file has already been downloaded to the local Downloads directory.
+     *
+     * Returns the [DriveDownloadOutcome] with uri if found, allowing instant local opening.
+     */
+    suspend fun checkDownloadedFile(item: DriveItemEntity): DriveDownloadOutcome? = withContext(Dispatchers.IO) {
+        if (item.type != DriveItemEntity.TYPE_FILE) return@withContext null
+        val fileName = DriveDownloader.sanitizeFileName(item.name, item.extension)
+        val relativePath = "${Environment.DIRECTORY_DOWNLOADS}/iClouDroid"
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val selection = "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND ${MediaStore.MediaColumns.RELATIVE_PATH} = ?"
+            val selectionArgs = arrayOf(fileName, "$relativePath/")
+            val projection = arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.SIZE)
+
+            try {
+                appContext.contentResolver.query(collection, projection, selection, selectionArgs, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val idIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                        val sizeIndex = cursor.getColumnIndex(MediaStore.MediaColumns.SIZE)
+                        val id = cursor.getLong(idIndex)
+                        val size = if (sizeIndex >= 0) cursor.getLong(sizeIndex) else 0L
+                        val contentUri = ContentUris.withAppendedId(collection, id)
+                        return@withContext DriveDownloadOutcome(
+                            uri = contentUri,
+                            displayLocation = "下载/iClouDroid",
+                            bytes = size
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "checkDownloadedFile query failed: ${e.message}")
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "iClouDroid")
+            val file = File(dir, fileName)
+            if (file.exists() && file.length() > 0) {
+                return@withContext DriveDownloadOutcome(
+                    uri = Uri.fromFile(file),
+                    displayLocation = "下载/iClouDroid",
+                    bytes = file.length()
+                )
+            }
+        }
+        null
+    }
+
+    /**
+     * Bridge for D7: mints signed thumbnail URL for file preview.
+     */
+    suspend fun fetchThumbnailUrl(drivewsid: String): Result<String> = withContext(Dispatchers.IO) {
+        ensureGoSession().onFailure { return@withContext Result.failure(it) }
+        runCatching {
+            val jsonStr = Icloudcore.retrieveDownloadURL(drivewsid)
+            val obj = JSONObject(jsonStr)
+            if (!obj.optBoolean("success", false)) {
+                throw Exception(obj.optString("errorMessage", "获取缩略图地址失败"))
+            }
+            val thumbUrl = obj.optJSONObject("token")?.optString("thumbnailUrl").orEmpty()
+            if (thumbUrl.isBlank()) throw Exception("缺少缩略图地址")
+            thumbUrl
+        }
+    }
+
     suspend fun downloadFile(
         drivewsid: String,
         onProgress: ((Int) -> Unit)? = null
@@ -585,6 +1036,22 @@ class DriveRepository(
         }
 
         return downloader.download(item, onProgress)
+    }
+
+    private fun formatSize(bytes: Long): String = when {
+        bytes >= 1L shl 30 -> String.format(java.util.Locale.US, "%.1f GB", bytes / (1L shl 30).toDouble())
+        bytes >= 1L shl 20 -> String.format(java.util.Locale.US, "%.1f MB", bytes / (1L shl 20).toDouble())
+        bytes >= 1L shl 10 -> String.format(java.util.Locale.US, "%.0f KB", bytes / (1L shl 10).toDouble())
+        else -> "$bytes B"
+    }
+
+    private fun formatSpeed(bytesPerSec: Long): String {
+        return when {
+            bytesPerSec >= 1L shl 20 -> String.format(java.util.Locale.US, "%.1f MB/s", bytesPerSec / (1L shl 20).toDouble())
+            bytesPerSec >= 1L shl 10 -> String.format(java.util.Locale.US, "%.0f KB/s", bytesPerSec / (1L shl 10).toDouble())
+            bytesPerSec > 0 -> "$bytesPerSec B/s"
+            else -> "准备中..."
+        }
     }
 
     companion object {

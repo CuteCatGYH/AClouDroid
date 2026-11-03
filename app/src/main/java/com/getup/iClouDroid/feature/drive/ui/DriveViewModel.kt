@@ -1,11 +1,17 @@
 package com.getup.iClouDroid.feature.drive.ui
 
+import android.content.Context
+import android.content.Intent
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.getup.iClouDroid.feature.drive.data.DriveDeltaPlanner
+import com.getup.iClouDroid.feature.drive.data.DriveDownloadTaskState
+import com.getup.iClouDroid.feature.drive.data.DriveDownloader
 import com.getup.iClouDroid.feature.drive.data.DriveRepository
 import com.getup.iClouDroid.feature.drive.data.db.DriveItemEntity
+import com.getup.iClouDroid.feature.drive.data.db.DriveUploadEntity
+import com.getup.iClouDroid.feature.drive.work.DriveUploadWorker
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,15 +42,22 @@ data class DriveUiState(
     val isSyncing: Boolean = false,
     /** Result of the last incremental walk, for the "上次检查…" line. Null until one runs. */
     val lastSyncSummary: String? = null,
-    /** The file currently downloading, or null. */
-    val downloadingDrivewsid: String? = null,
-    /** 0..100 for [downloadingDrivewsid]. */
-    val downloadProgress: Int = 0,
+    /** Map of active and queued download tasks. */
+    val downloadTasks: Map<String, DriveDownloadTaskState> = emptyMap(),
     /** Transient confirmation shown as a snackbar-like line after a finished download. */
-    val downloadMessage: String? = null
+    val downloadMessage: String? = null,
+    /** Active and queued upload tasks. */
+    val activeUploads: List<DriveUploadEntity> = emptyList()
 ) {
     val currentDrivewsid: String
         get() = trail.lastOrNull()?.drivewsid ?: DriveItemEntity.ROOT_DRIVEWSID
+
+    val currentFolderPath: String
+        get() {
+            val crumbs = trail.drop(1)
+            if (crumbs.isEmpty()) return "/"
+            return "/" + crumbs.joinToString("/") { it.name }
+        }
 
     val currentName: String
         get() = trail.lastOrNull()?.name ?: "iCloud Drive"
@@ -74,6 +87,10 @@ class DriveViewModel(
     private var syncJob: Job? = null
 
     init {
+        // Reclaim cached upload copies orphaned by earlier failures or a process kill.
+        // Runs before the listing so it cannot race the first upload.
+        viewModelScope.launch { repository.sweepOrphanedUploadCache() }
+
         viewModelScope.launch {
             repository.ensureRoot()
             val root = repository.getItem(DriveItemEntity.ROOT_DRIVEWSID)
@@ -83,6 +100,38 @@ class DriveViewModel(
             )
             _uiState.value = _uiState.value.copy(trail = listOf(rootCrumb))
             observeAndRefresh(rootCrumb)
+
+            // Collect download queue task states into UI state
+            launch {
+                repository.downloadQueueTasks.collect { queueTasks ->
+                    _uiState.value = _uiState.value.copy(downloadTasks = queueTasks)
+                }
+            }
+
+            // Collect active + recently-failed upload tasks into UI state; auto-refresh when an
+            // upload finishes.
+            //
+            // This deliberately observes `observeVisible()` rather than `observeActive()`: the
+            // latter drops a row the moment it becomes FAILED, so a rejected file disappeared with
+            // no message at all. `previousActiveCount` is tracked separately because a failure also
+            // reduces the *active* count and must still trigger a folder refresh.
+            var previousActiveCount = 0
+            launch {
+                repository.uploadQueue.observeVisible().collect { uploads ->
+                    val activeCount = uploads.count {
+                        it.status == com.getup.iClouDroid.feature.drive.data.db.DriveUploadStatus.QUEUED ||
+                            it.status == com.getup.iClouDroid.feature.drive.data.db.DriveUploadStatus.UPLOADING
+                    }
+                    val previousCount = previousActiveCount
+                    previousActiveCount = activeCount
+                    _uiState.value = _uiState.value.copy(activeUploads = uploads)
+
+                    if (previousCount > 0 && activeCount < previousCount) {
+                        Log.i(TAG, "Upload finished (active $previousCount -> $activeCount), refreshing")
+                        refresh()
+                    }
+                }
+            }
 
             // The walk needs a tree to walk. On a cold start the root listing above is the only
             // cached container, so running this immediately would check exactly one folder and
@@ -105,7 +154,7 @@ class DriveViewModel(
         if (!item.isContainer) return
         val crumb = DriveCrumb(
             drivewsid = item.drivewsid,
-            name = item.name.takeIf { it.isNotBlank() } ?: "未命名"
+            name = item.displayName
         )
         _uiState.value = _uiState.value.copy(trail = _uiState.value.trail + crumb)
         observeAndRefresh(crumb)
@@ -128,13 +177,6 @@ class DriveViewModel(
 
     /**
      * Runs one incremental sync pass over every cached container.
-     *
-     * Separate from [refresh] on purpose. [refresh] re-lists **one** folder and is what the user
-     * presses; this walks the **whole** cached tree and re-lists only what changed. Running it on
-     * entry to the screen is what makes a folder the user has never opened show its real contents.
-     *
-     * The walk is capped by the repository's container budget and reports whether it finished;
-     * an unfinished walk is not an error, so it does not raise [DriveUiState.errorMessage].
      */
     fun syncIncremental() {
         if (syncJob?.isActive == true) return
@@ -148,7 +190,6 @@ class DriveViewModel(
                     )
                 },
                 onFailure = { e ->
-                    // A failed walk must not blank the screen — the cached tree is still valid.
                     Log.w(TAG, "syncIncremental failed", e)
                     _uiState.value = _uiState.value.copy(
                         isSyncing = false,
@@ -159,15 +200,12 @@ class DriveViewModel(
         }
     }
 
-    /** Turns a [DriveDeltaPlanner.SyncReport] into one short Chinese line for the UI. */
     private fun summarize(report: DriveDeltaPlanner.SyncReport): String {
         val base = if (report.listed == 0) {
             "已是最新（检查 ${report.containersConsidered} 个文件夹）"
         } else {
             "已更新 ${report.listed} 个文件夹（检查 ${report.containersConsidered} 个）"
         }
-        // An incomplete walk is reported honestly rather than shown as a full success: the user
-        // is entitled to know the tree was only partly checked.
         return if (report.walkCompleted) base else "$base · ${report.abortReason ?: "未完成"}"
     }
 
@@ -179,65 +217,64 @@ class DriveViewModel(
         _uiState.value = _uiState.value.copy(downloadMessage = null)
     }
 
-    /**
-     * Downloads [item] into the shared Downloads collection.
-     *
-     * Only one download at a time: a second tap while one is in flight is ignored rather than
-     * queued. Two concurrent multi-hundred-megabyte streams would compete for the same link and
-     * both appear stalled.
-     */
-    fun download(item: DriveItemEntity) {
-        if (!item.isDownloadable) return
-        if (_uiState.value.downloadingDrivewsid != null) return
-
+    /** Enqueues files for upload into current folder. */
+    fun uploadFiles(uris: List<android.net.Uri>, context: Context) {
+        if (uris.isEmpty()) return
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(
-                downloadingDrivewsid = item.drivewsid,
-                downloadProgress = 0,
-                downloadMessage = null
-            )
+            val folderId = _uiState.value.currentDrivewsid
+            val folderPath = _uiState.value.currentFolderPath
 
-            repository.downloadFile(item.drivewsid) { percent ->
-                _uiState.value = _uiState.value.copy(downloadProgress = percent)
-            }.fold(
-                onSuccess = { outcome ->
-                    Log.i(TAG, "downloaded ${item.name} -> ${outcome.uri} (${outcome.bytes} B)")
-                    _uiState.value = _uiState.value.copy(
-                        downloadingDrivewsid = null,
-                        downloadProgress = 0,
-                        downloadMessage = "已保存到${outcome.displayLocation}：${item.name}"
-                    )
-                },
-                onFailure = { e ->
-                    Log.w(TAG, "download failed for ${item.name}", e)
-                    _uiState.value = _uiState.value.copy(
-                        downloadingDrivewsid = null,
-                        downloadProgress = 0,
-                        downloadMessage = e.message ?: "下载失败"
-                    )
-                }
-            )
+            for (uri in uris) {
+                repository.enqueueUpload(uri, folderId, folderPath)
+            }
+
+            DriveUploadWorker.enqueue(context)
+        }
+    }
+
+    /** Cancels an active or queued upload task by ID. */
+    fun cancelUpload(uploadId: Long) {
+        viewModelScope.launch {
+            repository.cancelUpload(uploadId)
         }
     }
 
     /**
-     * Subscribes to the cached children of [crumb], then refreshes from the server.
-     *
-     * The order matters: subscribe first so an already-cached folder paints immediately, then
-     * refresh. Doing it the other way would blank the screen on every back-navigation to a folder
-     * the user has already visited.
-     *
-     * ## Why the refresh result drives `isInitialLoading`, not the Flow
-     *
-     * An earlier version cleared `isInitialLoading` only from the `collect` block. That works for
-     * a folder with children and **spins forever on an empty one**: Room only re-emits when the
-     * table changes, and an empty folder writes no rows — the delete removes none, the insert adds
-     * none. So the Flow never fires a second time, and the screen keeps showing the spinner even
-     * though the server answered successfully with `items: []`.
-     *
-     * The refresh result is therefore the authority on "the first answer has arrived". The Flow
-     * stays responsible for keeping [DriveUiState.items] current after that.
+     * Handles file click: if file is already downloaded locally, opens it via Intent (bridge to D7 preview);
+     * otherwise enqueues for download.
      */
+    fun onFileClick(item: DriveItemEntity, context: Context? = null) {
+        if (!item.isDownloadable) return
+
+        viewModelScope.launch {
+            val localFile = repository.checkDownloadedFile(item)
+            if (localFile != null && localFile.uri != null && context != null) {
+                val mime = DriveDownloader.mimeTypeFor(item.extension)
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(localFile.uri, mime.ifBlank { "*/*" })
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                val opened = runCatching {
+                    context.startActivity(intent)
+                    true
+                }.getOrDefault(false)
+
+                if (opened) return@launch
+            }
+
+            // Not downloaded locally or failed to launch viewer -> enqueue download
+            repository.enqueueDownload(item.drivewsid)
+        }
+    }
+
+    /** Cancels an active or queued download task for [drivewsid]. */
+    fun cancelDownload(drivewsid: String) {
+        viewModelScope.launch {
+            repository.cancelDownload(drivewsid)
+        }
+    }
+
     private fun observeAndRefresh(crumb: DriveCrumb) {
         observeJob?.cancel()
         observeJob = viewModelScope.launch {
@@ -246,9 +283,6 @@ class DriveViewModel(
             }
         }
 
-        // Cancel any in-flight refresh for the previous folder: otherwise a slow listing of the
-        // folder the user just left can land after the new one and overwrite `items` with the
-        // wrong contents.
         refreshJob?.cancel()
         refreshJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isRefreshing = true, errorMessage = null)
@@ -260,8 +294,6 @@ class DriveViewModel(
                     )
                 }
             } finally {
-                // In `finally` so a cancellation or an unexpected throw cannot leave the spinner
-                // running. This is the line whose absence caused the stuck empty folder.
                 _uiState.value = _uiState.value.copy(
                     isRefreshing = false,
                     isInitialLoading = false

@@ -58,6 +58,16 @@
 | [ISS-044](#iss-044-motion-photo--live-photo-自动拆分与双资源-cloudkit-备份上传) | Motion Photo / Live Photo 自动拆分与双资源 CloudKit 备份上传全链路 | 🔴 P0 | Go / Android 全链路 | ✅ 已完成 |
 | [ISS-045](#iss-045-备份并发化时上传路径摘锁的死锁风险与权限弹窗盲区) | 备份并发化：上传路径摘锁后的死锁风险 + 权限弹窗顺序盲区 | 🟠 P1 | Android / 备份链路 | ✅ 已修复 |
 | [ISS-046](#iss-046画廊缩略图加载主线程掉帧与滑动胶囊跳转重绘轰炸治理) | 画廊缩略图加载主线程掉帧与滑动/胶囊跳转重绘轰炸治理 | 🔴 P0 | Android / UI + Coil + Repository | ✅ 已修复 |
+| [ISS-047](#iss-047drive-下载取消按钮伪取消jni-阻塞脱节与文件名无后缀显示修复) | Drive 下载取消按钮伪取消（JNI 阻塞脱节）与文件名无后缀显示修复 | 🔴 P0 | Go / Android 全链路 | ✅ 已修复 |
+| [ISS-048](#iss-048drive-上传文件-0-字节锁竞争严重抖动与-workmanager-进程卡死修复) | Drive 上传文件 0 字节、锁竞争严重抖动与 WorkManager 进程卡死修复 | 🔴 P0 | Go / Android 全链路 | ✅ 已修复 |
+| [ISS-049](#iss-049-drive-上传卡在传输中数分钟哈希阶段零进度上报) | **Drive 上传卡在「传输中」数分钟**（SHA-256 阶段零进度上报） | 🔴 P0 | Go / Android 跨语言 | ✅ 已修复 |
+| [ISS-050](#iss-050-drive-上传双引擎并跑同一任务重复上传与等待重启循环) | **Drive 上传双引擎并跑**：同一任务重复上传 + Worker 取消/重启循环 | 🔴 P0 | Android / Repository + WorkManager | ✅ 已修复 |
+| [ISS-051](#iss-051-drive-上传通知卡在-18-后跳到-100通知更新被系统合并) | Drive 上传通知卡在 18% 后跳到 100%（通知更新被系统合并） | 🟠 P1 | Android / WorkManager | ✅ 已修复 |
+| [ISS-052](#iss-052-drive-单次-body-上传大文件被-cdn-以-413-拒绝1gb-不是-clouddocs-的限制) | **Drive 单次 body 上传被 CDN 以 413 拒绝**（1GB 不是 CloudDocs 的限制） | 🟠 P1 | Go / drive_upload.go | ⚠️ 已定性，分片待实现 |
+| [ISS-053](#iss-053-drive-分片上传探针content-range-可用但分片不能拼装) | **Drive 分片上传探针**：`Content-Range` 可用但分片**不能拼装**，且单 token 限 3 片 | 🔴 P0 | Go / 协议侦察 | ✅ 已结论（方案证伪）|
+| [ISS-054](#iss-054-drive-上传失败后从-ui-静默消失用户以为没上传) | **Drive 上传失败后从 UI 静默消失**，用户误以为“根本没上传” | 🔴 P0 | Android / UI + DAO | ✅ 已修复 |
+| [ISS-055](#iss-055-drive-上传失败不删缓存副本累积-51-gb-垃圾) | **Drive 上传失败不删缓存副本**，四次失败累积 5.1 GB 垃圾 | 🔴 P0 | Android / Repository | ✅ 已修复 |
+| [ISS-056](#iss-056-drive-上传上限实测为-1-gib且无法绕过) | **Drive 上传上限实测为 1 GiB**，分片/换端点/换模式都无法绕过 | 🟠 P1 | Go / 协议侦察 | ✅ 已结论（真实字节标定）|
 
 ---
 
@@ -4176,4 +4186,547 @@ if (granted) {
 | `:app:testDebugUnitTest` | ✅ 229 passed |
 | 真机胶囊跳转与滑动测试 | ✅ 20~30 张缩略图单批平滑呈现，无卡顿无空白 |
 | Logcat 丢帧监控 | ✅ `Choreographer: Skipped` 日志清零 |
+
+---
+
+## ISS-047：Drive 下载取消按钮伪取消（JNI 阻塞脱节）与文件名无后缀显示修复
+
+**优先级**：🔴 P0（下载取消失效导致大量带宽与文件被静默占用）
+**归属**：Go 核心层 / Drive 下载 / Android UI
+**发现时间**：D4 功能实机联调测试
+
+### 现象
+
+1. **取消下载伪取消**：在 UI 或系统通知栏点击“取消下载”按钮后，通知栏与 UI 上的进度条停止更新，但底层应用依然在后台把整个大文件完整地下载并写入到了硬盘。
+2. **文件名后缀丢失**：在 Drive 画廊/目录列表中，所有文件均不显示扩展名（如只显示 `A测试文件` 而非 `A测试文件.pdf`）。
+
+### 根因分析
+
+1. **协程取消与 JNI 阻塞调用的取消脱节（取消伪生效）**：
+   - 当用户点击取消时，Kotlin 协程 `Job.cancel()` 被调用，协程状态变为 `cancelling`；
+   - 但底层 `Icloudcore.downloadToFileWithID` 正阻塞在 Go 原生 JNI 的 `io.Copy(f, resp.Body)` 循环中，**JNI 阻塞函数无法感知 Kotlin 协程的 CancellationException**；
+   - 原先在 Kotlin 侧注册的 `invokeOnCompletion` 回调，根据 Kotlin 协程语义**只在 Job 彻底 Completed（即 JNI 调用结束返回后）才会触发**；
+   - 导致底层 Go 线程的 TCP Socket 传输与磁盘写入完全未受影响，直至把整个大文件下载完毕。
+2. **文件名与扩展名字段分离**：
+   - iCloud Drive API 返回的节点 `name` 字段通常只包含文件主名（如 `"A测试文件"`），而把扩展名存放在单独的 `extension` 字段中；
+   - UI 之前直接渲染 `item.name`，因此文件后缀名无法展示。
+
+### 修复方案
+
+1. **Go 原生 Context Cancellation 彻底切断网络流 (`go-core/drive_download.go`)**：
+   - 在 Go 侧引入并发安全的 `activeDownloads` 线程锁字典（`map[string]context.CancelFunc`）与 `cancelledIDs` 预取消标记字典；
+   - 将下载 HTTP 请求升级为带可取消 Context 的 `http.NewRequestWithContext(ctx, ...)`；
+   - 导出 `CancelDownload(downloadID string)` 原生函数，被调用时触发 `ctx.CancelFunc()`，**立刻强制关闭 TCP Socket 网络连接**，使 `io.Copy` 抛出 `context.Canceled` 并毫秒级中断。
+2. **Kotlin 同步取消与通知栏广播绑定 (`DriveDownloadQueue.kt` & `DriveDownloadNotificationHelper.kt`)**：
+   - 在 Kotlin 侧 `DriveDownloadQueue.cancel()` 和 `DriveDownloadReceiver` 中，**同步直接调用** `Icloudcore.cancelDownload(docwsid)`，在取消发生的瞬间同步切断 Go 侧网络；
+   - 在 `DriveDownloader` 的 `finally` 块中补齐对 Go 原生 Cancel 的安全呼叫。
+3. **实体模型增加 `displayName` 智能拼接 (`DriveItemEntity.kt` & `DriveScreen.kt`)**：
+   - `DriveItemEntity` 增加 `displayName` 属性：当 `type == FILE` 且 `name` 未以 `.${extension}` 结尾时，自动拼接 `.${extension}`（输出 `"A测试文件.pdf"`）；
+   - UI 渲染列表项统一改用 `item.displayName`。
+4. **断点续传与多任务队列 (`DriveDownloader.kt` & `DriveDownloadQueue.kt`)**：
+   - 检查 `.part` 临时文件，将已下载字节数作为 `resumeFrom` 传入 Go 核心，实现 HTTP Range 206 中断续传；
+   - 引入串行/并发下载队列管理类 `DriveDownloadQueue`。
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| `go test ./...` | ✅ 含新增 `TestDownloadToFileCancellation` 单元测试通过 |
+| `:app:testDebugUnitTest` | ✅ 299 passed (包含新增 `DriveItemEntityTest` 与 `DriveDownloadQueueTest`) |
+| 实机 "A测试文件夹" 取消测试 | ✅ 用户实机测试确认：点击取消后网络流量与文件写入立刻完全停止 |
+| 实机后缀名显示测试 | ✅ `.zip`、`.mp4`、`.PNG` 等后缀名均正常完整呈现 |
+
+---
+
+## ISS-048：Drive 上传文件 0 字节、锁竞争严重抖动与 WorkManager 进程卡死修复
+
+**优先级**：🔴 P0（文件上传全线 0 字节损坏、大文件吞吐量断崖式下降与 WorkManager 任务挂死）
+**归属**：Go 核心层 / Drive 上传 / Android WorkManager & UI
+**发现时间**：D5 上传功能实机联调测试
+
+### 现象
+
+1. **上传文件 0 字节**：文件成功上传至 iCloud Drive，但在 macOS Finder 和 iCloud 网页端均显示为 0 字节。
+2. **传输速度严重卡顿（6MB/s 降至 200KB/s）**：上传大文件时速度断崖式下跌，且 UI 队列进度不打卡或卡在“传输中...”。
+3. **队列状态矛盾与挂死**：后台 Worker 被打断后，上传任务卡在 `UPLOADING` 状态，多次重新打开 App 或重新选文件无法自动续传。
+4. **特大文件（>1GB）直接报错 413**：上传 1.4GB 视频时 Apple CWS 服务器直接拒绝。
+
+### 根因分析
+
+1. **`/update/documents` 缺少 MMCS 凭证**：
+   - 提交节点时如果仅传 `command="add_file"` 和 `path`，CloudDocs 会建节点但因缺少二进制凭证而归零 `size: 0`。
+   - 实测证实：必须在 `/update/documents` 报文的 `"data"` 对象中回传 CWS 签发的 5 个凭证字段（`signature`, `receipt`, `size`, `reference_signature`, `wrapping_key`）。
+2. **`progressReader.Read` 锁竞争严重（吞吐量杀手）**：
+   - 原 Go 侧 `progressReader` 在**每一次 32KB 读**（对 150MB 文件高频触发数千次/秒）时均强行获取 `uploadProgressMutex.Lock()` 并执行 Map 写入与字符串截取。
+   - 高频排他锁极大阻塞了 Go HTTP/2 协议栈套接字缓冲区写入循环，导致网络吞吐量从正常的 5.5 MB/s 断崖式跌落至 200 KB/s。
+3. **WorkManager `ExistingWorkPolicy.REPLACE` / `KEEP` 导致任务挂死与抛弃**：
+   - 原 `DriveUploadWorker.enqueue` 使用 `REPLACE` 策略，用户新选文件时直接 kill 掉后台正在流式上传大文件的 Worker，造成 Room 数据库任务停留在 `UPLOADING` 悬挂状态；
+   - 切换为 `KEEP` 后，WorkManager 发现该 UniqueWork 曾经 `SUCCEEDED` 结束过，后续所有 `enqueue` 请求均被 WorkManager 直接静默丢弃，导致任务停留在 `QUEUED` 状态无人执行。
+
+### 修复方案
+
+1. **Go 补全 `"data"` 签名报文与 256KB Socket 缓冲区**：
+   - `drive_upload.go` 在提交节点时自动拼入 `cwsParsed.SingleFile` 的 5 个签名凭证字段，文件完好显示真实字节大小；
+   - 为 CWS `http.Client` 设置 256KB 读写套接字缓冲区（`WriteBufferSize: 256 * 1024`），最大化 TLS 记录效率。
+2. **`progressReader` 节流更新 (150ms 采样) 与模糊路径匹配**：
+   - 将 `Read(p)` 中的进度更新节流至每 150ms 采样一次（锁频次从 5000 次/秒降至 ~6 次/秒）；
+   - `GetDriveUploadProgress` 增加文件名与相对/绝对路径模糊查找兜底，避免准备阶段匹配不上。
+3. **立即标记 `UPLOADING` + 零锁阻塞流式进度轮询 + 自动断线恢复**：
+   - `executeUpload` 在执行第一时间将 DB 状态写为 `UPLOADING`；
+   - 增加 `resetUploadingToQueued()`，Worker 启动时自动将上次因进程被杀残留的 `UPLOADING` 挂起任务重置为 `QUEUED` 自动续传；
+   - 在 `DriveRepository` 中增加 `triggerUploadProcessor()`，用户选择文件后立即在前景 Coroutine 触发传输，不依赖 WorkManager 内部数据库状态。
+4. **HTTP 413 友好拦截**：
+   - 拦截 AppleHttpServer 返回的 `413 Request Entity Too Large`，提示用户 `"文件过大 (>1GB)，超过 iCloud 网页单文件上传限制"`。
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| `go test ./...` | ✅ 单元测试全过 |
+| `:app:testDebugUnitTest` | ✅ 300 passed |
+| 147MB 视频实机上传测试 | ✅ 速度恢复至 **5.4 MB/s**，20 秒传输完成并入库 |
+| macOS Finder / iCloud 网页端核对 | ✅ 文件字节大小完全吻合，双击完美播放渲染 |
+
+---
+
+## ISS-049 Drive 上传卡在「传输中」数分钟（SHA-256 阶段零进度上报）
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🔴 P0 |
+| **归属** | Go / Android 跳语言 |
+| **状态** | ✅ 已修复 |
+
+### 现象
+
+选择一个 178 MB 的 APK 后，上传横幅长时间显示 `网易云音乐.apk · 传输中...`（实测好几分钟），进度条完全不动；随后突然跳到 `8.7 MB/s (77%)` 开始正常跑。
+
+### 日志证据
+
+旧代码在哈希前后各只有一个上报点，中间整段为空白：
+
+```
+updateDriveUploadProgress(filePathKey, 0, fileSize)   // read=0, total=N
+err := computeFileSha256Base64(f)                     // ← 整个文件阻塞读取，无任何上报
+updateDriveUploadProgressPhase(key, 0, N, PhaseUpload)// 直接跳到 UPLOAD 阶段
+```
+
+Kotlin 侧又叠了一层：轮询只在 `read > 0` 时写入 `speedText`，否则要等 `elapsedSec > 2` 才写一个固定字符串，而 UI 的 `else` 分支回退到硬编码的 `“传输中...”`。
+
+### 根因
+
+1. **SHA-256 阶段完全不上报进度。** Drive 的 `filesignature` 要求对**整个文件**做 SHA-256，`io.Copy` 一次性读完；在手机上 178 MB 就需要数十秒到数分钟，而这段窗口的 `bytesUploaded` 恒为 `0`。
+2. **UI 无法区分「正在校验」与「卡住了」。** 进度对象只有 `bytesUploaded/totalBytes`，没有阶段字段，渲染层只能一律显示“传输中”。
+3. **进度查询存在串扰隐患。** `GetDriveUploadProgress` 的模糊兑底用 `HasSuffix` 双向匹配，`/a/report.pdf` 与 `/c/report.pdf` 会互相命中。
+
+### 修复方案
+
+1. **Go 侧新增阶段字段**（`drive_upload.go`）：`DriveUploadProgress.Phase ∈ {HASH, UPLOAD, COMMIT}`。
+2. **哈希阶段带进度**：新增 `computeFileSha256Base64WithProgress` + `hashProgressReader`（150ms 节流），不改动 Photos 共用的 `computeFileSha256Base64`。
+3. **阶段切换显式重置**：哈希完成→UPLOAD 时把进度归零，否则进度条会从 100% 倒回 0%，同样看起来像卡死。
+4. **Kotlin 按阶段渲染**：`HASH → “校验中 42%”`、`UPLOAD → “8.7 MB/s (77%)”`、`COMMIT → “正在写入云盘...”`；计时器改为**按阶段重置**（否则切换阶段那一瞬的速度是拿哈希总耗时去算的，会算出荒谬的低值）。
+5. **查询改为精确优先**：只保留 `filepath.Base` 相等作为兑底，删除双向 `HasSuffix`。
+6. **UI 与通知的进度条**：只有在 `speedText` 含 `%` 时才用确定态，否则用不确定态（确定态的 0% 与卡死无法区分）。
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| `go test -race ./...` | ✅ 全过（新增 5 条进度阶段回归测试）|
+| `:app:testDebugUnitTest` | ✅ 303 passed |
+| 实机 300 MB 上传 | ✅ 从第一秒就展示 `校验中 N%` → `10.4 MB/s (30%)`，无“卡住”盲区 |
+
+---
+
+## ISS-050 Drive 上传双引擎并跑：同一任务重复上传与 Worker 取消/重启循环
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🔴 P0 |
+| **归属** | Android / Repository + WorkManager |
+| **状态** | ✅ 已修复 |
+
+### 现象
+
+实机日志中同一个上传任务被**两个引擎同时领取**：
+
+```
+22:17:40.135 DriveRepository: Processor executing upload #20: QQ_9.1.50-741-npatched.apk
+22:17:40.190 DriveUploadWorker: DriveUploadWorker processing upload #20: QQ_9.1.50-741-npatched.apk
+22:17:49.867 WM-WorkerWrapper: Work ... was cancelled
+22:18:10.152 DriveUploadWorker: DriveUploadWorker started processing upload queue...
+22:18:10.153 DriveUploadWorker: DriveUploadWorker processing upload #20: ...
+```
+
+另一个现象：`upload #21` 在 22:20:50 与 22:21:40 各执行了一次，同一文件传了两遍。
+
+### 根因（四个独立缺陷叠加）
+
+1. **双引擎。** `DriveRepository.enqueueUpload()` 调 `triggerUploadProcessor()`（进程内协程），同时 `DriveViewModel.uploadFiles()` 调 `DriveUploadWorker.enqueue()`（WorkManager）。两者都能 `executeUpload`。
+2. **`getNextPending()` 自我重置。** 它每次调用都先执行 `dao.resetUploadingToQueued()`。因为 drain 循环每轮都调它，于是**每轮都把刚领的任务又改回 QUEUED**，下一轮拿到的还是同一行——循环永远前进不了。
+3. **`ExistingWorkPolicy.REPLACE`。** 用户选第二个文件时直接 kill 掉正在流式上传的 Worker。
+4. **没有前台服务 + 无限 `Result.retry()`。** 300 MB 传输耗时数分钟，作为普通后台 Worker 随时被系统回收；取消后 `retry()` 又把它拉起，从 0 重传。
+
+### 修复方案
+
+1. **单一入口。** `enqueueUpload` 只入队、不启动处理器；`DriveUploadWorker` 成为唯一 drain 引擎（它能在进程被杀后存活）。
+2. **共享击穿锁。** `DriveRepository` 新增 `uploadDrainMutex`（suspend `Mutex`），`triggerUploadProcessor` 与新抽出的 `drainUploadQueue()` 共用。注意：`dataMutationLock` **没用**——它在 `executeUpload` 内部才拿，那时双方已经决定上传了。
+3. **`getNextPending()` 不再重置。** 孤儿恢复改为每次 drain 开始前调一次 `resetUploadingToQueued()`。
+4. **`APPEND_OR_REPLACE`** 代替 `REPLACE`。
+5. **前台服务**：`setForeground(createForegroundInfo())` + `FOREGROUND_SERVICE_TYPE_DATA_SYNC`，失败时降级而不崩溃。
+6. **有限重试**：`runAttemptCount < 3` 才 `retry()`，否则 `failure()`。
+7. **取消时回写 QUEUED**：Go 调用是阻塞 JNI，不响应协程取消；`catch (CancellationException)` 里显式 `markQueued`，让重启决策至少可追踪。
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| `:app:testDebugUnitTest` | ✅ 303 passed（新增 3 条队列回归）|
+| 实机 36 秒采样 | ✅ `cancels=0 executes=1`（修复前必然出现取消与重复领取）|
+| 实机 311 MB 上传 | ✅ 单次领取、一次完成、无重传 |
+
+---
+
+## ISS-051 Drive 上传通知卡在 18% 后跳到 100%（通知更新被系统合并）
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🟠 P1 |
+| **归属** | Android / WorkManager |
+| **状态** | ✅ 已修复 |
+
+### 现象
+
+上传进行中，通知栏进度条卡在 `18%` 长时间不动，完成后一下跳到 `100%`。界面内的横幅（Compose）却正常。
+
+### 根因
+
+Worker 用侧边协程 `collect(uploadQueue.observeActive())`。`observeActive` 是 Room `Flow`，而进度**每 250 ms 写一次**，所以 Flow 高频发射，每次都对一个**固定 notification id** 调 `notify()`。Android 会合并通知更新，中间帧被大量丢弃——屏幕上留下来的就是被合并保留下来的那个值（18%）。
+
+附加缺陷：`finally` 里直接 `progressScope.cancel()`，最后几百毫秒的进度根本发不出去。
+
+### 修复方案
+
+1. **改为快照轮询**，不采集 Flow：新增 `DriveUploadQueue.observeActiveSnapshot()`。
+2. **降低刷新频率**：`NOTIFICATION_REFRESH_MS = 500`，低于合并阈值。
+3. **只在渲染值变化时才 `notify()`**：同时比较 `percent` 与 `speedText`，两者都没变就不发。
+4. **收尾留一帧**：`finally` 里先 `delay(200)` 再取消轮询协程。
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| `:app:testDebugUnitTest` | ✅ 303 passed（新增 `activeSnapshotReflectsLiveProgress`）|
+| 实机观察 | ✅ 百分比平滑递增，不再跳变 |
+
+---
+
+## ISS-052 Drive 单次 body 上传大文件被 CDN 以 413 拒绝（1GB 不是 CloudDocs 的限制）
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🟠 P1 |
+| **归属** | Go / drive_upload.go |
+| **状态** | ⚠️ 已定性，分片待实现 |
+
+### 现象
+
+1.2 GB 文件上传，**1.4 秒**内失败。
+
+### 日志证据（原始报文，本轮刚补上）
+
+```
+Upload #26 failed raw: status=413 code=UNKNOWN size=1258291200
+  msg=CWS streaming upload failed with HTTP 413: <html>
+<head><title>413 Request Entity Too Large</title></head>
+<center><h1>413 Request Entity Too Large</h1></center>
+```
+
+### 根因
+
+1. **失败点在第二步（CWS 传字节），不在 `/upload/web`。** 令牌申请成功才拿到 `url`，说明 CloudDocs 业务层**没有** 1 GB 限制。
+2. **1.4 秒返回 = 只看请求头就拒了。** `Content-Length = 1258291200` 一报出去，前置 CDN/nginx 直接 413，**根本没有传输**。这是**单次请求体**上限，不是账号或目录限制。
+3. **网页端能传 1.9 GB 是因为它分片。** 本账号实际存在一个 1.9 GB 文件（`木土小台龙的第四期万人图海报150%.PNG`，从网页上传），对照成立。REFERENCE §5.12 早就记录了 `Content-Range: bytes 0-N/Total`，但**代码里从来没写**（全局搜 `Content-Range` 零命中）。
+
+### 已做的修复（仅诊断面）
+
+1. **删掉误导性文案。** 旧代码把任何 413 都改写成「超过 iCloud 网页单文件上传限制 (1GB)」（源头是 ISS-046 的第 4 条）——这直接误导了后续排查。现改为中性描述。
+2. **补充原始报文日志。** 在改写字串**之前**先打印 `status/code/size/msg`，否则真实原因会被友好文案吞掉。
+3. **409 单独识别。** `UNIQUE_FIELD_FAILURE` 是“同目录同名文件已存在”，与大小无关，之前被归在同一分支。
+
+### 待实现（未做）
+
+> [!IMPORTANT]
+> **分片上传（含断点续传）尚未实现。** 而且**不能直接假定 `singleFileUpload` 的 URL 支持分段**——
+> 它是为“单次写入”签发的令牌，续传语义（同一 `tk` 能否接受多段 `Content-Range`、
+> 偏移是否必须严格递增、中断后能否重用）**必须先用探针实测**，不能照 REFERENCE 那句
+> “支持 `Content-Range`” 直接写实现。
+
+建议的实施顺序：
+
+1. 探针阶段：确认分段 POST 是否被接受、服务端对最后一段的完成判定。
+2. 分片实现：固定 32/64 MB 分片，逐段 `Content-Range`。
+3. 断点续传：把已完成分片的偏移持久化到 `drive_upload_queue`（**不要**重用 `drive_sync_state`）。
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| <300 MB 实机上传（296.8 / 300.4 MB）| ✅ 正常完成，证明区间内无限制 |
+| 1.2 GB 实机上传 | ❌ 413（已定性为单次请求体上限）|
+| 对照：网页端 1.9 GB 文件 | ✅ 存在于同一目录，证明非账号级限制 |
+
+---
+
+## ISS-053 Drive 分片上传探针：`Content-Range` 可用但分片不能拼装
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🔴 P0 |
+| **归属** | Go / 协议侦察 |
+| **状态** | ✅ 已结论（分片方案被证伪）|
+
+### 背景
+
+[ISS-052](CHANGELOG_ISSUES.md#iss-052-drive-单次-body-上传大文件被-cdn-以-413-拒绝1gb-不是-clouddocs-的限制) 证明大文件上传失败是 CDN
+对**单次请求体**的限制。REFERENCE §5.12 声称 CWS 的 `singleFileUpload` 支持
+`Content-Range: bytes 0-N/Total` 分片，但本项目**从未验证过**。本轮编写探针做了真实测量。
+
+### 实验一：同一 token 能否多次 `Content-Range` POST？
+
+**能。** 100 MB / 2 段：
+
+| 试探 | HTTP | 耗时 | 服务端存储 |
+| --- | --- | --- | --- |
+| `bytes 0-52428799/104857600` | 200 | 7.26s | 52,428,800 ✅ |
+| `bytes 52428800-104857599/104857600` | 200 | 7.58s | 52,428,800 ✅ |
+
+幂等性同样验证：同一分片重发两次，得到**相同的 `fileChecksum`**。
+
+### 实验二：分片能否拼成一个完整文件？
+
+**不能。** 90 MB / 3 段，两两对照：
+
+| 提交声明 | 结果 |
+| --- | --- |
+| `size = 94,371,840`（完整文件）+ 最后一片凭证 | ❌ 400 `bad upload receipt (did_not_validate)` |
+| `size = 31,457,280`（最后一片真实大小）| ✅ **200，创建了一个 30 MB 文件** |
+
+对照成功的响应确认：新节点 `size: 31457280`，`parent_id: 1EA6072E...`（`A 测试文件`）。
+也就是说，**每个 `Content-Range` POST 产生的是一个独立 asset**，不是一个大文件的分段。
+
+### 探针自身的两个坑（已修，记录供后续参考）
+
+1. **`defer` 改值类型的副本无效。** 第一版在 `defer` 里写 `att.ElapsedMs`，而 `att` 是值返回，
+   于是每个分片都报 `elapsedMs = 0` —— 几次 50 MB 传输看起来“瞬间完成”，差点得出相反结论。
+   计时必须在**每个 return 前**显式计算。
+2. **HTTP 200 不等于字节落地。** 判据必须是响应里的 `singleFile.size` 等于本段长度，
+   而不是状态码。这与 AGENTS 里“200 不等于图片字节”是同一类错误。
+3. **提交必须带全 5 个凭证。** 只传 `signature`、把 `receipt` / `wrapping_key` 留空 →
+   400 `Invalid asset signature`（ISS-046 已踩过的同一个坑）。补齐后错误变为
+   `bad upload receipt`，才真正暴露“大小不匹配”这个根因。
+
+### 额外发现：单 token 限 3 次 `Content-Range`
+
+第 **4** 次 `Content-Range` POST 返回 `429 Too Many Requests`。
+两次独立实验（含 60s 冷却后重跑）**都在同一个索引失败**，所以限制是
+**按 token 计数**的，不是全局频率限制。
+
+> [!CAUTION]
+> **这条直接堵死了“用一个 token 传完 1.2 GB”。** 即使拼装可行，3 片的容量上限也让这个方案无意义。
+
+### 结论：不要写分片实现，先拓包看网页端
+
+以下方案已被实测证伪，**不要再尝试**：
+
+- ❌ 定长分片 + 逐段 `Content-Range` + 完整大小提交 → `bad upload receipt`
+- ❌ 多发几次 `Content-Range` 突破 1 GB → 第 4 次 429
+- ❌ 把分片结果当一个大文件提交 → 每片是独立 asset
+
+**推荐下一步**：拓包观察 iCloud **网页端**上传 1.9 GB 文件时真正用的是哪个接口。
+本项目已经两次因为“照文档猜协议”而走弯路（ISS-040 手写 bplist、ISS-052 误信 Content-Range），
+在弄清楚真实接口前不应再写实现代码。详细候选方向见 [TODO_DRIVE.md](TODO_DRIVE.md) §7.4。
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| 分片 POST 可接受 | ✅ 2/2 成功，字节数与服务端 `size` 一致 |
+| 分片拼接 | ❌ 完整大小提交 400，单片大小提交 200 |
+| 单 token 分片上限 | 3 片（第 4 片 429，可重复复现）|
+| 探针清理 | ✅ `probe_drive_chunk.go` / 对应 androidTest 已删除 |
+| 云端残留 | ✅ 无（未提交的分片是不可见的孤儿 blob）|
+| 回归 | ✅ `go test -race ./...` 与 303 项 Android 单测全过 |
+
+---
+
+## ISS-054 Drive 上传失败后从 UI 静默消失，用户以为“根本没上传”
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🔴 P0 |
+| **归属** | Android / UI + DAO |
+| **状态** | ✅ 已修复 |
+
+### 现象
+
+用户报告：“上传大于 1GB 的文件时，进度条跑完校验中之后上传列表就直接空了，根本没上传。”
+
+### 日志证据
+
+实际上传发生得很正常，只是失败得很快：
+
+```
+22:59:55.713 Enqueued upload #4 for bigtest_1200mb.bin
+22:59:55.792 Worker executing upload #4: bigtest_1200mb.bin
+22:59:57.766 Upload #4 failed raw: status=413 size=1258291200
+22:59:57.767 Upload #4 failed: 文件过大 (1.2 GB)，服务端拒绝了本次上传
+```
+
+从入队到失败只用了 **1.97 秒**。用户看到的是校验完成后横幅消失，自然得出“没上传”的结论。
+
+### 根因
+
+`DriveUploadDao.observeActiveUploads()` 只查 `QUEUED` / `UPLOADING`：
+
+```sql
+SELECT * FROM drive_upload_queue WHERE status IN ('QUEUED', 'UPLOADING')
+```
+
+任务一旦变成 `FAILED` 就**从横幅里消失**，`errorMessage` 写进了数据库但**没有任何 UI 读它**。
+这是“写入但不可观测”的典型：失败被记录、被日志打印，却被渲染层完全丢弃。
+
+### 修复方案
+
+1. **新增 `observeVisibleUploads(failedSince)`**：活动任务 + 最近 10 分钟内的失败任务。
+2. **横幅区分两种状态**：有活动任务才显示 spinner + “正在上传”；全部失败则改用 error 色彩 + “上传失败 (N 个文件)”。
+3. **失败行允许多行**：原因常常是一整句，单行 clamp 正是原因被藏住的元凶。
+4. **按钮语义分离**：失败行的按钮叫“移除记录”，不是“取消上传”。
+5. **ViewModel 分开统计 active 数量**：失败也会让 active 数量下降，仍需触发目录刷新。
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| 单测 | ✅ 305 passed（新增 2 条：失败仍可见 / 过期失败不可见）|
+| 实机 | ✅ 横幅显示“上传失败 (4 个文件)” + “文件过大 (1.4 GB)，服务端拒绝了本次上传”|
+
+---
+
+## ISS-055 Drive 上传失败不删缓存副本，累积 5.1 GB 垃圾
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🔴 P0 |
+| **归属** | Android / Repository |
+| **状态** | ✅ 已修复 |
+
+### 现象
+
+排查 ISS-054 时顺手看 `cacheDir/drive_uploads`，发现四次失败的上传留下了 **四个完整文件**：
+
+```
+upload_..._dji_fly_...mp4      1.4 GB
+upload_..._dji_fly_...mp4      1.4 GB
+upload_..._bigtest_1200mb.bin  1.2 GB
+upload_..._bigtest_1200mb.bin  1.2 GB
+```
+
+### 根因
+
+**只有成功路径**调了 `File(upload.localPath).delete()`。失败路径只 `markFailed` 就返回，
+缓存副本永久残留。而**最容易失败的恰恰是最大的文件**，所以这个泄漏量随使用单调增长。
+
+更糟的是进程被杀时 `finally` 也不会执行，那些副本同样无人回收。
+
+### 修复方案
+
+1. **失败路径也删缓存副本**：`markFailed` 后立即 `delete()`。行元数据保留，用户仍能看到失败原因，但字节没了。
+2. **启动时扫孤儿文件**：`sweepOrphanedUploadCache()` 删除 `drive_uploads/` 下所有**不被
+   `QUEUED`/`UPLOADING` 行引用**的文件。这是唯一能回收“进程被杀”场景的机制。
+
+> [!IMPORTANT]
+> 存活判据只能是 `QUEUED`/`UPLOADING`。把 `FAILED`/`SUCCESS` 也算成存活就等于永远不清；
+> 反之把 `QUEUED` 算成孤儿会删掉即将流式上传的文件。单测 `DriveUploadCacheSweepTest` 盯住两边。
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| 单测 | ✅ 4 passed（`DriveUploadCacheSweepTest`）|
+| 实机 | ✅ `sweepOrphanedUploadCache: removed 4 file(s), freed 5.1 GB`，目录清空 |
+
+---
+
+## ISS-056 Drive 上传上限实测为 1 GiB，且无法绕过
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🟠 P1 |
+| **归属** | Go / 协议侦察 |
+| **状态** | ✅ 已结论（真实字节标定）|
+
+### 背景
+
+[ISS-052](CHANGELOG_ISSUES.md#iss-052-drive-单次-body-上传大文件被-cdn-以-413-拒绝1gb-不是-clouddocs-的限制) 只说“CDN 单次 body 限制”，没标定具体阈值；
+[ISS-053](CHANGELOG_ISSUES.md#iss-053-drive-分片上传探针content-range-可用但分片不能拼装) 的分片结论基于单次令牌，未穷尽其他上传模式。
+本轮用**完整真实传输**重测，并在两个端点、六种参数组合上验证绕过可能。
+
+### 实测数据（全部为完整传输）
+
+| 声明大小 | 结果 |
+| --- | --- |
+| 8 / 32 / 300 / 500 / 700 / 900 / 1000 MB | ✅ 200 完整上传 |
+| **1024 MB（1 GiB）** | ✅ **200 完整上传** |
+| 1100 MB | ❌ 413（19.19 MB 处）|
+| 1.17 GB | ❌ 413（10.56 / 12.06 MB 处）|
+
+### 关键辨识：“11 MB 处被拒”不是容量限制
+
+早期版本据此推断“单次请求体上限 11 MB”，**这是错的**。
+11 MB 单独上传**成功**；且失败位置随总大小漂移（10.56 / 12.06 / 19.19 MB），
+是服务器**边收边判“总大小超限”**的表现，不是固定大小截断。
+
+> [!CAUTION]
+> **“声明大小 + 不发字节”的探测方法会误判。** 第一版探针只声明 `Content-Length` 不产生数据，
+> 客户端“阻塞等待 body”被当成了“接受”。两个层都报告“1.17 GB 可接受”，与真实结果相反。
+> 凡是涉及流量闸口的结论，必须用真实传输验证。
+
+### 绕过尝试与结果
+
+| 方向 | 结果 |
+| --- | --- |
+| 定长分片 + 逐段 `Content-Range` | ❌ 每片是独立 asset；完整大小提交报 `bad upload receipt` |
+| 单 token 多片 | ❌ 第 4 片 429（按 token 计数，非全局频率）|
+| 换上传模式字段（`chunked` / `multiFile` / `partSize` / `chunkSize` / `resumable` / `uploadType`）| ❌ 全部仍返回 `singleFileUpload` |
+| `type:PACKAGE` → `packageUpload` | ❌ 同样在 10.56 MB 处 413（同一前置 CDN）|
+
+### 唯一值得留意的发现
+
+`type:PACKAGE` 会返回**不同形态的 URL**：
+
+```
+.../packageUpload?m=CAog...&p=203&s=CAog...&c=com.apple.clouddocs&z=com.apple.CloudDocs
+```
+
+而不是 `singleFileUpload?tk=...&ref=...`。参数多出了 `m` 与 `s`，语义未知。
+虽然它同样受限制，但这是目前唯一已知的“非单文件上传”入口，若日后要做拓包，它是最该看的地方。
+
+### 探针工程坑（两个，都会导致假结论）
+
+1. **`defer` 改值类型副本无效** → 每个分片都报 `elapsedMs = 0`，几十 MB 传输看起来“瞬间完成”。
+2. **`[]int64` 参数不会被 gomobile 导出** → 探针函数在 AAR 里**静默消失**，必须先 `javap classes.jar`
+   确认导出成功，否则会在设备上撞 `NoSuchMethodError`。
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| 探针清理 | ✅ `probe_drive_limit.go` / `probe_drive_mode.go` / androidTest 均已删除 |
+| 云端残留 | ✅ 无可见节点（探针从未调用 `/update/documents` 提交）|
+| 回归 | ✅ `go test -race` 与 309 项 Android 单测全过 |
+| 典型应用行为 | ✅ 失败后横幅显示“上传失败 (N 个文件)”与具体原因，不再静默消失 |
+
+
+
 

@@ -78,6 +78,15 @@
             </intent-filter>
         </provider>
 
+        <!-- Drive download notification cancel receiver -->
+        <receiver
+            android:name=".feature.drive.data.DriveDownloadReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.getup.iClouDroid.ACTION_CANCEL_DOWNLOAD" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

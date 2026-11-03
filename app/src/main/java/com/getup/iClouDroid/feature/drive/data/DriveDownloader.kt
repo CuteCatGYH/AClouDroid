@@ -12,6 +12,7 @@ import com.getup.icloudcore.Icloudcore
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -20,8 +21,8 @@ import org.json.JSONObject
 
 /** Where a Drive download ended up, for the "已保存到…" message. */
 data class DriveDownloadOutcome(
-    /** The `content://` URI of the finished file, or the plain path on legacy Android. */
-    val uri: Uri,
+    /** The `content://` URI of the finished file, or null in tests / legacy Android. */
+    val uri: Uri?,
     /** Human-readable location, e.g. `Download/iClouDroid`. */
     val displayLocation: String,
     val bytes: Long
@@ -71,26 +72,48 @@ class DriveDownloader(
 
         val tempDir = File(context.cacheDir, "drive_downloads").apply { mkdirs() }
         val tempFile = File(tempDir, "${item.docwsid}.part")
-        tempFile.delete()
+
+        // 1. Calculate resumption offset if a partial file exists from an interrupted download
+        var resumeFrom = if (tempFile.exists()) tempFile.length() else 0L
+        if (item.size > 0 && resumeFrom >= item.size) {
+            tempFile.delete()
+            resumeFrom = 0L
+        }
+
+        val initialPercent = if (item.size > 0 && resumeFrom > 0) {
+            ((resumeFrom * 100) / item.size).toInt().coerceIn(0, 99)
+        } else 0
 
         DriveDownloadNotificationHelper.showProgress(
             context = context,
             notificationId = notificationId,
             filename = fileName,
-            progressPercent = 0,
-            downloadedBytes = 0L
+            progressPercent = initialPercent,
+            downloadedBytes = resumeFrom,
+            drivewsid = item.drivewsid
         )
 
+        var publishSuccess = false
+
         try {
-            // 1. Mint a signed URL.
+            // 2. Mint a signed URL.
             val tokenJson = Icloudcore.retrieveDownloadURL(item.drivewsid)
             val token = parseToken(tokenJson)
-                ?: throw Exception(tokenErrorMessage(tokenJson) ?: "无法获取下载地址")
+                ?: throw Exception(formatDownloadError(tokenErrorMessage(tokenJson)))
 
-            // 2. Stream into temp file with live progress ticker
+            // 3. Stream into temp file with live progress ticker
+            // Cancellation MUST reach Go synchronously.
+            //
+            // `invokeOnCompletion` fires only once the job is *completed*, i.e. after the blocking
+            // JNI call has returned — which is precisely when cancellation is no longer needed.
+            // A previous version relied on it and the cancel button was pure theatre: the byte
+            // stream kept running and the full file landed in Downloads. The JNI call below is a
+            // native blocking `io.Copy`, so the only thing that can stop it is an explicit call
+            // into Go, made from the cancel path itself (see DriveDownloadQueue.cancel and
+            // DriveDownloadReceiver), or from the periodic ticker below as a safety net.
             val tickerJob = launch {
                 while (isActive) {
-                    delay(250)
+                    delay(PROGRESS_POLL_MS)
                     val currentBytes = tempFile.length()
                     val percent = if (item.size > 0) {
                         ((currentBytes * 100) / item.size).toInt().coerceIn(0, 99)
@@ -101,28 +124,56 @@ class DriveDownloader(
                         notificationId = notificationId,
                         filename = fileName,
                         progressPercent = percent,
-                        downloadedBytes = currentBytes
+                        downloadedBytes = currentBytes,
+                        drivewsid = item.drivewsid
                     )
                 }
             }
 
-            val resultJson = try {
-                Icloudcore.downloadToFile(token.url, tempFile.absolutePath, 0L)
+            // Safety net: if this coroutine is cancelled by any path that did not already signal
+            // Go (e.g. the ViewModel scope being torn down), the ticker notices and pushes the
+            // cancellation through before it dies. `finally` runs on cancellation, so this cannot
+            // be skipped.
+            var resultJson: String
+            try {
+                resultJson = Icloudcore.downloadToFileWithID(
+                    token.url,
+                    tempFile.absolutePath,
+                    resumeFrom,
+                    item.docwsid
+                )
             } finally {
+                // Only poke Go when we really are being cancelled; on the normal path this is a
+                // no-op lookup in Go's map.
+                coroutineContext[Job]?.let { if (!it.isActive) signalGoCancel(item) }
                 tickerJob.cancel()
             }
 
-            val download = parseDownloadResult(resultJson)
+            var download = parseDownloadResult(resultJson)
+
+            // If the server ignored Range on a resumed request, clear tempFile and retry from 0.
+            if (!download.success && resumeFrom > 0 &&
+                download.errorMessage?.contains("server ignored Range") == true
+            ) {
+                Log.w(TAG, "Server ignored Range for ${item.name}, restarting download from 0")
+                tempFile.delete()
+                resumeFrom = 0L
+                resultJson = Icloudcore.downloadToFileWithID(token.url, tempFile.absolutePath, 0L, item.docwsid)
+                download = parseDownloadResult(resultJson)
+            }
+
             if (!download.success) {
-                throw Exception(download.errorMessage ?: "下载失败")
+                val formattedMsg = formatDownloadError(download.errorMessage)
+                throw Exception(formattedMsg)
             }
 
             onProgress?.invoke(100)
 
-            // 3. Publish to MediaStore Downloads
+            // 4. Publish to MediaStore Downloads
             val outcome = publish(tempFile, fileName, item.extension, download.written)
+            publishSuccess = true
 
-            val resolvedMime = context.contentResolver.getType(outcome.uri) ?: mimeType
+            val resolvedMime = outcome.uri?.let { context.contentResolver.getType(it) } ?: mimeType
             DriveDownloadNotificationHelper.showFinished(
                 context = context,
                 notificationId = notificationId,
@@ -134,19 +185,23 @@ class DriveDownloader(
             Result.success(outcome)
         } catch (e: Exception) {
             if (e is CancellationException) {
+                Log.i(TAG, "Download cancelled for ${item.name}; keeping .part file (${tempFile.length()} B)")
                 DriveDownloadNotificationHelper.cancel(context, notificationId)
                 throw e
             }
             Log.e(TAG, "Download failed for ${item.name}", e)
+            val displayErr = e.message ?: "下载失败"
             DriveDownloadNotificationHelper.showFailed(
                 context = context,
                 notificationId = notificationId,
                 filename = fileName,
-                errorMsg = e.message
+                errorMsg = displayErr
             )
             Result.failure(e)
         } finally {
-            tempFile.delete()
+            if (publishSuccess) {
+                tempFile.delete()
+            }
         }
     }
 
@@ -348,6 +403,35 @@ class DriveDownloader(
     // unreachable from a test would mean the only way to check them is on a device.
     internal companion object {
         const val TAG = "DriveDownloader"
+
+        /** How often the progress ticker samples the partial file. */
+        private const val PROGRESS_POLL_MS = 250L
+
+        /**
+         * Pushes a cancellation into the Go core for every id the download might be registered
+         * under.
+         *
+         * The JNI call `downloadToFileWithID` blocks in native `io.Copy` and cannot observe a
+         * Kotlin coroutine cancellation, so this is the only way to actually stop the byte
+         * stream. Calling it for a download that already finished is harmless: Go reports false
+         * and the ids are not reused.
+         */
+        internal fun signalGoCancel(item: DriveItemEntity) {
+            runCatching { Icloudcore.cancelDownload(item.docwsid) }
+            runCatching { Icloudcore.cancelDownload(item.drivewsid) }
+        }
+
+        /** Maps technical error strings from Go / HTTP response to user-friendly messages. */
+        fun formatDownloadError(rawMsg: String?): String {
+            if (rawMsg.isNullOrBlank()) return "下载失败"
+            return when {
+                rawMsg.contains("no data_token.url") -> "该文件类型（如 iWork 包）暂不支持直接下载"
+                rawMsg.contains("No active session") || rawMsg.contains("AUTH_EXPIRED") || rawMsg.contains("401") -> "iCloud 登录凭证已过期，请重新登录"
+                rawMsg.contains("NOT_FOUND") || rawMsg.contains("404") -> "文件在云端不存在或已被删除"
+                rawMsg.contains("503") || rawMsg.contains("Bad Gateway") -> "云端服务暂不可用，请稍后重试"
+                else -> rawMsg
+            }
+        }
 
         /** How many `(n)` suffixes to try before falling back to a timestamp. */
         const val MAX_DUPLICATE_SUFFIX = 99

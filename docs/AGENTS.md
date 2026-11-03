@@ -17,6 +17,7 @@
 | [5](#5-会话生命周期session-lifecycle) | 会话生命周期 |
 | [6](#6-url-生命周期与刷新规范) | URL 生命周期与刷新 |
 | [6.7](#67-系统云端媒体提供方cloudmediaprovider) | **系统云端媒体提供方（必读）** |
+| [6.7.9](#679-drive-上传队列与-photos-上传完全不同) | **Drive 上传队列（必读）** |
 | [7](#7-错误判定规范) | 错误判定规范 |
 | [8](#8-日志与可观测性规范) | 日志与可观测性 |
 | [9](#9-验证纪律verification-discipline) | 验证纪律 |
@@ -676,8 +677,48 @@ adb logcat | grep -E "Glide|VideoDecoder|setDataSource|Failed to find any load p
 > 已修复三处确定性缺陷（keyset 分页 / 缓存魔数校验 / 视频降级链），
 > 详见 [ISS-035](CHANGELOG_ISSUES.md#iss-035photopicker-缩略图空白多层柹障式修复与已知残留)。
 
-### 6.8 实况照片 (Live Photo / Motion Photo) 开发规范
+### 6.7.9 Drive 上传队列（与 Photos 上传完全不同）
 
+> 踩坑记录：[ISS-049](CHANGELOG_ISSUES.md#iss-049-drive-上传卡在传输中数分钟哈希阶段零进度上报) /
+> [ISS-050](CHANGELOG_ISSUES.md#iss-050-drive-上传双引擎并跑同一任务重复上传与等待重启循环) /
+> [ISS-051](CHANGELOG_ISSUES.md#iss-051-drive-上传通知卡在-18-后跳到-100通知更新被系统合并)。
+
+四条硬规则，改 Drive 上传相关代码前必读：
+
+**① 只能有一个 drain 引擎。** `enqueueUpload()` 只入队，**不得**在里面启动处理器。
+唯一入口是 `DriveUploadWorker`（它能在进程被杀后存活）。进程内协程与 WorkManager
+曾同时领取同一任务并各自上传一遍。两者共用 `DriveRepository.uploadDrainMutex`。
+
+> [!CAUTION]
+> **`dataMutationLock` 救不了这个竞态。** 它在 `executeUpload` **内部**才获取，
+> 那时两个调用方已经各自决定要上传了。需要的是在**进入 drain 之前**的互斥。
+
+**② `getNextPending()` 绝不得重置 `UPLOADING`。** 它每轮都被调用，一旦内部执行
+`resetUploadingToQueued()`，就要把刚领的任务又改回 QUEUED，循环永远前进不了、
+同一文件无限重传。孤儿恢复是**每次 drain 开始前一次**的事。
+
+**③ 长上传必须前台服务 + 有限重试。** 300 MB 传输要几分钟，普通后台 Worker
+随时被系统回收；`REPLACE` 会直接 kill 正在传的 Worker；无限 `retry()` 会把
+已取消的任务反复拉起、从 0 重传。用 `APPEND_OR_REPLACE` +
+`FOREGROUND_SERVICE_TYPE_DATA_SYNC` + `runAttemptCount < 3`。
+
+**④ 通知进度要控频且只在值变时发。** Room `Flow` + 250ms 写库 = 高频 `notify()`，
+Android 会合并掉中间帧，表现为“卡在 18% 然后跳 100%”。用快照轮询 + 500ms +
+percent/text 不变则不发。**UI 横幅可以继续用 Flow**（Compose 状态没有合并问题）。
+
+另：Go 侧进度必须带 `Phase`（`HASH`/`UPLOAD`/`COMMIT`）。Drive 要对全文件做 SHA-256，
+这段窗口没有网络流量，不过报就会表现为“卡在传输中数分钟”。
+
+> [!CAUTION]
+> **不要把 413 一律当成“文件超过 1GB”，也不要相信“分片能绕过”。**
+> 实测（真实完整传输）结论：这个账号 **1024 MB 可完整上传，1100 MB 就不行**，上限就是 **1 GiB**。
+> 分片、换参数、`packageUpload` 端点全部试过，无一绕过。详见
+> [ISS-056](CHANGELOG_ISSUES.md#iss-056-drive-上传上限实测为-1-gib且无法绕过)。
+>
+> **方法论硬规则：** 涉及流量闸口的结论**必须用真实传输验证**。
+> “声明 Content-Length 但不发字节”会把客户端阻塞误判为“接受”，本项目已因此得出过相反结论。
+
+### 6.8 实况照片 (Live Photo / Motion Photo) 开发规范
 1. **增量更新防覆写**：
    CloudKit 增量同步 (`/records/changes`) 仅返回被修改的 `CPLAsset`，缺省 `CPLMaster`。
    `PhotoRepository` 必须通过 `mergeWithExistingAssets()` 保护已有记录，绝不可将 `LIVE_PHOTO` 冲刷改写为 `IMAGE`。详见 [ISS-036](CHANGELOG_ISSUES.md#iss-036-收藏操作导致-live_photo-媒体类型被冲刷覆写为-image)。

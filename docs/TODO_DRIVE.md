@@ -72,9 +72,9 @@ D0 协议侦察与探针（必须最先）
 | D0 | 协议侦察与探针 | — | ✅ **已完成**（见 [REFERENCE.md](REFERENCE.md) §5） |
 | D1 | Go 协议底座：会话枚举 + 目录列举 | D0 | ✅ **已完成** |
 | D2 | Kotlin 数据层 + 目录浏览 UI | D1 | ✅ **已完成** |
-| D3 | 增量同步与对账 | D2 | ⏳ 未开始 |
-| D4 | 下载（直链 + 落盘） | D2 | ⏳ 未开始 |
-| D5 | 上传（分片） | D4 | ⏳ 未开始 |
+| D3 | 增量同步与对账 | D2 | ✅ 已完成 |
+| D4 | 下载（直链 + 落盘） | D2 | ✅ **已完成** |
+| D5 | 上传（单文件直链 + 队列） | D4 | 🟡 **部分完成**（<300MB 已验；>1GB 已定性为 CDN 限制，分片方案已证伪，见 §7） |
 | D6 | 目录操作与冲突处理 | D3 | ⏳ 未开始 |
 | D7 | 预览与分享 | D4 | ⏳ 未开始 |
 | D8 | 跨功能收尾 | D2~D7 | ⏳ 未开始 |
@@ -434,11 +434,15 @@ D0 协议侦察与探针（必须最先）
   - 后缀在扩展名**之前**（`report (1).pdf` 而非 `report.pdf (1)`），保证仍能被正确打开
   - 后缀由 App 自己算，不依赖 MediaStore 的去重行为（后者不是 API 契约）
   - 下载失败不再丢失旧文件（已取消“先删后写”）
-- [x] **下载通知与直接调起**（[DriveDownloadNotificationHelper.kt](app/src/main/java/com/getup/iClouDroid/feature/drive/data/DriveDownloadNotificationHelper.kt)）
+- [x] **下载通知与直接调起**（[DriveDownloadNotificationHelper.kt](file:///Users/syh/iClouDroid/app/src/main/java/com/getup/iClouDroid/feature/drive/data/DriveDownloadNotificationHelper.kt)）
   - `icloud_drive_download` 专用渠道（`云盘文件下载`）
   - 采样 `tempFile.length()` 实时刷新通知栏百分比/已下载大小
   - 下载完成弹出通知，点击通过 `Intent.ACTION_VIEW` + `PendingIntent` 调起系统/第三方 App 直接打开本地文件
-- [x] 断点续传能力已实现（`Range` + 206 校验），**尚未接入 UI**
+- [x] **断点续传能力**：保留 `.part` 临时文件，支持 HTTP Range 206 自动追加续传
+- [x] **主动取消下载（已解 JNI 阻塞脱节）**：Go 原生 Context Cancellation 彻底切断底层网络流，通知栏与 UI 点击同步毫秒级响应
+- [x] **多任务排队与并发管理**：新增 `DriveDownloadQueue` 管理任务 `QUEUED` / `DOWNLOADING` / `SUCCESS` / `FAILED` 状态
+- [x] **文件名后缀自动显示**：`DriveItemEntity.displayName` 自动补全 `.ext`，解决 UI 无后缀问题
+- [x] **D7 预览前置衔接**：已下载文件本地 Intent 直接调起 + `fetchThumbnailUrl` 接口预留
 
 ### 踩到的一个大坑（已修，已加回归测试）
 
@@ -491,19 +495,13 @@ D0 协议侦察与探针（必须最先）
 ### 任务
 
 - [x] 探明 `/upload/web` 请求形状（D3b）
-- [ ] 拿到 `url` 后如何 POST 字节、如何提交记录（`/update/documents`？）
-- [ ] 签名：**先确认 Drive 的 filesignature 语义**（是否与 Photos 同为 SHA-256）
-- [ ] **零内存流式**：`os.NewFile` + `io.Copy` 分片
-  - **必须在流式上传前抽完全部需要的元数据** ——
-    [ISS-040](CHANGELOG_ISSUES.md) 的 `uploadFileToUrl` 会关闭传入的 `*os.File`，
-    后续任何 `ReadAt` 都会失败，且只表现为「字段缺失」
-- [ ] 查重：Drive 靠 `etag` / `contentChangeTag`，比 Photos 的 MMCS 指纹简单
-- [ ] 上传队列：**独立表 `drive_upload_queue`**，不进 `drive_sync_state`
-  （AGENTS §12：上传统计不进扫描游标表）
-- [ ] 后台任务：`DriveUploadWorker` + 前台服务 + 退避重试
-  - 约束：仅 Wi-Fi / 充电 / 电量充足
-  - 错误分类复用 `classifyCoreResponse()`，新增 Drive 错误码在 `errors.go` 注册
-- [ ] 上传与同步共用 `DataMutationLock`
+- [x] 拿到 `url` 后如何 POST 字节、如何提交记录（`/update/documents`）
+- [x] 签名：确认 Drive 的 filesignature 语义（SHA-256 Base64）
+- [x] **零内存流式**：`os.NewFile` + `io.Copy` / `ProgressReader`
+- [x] 查重：Drive 靠 `etag` / `contentChangeTag`
+- [x] 上传队列：**独立表 `drive_upload_queue`**，不进 `drive_sync_state`
+- [x] 后台任务与通知：`DriveUploadWorker` + 常驻百分比进度通知
+- [x] 上传与同步共用 `DataMutationLock`
 
 ### 验收标准
 
@@ -514,6 +512,120 @@ D0 协议侦察与探针（必须最先）
 | 幂等 | 同一文件传两次不产生重复条目 |
 | 断网 | 退避重试，不误判为鉴权失败（不触发会话重建） |
 | 登出 | 上传中途登出立即放弃，且不写回数据 |
+
+### 7.1 实测结论（2026-11，实机 SM-F9760）
+
+> **已归档：[ISS-049](CHANGELOG_ISSUES.md#iss-049-drive-上传卡在传输中数分钟哈希阶段零进度上报) /
+> [ISS-050](CHANGELOG_ISSUES.md#iss-050-drive-上传双引擎并跑同一任务重复上传与等待重启循环) /
+> [ISS-051](CHANGELOG_ISSUES.md#iss-051-drive-上传通知卡在-18-后跳到-100通知更新被系统合并)。**
+
+| 能力 | 状态 | 备注 |
+| --- | --- | --- |
+| 零内存流式上传 | ✅ | 单次 full-body POST |
+| 分阶段进度（哈希/传输/提交） | ✅ | Go 侧 `Phase` 字段驱动 |
+| 单引擎队列 + 前台服务 | ✅ | Worker 唯一 drain，共享 `uploadDrainMutex` |
+| 通知实时进度 | ✅ | 500ms 采样，值变才 `notify` |
+| 同名冲突提示 | ✅ | 409 `UNIQUE_FIELD_FAILURE` → “同名文件已存在” |
+| **>1GB 文件** | ❌ | 见 §7.2，受 CDN 单次请求体限制 |
+| **分片上传** | ❌ | **已证伪**（§7.3）：分片不能拼装，且单 token 限 3 片 |
+| **断点续传** | ❌ | 未知；取决于是否找到真正的分片接口 |
+
+### 7.2 >1GB 上传：必须分片（已定性）
+
+实测 1.2 GB 文件在 **1.4 秒**内失败：
+
+```
+CWS streaming upload failed with HTTP 413: <html><title>413 Request Entity Too Large</title>
+```
+
+关键推论：
+
+1. **不是 CloudDocs 的业务限制。** `/upload/web` 申请令牌**成功**了（否则拿不到 `url`）。
+2. **是单次请求体的上限。** 1.4 秒返回意味着只看了 `Content-Length` 就拒，**没有传字节**。
+3. **网页端能传 1.9 GB，因为它分片。** 同账号存在一个 1.9 GB 文件，对照成立。
+
+> [!CAUTION]
+> **不要相信“1GB 限制”这个说法。** 它是 ISS-046 写下的错误文案，导致后续排查往错方向走了很久。
+> 限制来自 CDN 对**单个请求**的大小，与账号/目录/文件类型无关。
+
+### 7.3 分片探针结论（2026-11 实测，已闭环）
+
+> 探针代码已删除（`probe_drive_chunk.go` / `DriveChunkUploadProbeTest`）。
+> 完整日志见 [ISS-053](CHANGELOG_ISSUES.md#iss-053-drive-分片上传探针content-range-可用但分片不能拼装)。
+
+**实验一：同一 token 能否多次 `Content-Range` POST？——能。**
+
+| 试探 | HTTP | 耗时 | 服务端存储 |
+| --- | --- | --- | --- |
+| 前 50 MB | 200 | 7.26s | 52,428,800 ✅ |
+| 后 50 MB（同一 token）| 200 | 7.58s | 52,428,800 ✅ |
+
+**实验二：分片能否拼成一个完整文件？——不能。**
+
+| 提交方式 | 结果 |
+| --- | --- |
+| 声明 `size = 94,371,840`（完整文件）| ❌ 400 `bad upload receipt (did_not_validate)` |
+| 声明 `size = 31,457,280`（单分片真实大小）| ✅ **200，创建了一个 30 MB 文件** |
+
+**另外发现：`Content-Range` 是每段独立的 asset。**
+
+- 每个分片返回**不同的 `fileChecksum`**（`ATwgNR6...` / `AXHE3304...` / `AU7OF1R7...`）。
+- `receipt` 绑定的是**那一次请求实际收到的字节数**，所以拿完整文件大小去提交必然校验失败。
+- 同一内容重传是**幂等**的（两次得到同一个 `fileChecksum`），这对断点续传有利。
+
+> [!CAUTION]
+> **每个 token 只接受 3 次 `Content-Range` POST，第 4 次返回 429。**
+> 两次独立实验（含 60s 冷却后）**都在同一索引失败**，所以是**按 token 计数**，不是全局频率限制。
+> 这意味着“用一个 token 传完 1.2 GB”这条路**直接堵死**（要么 3 片以内，要么换 token）。
+
+### 7.4 结论：上限是 1 GiB，且无法绕过（已用真实字节标定）
+
+> [!IMPORTANT]
+> **修正上一版本文的错误结论。** 之前写的“单次 body 上限”与“分片可行”都不准确。
+> 下面是 2026-11 用**真实字节**重新测得的结论（探针已删除，日志见
+> [ISS-056](CHANGELOG_ISSUES.md#iss-056-drive-上传上限实测为-1-gib且无法绕过)）。
+
+**真实上传扫描结果**（每个都是完整传输，非估算）：
+
+| 声明大小 | 结果 |
+| --- | --- |
+| 8 / 32 / 300 / 500 / 700 / 900 / **1000 MB** | ✅ 200，完整上传 |
+| **1024 MB（1 GiB）** | ✅ **200，完整上传** |
+| 1100 MB | ❌ 413（传了 19 MB 后被拒）|
+| 1.17 GB | ❌ 413（传了 10–12 MB 后被拒）|
+
+**“11 MB 处被拒”不是 11 MB 的容量限制。** 11 MB 单独上传是成功的；
+被拒位置随总大小漂移（10.56 / 12.06 / 19.19 MB），这是服务器边收边判“总大小超限”的表现。
+
+**已尝试并证伪的绕过方案：**
+
+| 方向 | 结论 |
+| --- | --- |
+| 定长分片 + 逐段 `Content-Range` | ❌ 每片是**独立 asset**，用完整大小提交报 `bad upload receipt` |
+| 多段拼装 | ❌ 单片大小提交能成功，但那是另一个 30 MB 文件，不是原文件 |
+| 单 token 多片 | ❌ 第 4 片就 429（按 token 计数）|
+| 换上传模式字段（`chunked`/`resumable`/`partSize`…）| ❌ 全部仍返回 `singleFileUpload` |
+| `type:PACKAGE` → `packageUpload` 端点 | ❌ 同样在 10.56 MB 处 413（**同一个前置 CDN 限制**）|
+| 多个 token 分传 | 无意义：无法拼装 |
+
+**唯一的新发现（尚未深入）：** `type:PACKAGE` 会返回一个不同的 URL 形态
+`.../packageUpload?m=...&s=...`（而不是 `singleFileUpload?tk=`）。虽然它同样受 10 MB 限制，
+但参数结构不同，值得日后单独研究（目前不知 `m`/`s` 两参数如何生成，可能需要网页端才能拿到）。
+
+> [!CAUTION]
+> **不要再写任何“分片突破 1GB”的实现。** 已用真实字节在
+> 两个端点、六种参数组合上验证：服务端就是 1 GiB 硬上限。
+
+**当前正确做法（已实现）：**
+
+- 上传失败时**明确告知**用户文件过大，而不是静默消失（[ISS-054](CHANGELOG_ISSUES.md#iss-054-drive-上传失败后从-ui-静默消失用户以为没上传)）
+- 失败后清理缓存副本（[ISS-055](CHANGELOG_ISSUES.md#iss-055-drive-上传失败不删缓存副本累积-51-gb-垃圾)）
+
+### 7.5 待办
+
+- [ ] >1 GiB 时**提前拦截**并在选文件后立即提示，而不是传了几十 MB 才失败
+- [ ] 提示文案给出准确上限（1 GiB），并建议“大文件请用网页端”
+- [ ] （低优先）`packageUpload` 的 `m`/`s` 参数如何生成——若未来要拓包，这是唯一悬念
 
 ---
 

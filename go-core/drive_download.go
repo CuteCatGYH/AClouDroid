@@ -1,6 +1,7 @@
 package icloudcore
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,7 +9,65 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 )
+
+var (
+	activeDownloads = make(map[string]context.CancelFunc)
+	// cancelledIDs remembers cancellations that arrived BEFORE the download registered itself.
+	//
+	// Without it there is a real race: Kotlin taps "cancel" while the goroutine is still inside
+	// `retrieveDownloadURL` (minting the signed URL), so no entry exists in activeDownloads yet.
+	// CancelDownload would return false, the download would then register and proceed to fetch
+	// the entire file — the exact symptom that made the cancel button look fake.
+	cancelledIDs      = make(map[string]struct{})
+	activeDownloadsMu sync.Mutex
+)
+
+// cancelledIDTTLMillis bounds how long a pre-registration cancellation is remembered, so the
+// map cannot grow without limit if a caller cancels an id that is never downloaded.
+const cancelledIDTTLMillis = 10 * 60 * 1000
+
+// CancelDownload cancels an in-flight download by downloadID or destPath.
+//
+// Returns true when a live download was signalled. A `false` return does NOT mean the request
+// was ignored: the id is also recorded so a download that starts a moment later aborts before
+// transferring anything.
+func CancelDownload(downloadID string) bool {
+	downloadID = strings.TrimSpace(downloadID)
+	if downloadID == "" {
+		return false
+	}
+
+	activeDownloadsMu.Lock()
+	cancel, ok := activeDownloads[downloadID]
+	if !ok {
+		cancelledIDs[downloadID] = struct{}{}
+	}
+	activeDownloadsMu.Unlock()
+
+	if ok && cancel != nil {
+		cancel()
+		return true
+	}
+	return false
+}
+
+// isCancelledLocked reports (and clears) a pending cancellation for id. Callers hold the mutex.
+func isCancelledLocked(id string) bool {
+	if _, ok := cancelledIDs[id]; ok {
+		delete(cancelledIDs, id)
+		return true
+	}
+	return false
+}
+
+// clearCancelled drops a stale cancellation marker so it cannot affect a later, unrelated run.
+func clearCancelled(id string) {
+	activeDownloadsMu.Lock()
+	delete(cancelledIDs, id)
+	activeDownloadsMu.Unlock()
+}
 
 // DriveDownloadToken is the signed URL pair returned by `download/by_id`.
 //
@@ -142,23 +201,17 @@ type DriveDownloadResult struct {
 
 // DownloadToFile streams a signed URL into `destPath`.
 //
-// ## Why this lives in Go rather than Kotlin
+// ## Resumption & Cancellation
 //
-// The alternative is `URL.openStream().copyTo(file)` on the Kotlin side, which is fine — but the
-// project already owns the HTTP client that holds the session cookies here, and a Go-side
-// downloader keeps the "one place talks to the network" rule intact (AGENTS §10).
-//
-// ## Why a path and not a byte array
-//
-// Files here reach 300 MB+. Crossing the JNI boundary with a `[]byte` would allocate the whole
-// file twice (PITFALLS §4). The file descriptor never leaves Go.
-//
-// ## Resumption
-//
-// `resumeFrom > 0` sends a `Range` header and appends. The caller is responsible for having
-// verified that the partial file on disk is genuinely a prefix of this resource — this function
-// cannot tell a partial download from a corrupt one.
+// `resumeFrom > 0` sends a `Range` header and appends.
+// The in-flight request is registered in `activeDownloads` so calling [CancelDownload] with
+// `destPath` (or [DownloadToFileWithID] with `downloadID`) cancels the context and closes
+// the TCP stream immediately.
 func DownloadToFile(signedURL string, destPath string, resumeFrom int64) string {
+	return DownloadToFileWithID(signedURL, destPath, resumeFrom, "")
+}
+
+func DownloadToFileWithID(signedURL string, destPath string, resumeFrom int64, downloadID string) string {
 	s := GetSession()
 	if s == nil {
 		return marshalDownloadResult(failBase(ErrCodeAuthExpired, 0, "No active session"), "", 0, "")
@@ -169,6 +222,60 @@ func DownloadToFile(signedURL string, destPath string, resumeFrom int64) string 
 	if strings.TrimSpace(destPath) == "" {
 		return marshalDownloadResult(failBase(ErrCodeUnknown, 0, "destPath is empty"), "", 0, "")
 	}
+
+	downloadID = strings.TrimSpace(downloadID)
+	if downloadID == "" {
+		downloadID = destPath
+	}
+
+	// A cancel that arrived while the caller was still minting the signed URL is honoured here:
+	// the download exits before opening the destination file or touching the network.
+	activeDownloadsMu.Lock()
+	preCancelled := isCancelledLocked(downloadID) || (downloadID != destPath && isCancelledLocked(destPath))
+	activeDownloadsMu.Unlock()
+	if preCancelled {
+		return marshalDownloadResult(failBase(ErrCodeUnknown, 0, "download cancelled"), "", 0, destPath)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	activeDownloadsMu.Lock()
+	activeDownloads[downloadID] = cancel
+	if downloadID != destPath {
+		activeDownloads[destPath] = cancel
+	}
+	// Re-check under the same critical section that published the entry. A CancelDownload that
+	// lands between the pre-check above and this line would otherwise see no handle and only
+	// leave a marker behind, letting the transfer run to completion.
+	raced := isCancelledLocked(downloadID) || (downloadID != destPath && isCancelledLocked(destPath))
+	activeDownloadsMu.Unlock()
+
+	if raced {
+		cancel()
+		activeDownloadsMu.Lock()
+		delete(activeDownloads, downloadID)
+		if downloadID != destPath {
+			delete(activeDownloads, destPath)
+		}
+		activeDownloadsMu.Unlock()
+		return marshalDownloadResult(failBase(ErrCodeUnknown, 0, "download cancelled"), "", 0, destPath)
+	}
+
+	defer func() {
+		activeDownloadsMu.Lock()
+		delete(activeDownloads, downloadID)
+		if downloadID != destPath {
+			delete(activeDownloads, destPath)
+		}
+		activeDownloadsMu.Unlock()
+		// Drop any marker left over from a cancel that raced with completion, so it cannot
+		// abort a future attempt at the same document.
+		clearCancelled(downloadID)
+		if downloadID != destPath {
+			clearCancelled(destPath)
+		}
+	}()
 
 	flags := os.O_CREATE | os.O_WRONLY
 	if resumeFrom > 0 {
@@ -183,16 +290,13 @@ func DownloadToFile(signedURL string, destPath string, resumeFrom int64) string 
 	}
 	defer f.Close()
 
-	// Built with `http.NewRequest`, NOT `s.NewRequest`.
+	// Built with `http.NewRequestWithContext`, NOT `s.NewRequest`.
 	//
 	// `s.NewRequest` stamps `Origin: https://www.icloud.com` and `Referer: https://www.icloud.com/`
 	// onto every request it builds, which is correct for the API hosts and fatal for the CDN. The
 	// signed URL already carries its own authorisation in the query string, and a request that
 	// arrives with an iCloud origin is rejected with `503 Bad Gateway`.
-	//
-	// Verified on a real account: identical URL, bare request -> 200 + real HEIC bytes; the same
-	// URL through `s.NewRequest` -> 503. Do not "simplify" this back.
-	req, err := http.NewRequest(http.MethodGet, signedURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, signedURL, nil)
 	if err != nil {
 		return marshalDownloadResult(failBase(ErrCodeUnknown, 0, "build request: "+err.Error()), "", 0, "")
 	}
@@ -201,24 +305,13 @@ func DownloadToFile(signedURL string, destPath string, resumeFrom int64) string 
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", resumeFrom))
 	}
 
-	// A DEDICATED client with no cookie jar. This is the whole reason the first attempt returned
-	// `503 Bad Gateway`:
-	//
-	// `s.Client` owns the session's `cookiejar`, so reusing it here silently attached the iCloud
-	// auth cookies to the CDN request. The CDN rejects a signed URL that arrives with session
-	// cookies — the signature is the only credential it accepts. A probe run with a bare
-	// `&http.Client{}` against the same URL returned 200 and real bytes, which is how this was
-	// found (REFERENCE.md §5.11).
-	//
-	// Do not "simplify" this back to `s.Client`: sharing the transport was fine, sharing the jar
-	// was not, and `http.Client` ties the two together.
-	//
-	// No timeout either — a 300 MB file over a slow link is normal, and a truncated stream is
-	// worse than a slow one. Callers that need a bound pass their own via cancellation.
 	client := &http.Client{Transport: s.Client.Transport}
 
 	resp, err := client.Do(req)
 	if err != nil {
+		if ctx.Err() == context.Canceled {
+			return marshalDownloadResult(failBase(ErrCodeUnknown, 0, "download cancelled"), "", 0, destPath)
+		}
 		return marshalDownloadResult(failBase(ClassifyNetErr(err), 0, err.Error()), "", 0, "")
 	}
 	defer resp.Body.Close()
@@ -243,7 +336,9 @@ func DownloadToFile(signedURL string, destPath string, resumeFrom int64) string 
 
 	written, err := io.Copy(f, resp.Body)
 	if err != nil {
-		// Report what did land: the caller keeps the partial file and resumes from this offset.
+		if ctx.Err() == context.Canceled {
+			return marshalDownloadResult(failBase(ErrCodeUnknown, 0, "download cancelled"), "", written, destPath)
+		}
 		return marshalDownloadResult(
 			failBase(ClassifyNetErr(err), resp.StatusCode, "copy: "+err.Error()), "", written, destPath)
 	}

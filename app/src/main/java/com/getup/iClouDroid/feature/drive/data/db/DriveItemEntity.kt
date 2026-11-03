@@ -77,6 +77,23 @@ data class DriveItemEntity(
      */
     val isDownloadable: Boolean get() = type == TYPE_FILE
 
+    /**
+     * User-visible name with file extension guaranteed for `FILE` nodes.
+     *
+     * The API's `name` field for a file often omits the extension (which is stored in [extension]).
+     * This property appends `.${extension}` when missing so files render with their extension.
+     */
+    val displayName: String
+        get() {
+            val base = name.ifBlank { "未命名" }
+            val ext = extension?.takeIf { it.isNotBlank() }
+            return if (type == TYPE_FILE && ext != null && !base.endsWith(".$ext", ignoreCase = true)) {
+                "$base.$ext"
+            } else {
+                base
+            }
+        }
+
     companion object {
         const val TYPE_FOLDER = "FOLDER"
         const val TYPE_FILE = "FILE"

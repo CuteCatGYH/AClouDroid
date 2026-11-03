@@ -874,3 +874,23 @@ RuntimeException: setDataSource failed: status = 0xFFFFFFEA
 5. **Session Generation 内存缓存**：`sessionManager` 增加 `@Volatile` 内存缓存，消除偏好文件读取锁开销。
 详见 [ISS-046](CHANGELOG_ISSUES.md#iss-046画廊缩略图加载主线程掉帧与滑动胶囊跳转重绘轰炸治理)。
 
+---
+
+## 25. Kotlin 协程与 JNI 阻塞调用的取消脱节（取消伪生效）
+
+> 详细案例见 [ISS-047](CHANGELOG_ISSUES.md#iss-047drive-下载取消按钮伪取消jni-阻塞脱节与文件名无后缀显示修复)
+
+**现象**：
+在 UI 或通知栏点击“取消下载”按钮后，通知栏和 UI 上的进度条停止更新（因为 Kotlin 侧的 `tickerJob` 被取消了），但底层 Go JNI 阻塞调用仍然在后台默默将整个大文件完整地下载并落盘。
+
+**根因**：
+1. Kotlin 协程取消（`job.cancel()`）会将协程状态设置为 `cancelling`；
+2. 但底层 `Icloudcore.downloadToFileWithID` 正阻塞在 Go 原生 JNI 的 `io.Copy(f, resp.Body)` 阻塞循环中，**JNI 原生 C/Go 函数无法自动感知 Kotlin 协程的 `CancellationException`**；
+3. 原先在 Kotlin 侧注册的 `invokeOnCompletion` 回调，根据 Kotlin 协程语义**只在 Job 彻底 Completed（即 JNI 原生函数执行完毕返回后）才会触发**，所以回调触发时文件其实已经下载完成了。
+
+**正确做法**：
+1. **Go 侧暴露基于 Context Cancellation 的原生取消函数**（如 `CancelDownload(id)`）；
+2. **在取消触发点（取消按钮点击 / 通知栏广播接收器）同步直接调用 Go 原生取消函数**（`Icloudcore.cancelDownload(id)`），而不是仅仅靠 `job.cancel()`；
+3. Go 侧使用 `http.NewRequestWithContext(ctx, ...)`，触发 `cancel()` 时 Go 原生网络读写会**瞬间强制关闭底层 TCP Socket 连接**，毫秒级终止网络传输。
+
+

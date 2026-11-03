@@ -720,9 +720,64 @@ tag 不对时服务端会拒绝，所以本地必须每次写前先拿到最新 
 | 问题 | 归属阶段 |
 | --- | --- |
 | Drive 直链的**真实寿命**（已验 206，未验多久后失效） | D4（curl 定时实测）|
-| 上传令牌拿到后，字节怎么 POST、怎么提交记录 | D5 |
 | **读回收站内容的接口**（写入口 `moveItemsToTrash` 已找到） | 删除感知 |
 | **子文件内容变更是否 bump 父目录 `etag`** | 内容变更检测 |
 | 同名文件冲突语义 | D6 |
 | iWork 文档包（`.pages`）是否显示为 FILE | D2 后补验 |
 | 共享文件（`share` / `shareID`）的权限模型 | D6 之后 |
+
+---
+
+### 5.12 iCloud Drive 上传协议完整链路（D5 探针实测结论）
+
+> **来源**：2026-11，同一账号，真机进程内探针（`DriveUploadProbeTest`）。
+
+#### 上传四步走全流程
+
+```
+[客户端] ──1. POST /upload/web──> [docws] 返回 document_id + cws singleFileUpload URL
+[客户端] ──2. POST bytes stream─> [cws] 传输二进制，返回 fileChecksum / receipt / wrappingKey
+[客户端] ──3. POST /update/docs──> [docws] command="add_file", path={"path": "/file.txt"} 提交节点
+[客户端] ──4. retrieveDetails ──> [drivews] 确认文件入库，拿到 ETag (nug::nuf)
+```
+
+#### 详细协议约束与报文细节
+
+**① 第一步：申请上传 Token (`POST {docws}/ws/com.apple.CloudDocs/upload/web`)**
+- Request Body:
+  `{"filesize": 101, "filesignature": "<SHA-256 Base64>", "type": "FILE", "filename": "a.txt", "content_type": "text/plain"}`
+- Response Body (裸数组):
+  `[{"document_id": "17B0A6F2-...", "url": "https://cws.icloud-content.com.cn:443/20118126497/singleFileUpload?tk=..."}]`
+
+**② 第二步：流式上传字节 (`POST {cws_singleFileUpload_url}`)**
+- Header 约束：**切勿带 `Origin` / `Referer` / Cookie**，纯净 `http.NewRequest` + `Content-Type: application/octet-stream`
+- 支持 `Content-Range: bytes 0-N/Total` 分片上传
+- Response Body:
+  `{"singleFile": {"fileChecksum": "AXnovuZELn9BJgHCqyb+/OTs+nit", "receipt": "CAogT+gv...", "size": 101, "wrappingKey": "..."}}`
+
+**③ 第三步：提交/挂载节点 (`POST {docws}/ws/com.apple.CloudDocs/update/documents`)**
+- **必须字段与结构**：
+  必须包含嵌套对象 `path` 以及包含 5 个 MMCS 凭证字段的 `data` 对象，否则 CloudDocs 会把文件大小归零为 0 字节：
+  ```json
+  {
+    "command": "add_file",
+    "document_id": "17B0A6F2-...",
+    "path": {"path": "/a.txt"},
+    "data": {
+      "signature": "<fileChecksum>",
+      "receipt": "<receipt>",
+      "size": 101,
+      "reference_signature": "<referenceChecksum>",
+      "wrapping_key": "<wrappingKey>"
+    }
+  }
+  ```
+- **避坑红线**：
+  1. `path` 必须是**嵌套 JSON 对象** `{"path": "/a.txt"}`，不能是字符串 `"/a.txt"`（否则报 `add_file operation requires value for path.path`）。
+  2. 不能把 `fileChecksum` / `receipt` 作为顶层字段（服务端 Strict Deserializer 会报 `Unexpected input` 400）；必须且只能包含在 `"data"` 对象中。
+- Response Body:
+  `{"status": {"status_code": 0, "error_message": "OK"}, "results": [{"status": {"status_code": 0, "error_message": "OK"}, "document": {"document_id": "17B0A6F2-...", "item_id": "CKH_..."}}]}`
+
+**④ 第四步：幂等与查重**
+- 每次调用 `/upload/web` 都会签发新的 `document_id`。
+- 上传前先通过 `/retrieveItemDetailsInFolders` 查重文件名与 ETag，防止产生同名副本。
