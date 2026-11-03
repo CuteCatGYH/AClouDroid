@@ -424,6 +424,10 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
                     Log.w(TAG, "scanAll failed: $err")
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) {
+                    _syncMessage.value = null
+                    throw e
+                }
                 Log.e(TAG, "initial load exception", e)
                 _syncMessage.value = "异常: ${e.message}"
             } finally {

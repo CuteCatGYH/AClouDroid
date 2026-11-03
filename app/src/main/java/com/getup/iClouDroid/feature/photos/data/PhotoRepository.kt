@@ -2104,6 +2104,18 @@ class PhotoRepository(
                     )
                 )
 
+                if (queueItem.mediaStoreUri.contains("/cache/share_uploads/")) {
+                    try {
+                        val file = java.io.File(android.net.Uri.parse(queueItem.mediaStoreUri).path ?: "")
+                        if (file.exists()) {
+                            file.delete()
+                            Log.d(TAG, "Cleaned up temporary share upload file: ${file.absolutePath}")
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to clean up temp share upload file: ${e.message}")
+                    }
+                }
+
                 // Attribution for the next time an upload renders grey / exclamation on Apple's
                 // side. Never log signed URLs (AGENTS 8.2).
                 Log.i(

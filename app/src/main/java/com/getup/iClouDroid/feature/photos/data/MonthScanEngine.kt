@@ -140,6 +140,17 @@ class MonthScanEngine(
 
             var state = loadOrCreateState()
 
+            if (!force && state.isComplete && photoDao.countUnbucketed() == 0 && monthIndexDao.getAll().isNotEmpty()) {
+                Log.d(TAG, "scanAll - library already fully scanned")
+                _progress.value = ScanProgress(
+                    isScanning = false,
+                    scanned = state.scannedCount,
+                    estimatedTotal = state.estimatedTotal,
+                    isComplete = true
+                )
+                return@withContext Result.success(0)
+            }
+
             val purgedOrphans = photoDao.deleteOrphanRows()
             if (purgedOrphans > 0) {
                 Log.i(TAG, "Purged $purgedOrphans legacy orphan rows before scanning")
@@ -160,17 +171,6 @@ class MonthScanEngine(
             // empty gallery, because no month index row exists for those photos.
             backfillUnbucketedRows()
             rebuildMonthIndex()
-
-            if (!force && state.isComplete && photoDao.countUnbucketed() == 0 && monthIndexDao.getAll().isNotEmpty()) {
-                Log.d(TAG, "scanAll - library already fully scanned")
-                _progress.value = ScanProgress(
-                    isScanning = false,
-                    scanned = state.scannedCount,
-                    estimatedTotal = state.estimatedTotal,
-                    isComplete = true
-                )
-                return@withContext Result.success(0)
-            }
 
             // `scan_seen_ids` must only be cleared when a *fresh* walk is about to start.
             //
