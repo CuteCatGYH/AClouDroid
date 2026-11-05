@@ -63,6 +63,17 @@ class DriveUploadQueue(
         dao.getPendingUploads().firstOrNull { it.status == DriveUploadStatus.QUEUED }
     }
 
+    /**
+     * True when at least one row is still waiting to be picked up.
+     *
+     * Used by the enqueue recovery path to tell "the queue is genuinely empty" apart from
+     * "there is work but nothing is draining it" — the latter is the state that used to hang
+     * at "排队中" forever.
+     */
+    suspend fun hasPendingWork(): Boolean = queueMutex.withLock {
+        dao.getPendingUploads().any { it.status == DriveUploadStatus.QUEUED }
+    }
+
     suspend fun resetUploadingToQueued() = queueMutex.withLock {
         dao.resetUploadingToQueued()
     }
@@ -93,6 +104,10 @@ class DriveUploadQueue(
 
     suspend fun markFailed(id: Long, errorMessage: String) = queueMutex.withLock {
         dao.markFailed(id, errorMessage)
+    }
+
+    suspend fun retryUpload(id: Long) = queueMutex.withLock {
+        dao.resetForRetry(id)
     }
 
     suspend fun delete(id: Long) = queueMutex.withLock {

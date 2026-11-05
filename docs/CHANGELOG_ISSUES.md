@@ -67,7 +67,10 @@
 | [ISS-053](#iss-053-drive-分片上传探针content-range-可用但分片不能拼装) | **Drive 分片上传探针**：`Content-Range` 可用但分片**不能拼装**，且单 token 限 3 片 | 🔴 P0 | Go / 协议侦察 | ✅ 已结论（方案证伪）|
 | [ISS-054](#iss-054-drive-上传失败后从-ui-静默消失用户以为没上传) | **Drive 上传失败后从 UI 静默消失**，用户误以为“根本没上传” | 🔴 P0 | Android / UI + DAO | ✅ 已修复 |
 | [ISS-055](#iss-055-drive-上传失败不删缓存副本累积-51-gb-垃圾) | **Drive 上传失败不删缓存副本**，四次失败累积 5.1 GB 垃圾 | 🔴 P0 | Android / Repository | ✅ 已修复 |
-| [ISS-056](#iss-056-drive-上传上限实测为-1-gib且无法绕过) | **Drive 上传上限实测为 1 GiB**，分片/换端点/换模式都无法绕过 | 🟠 P1 | Go / 协议侦察 | ✅ 已结论（真实字节标定）|
+| [ISS-056](#iss-056-drive-上传上限实测为-1-gib且无法绕过) | ~~Drive 上传上限实测为 1 GiB~~ **结论已修正，见 ISS-057** | 🟠 P1 | Go / 协议侦察 | ⚠️ 结论有误 |
+| [ISS-057](#iss-057-drive-上传上限是云上贵州区特有国际区无此限制) | **Drive 上传上限是云上贵州区特有**，国际区可传 2.1 GB（三账号对照抓包）| 🔴 P0 | 全局 / 协议 | ✅ 已定案 |
+| [ISS-058](#iss-058-drive-上传任务在排队中长期卡住append_or_replace-链式死锁僵尸-work-占位与-markuploading-时序混淆) | **Drive 上传在「排队中」长期卡住**：`APPEND_OR_REPLACE` 链式死锁与时序修正 | 🔴 P0 | Android / WorkManager + Repository | ✅ 已修复 |
+| [ISS-059](#iss-059-drive-上传失败任务支持重试与云上贵州账号首次上传-1gb-限制预警弹窗) | **Drive 失败任务重试** 与 云上贵州账号首次上传 1GB 预警弹窗 | 🟠 P1 | Android / UI + Repository + SessionManager | ✅ 已完成 |
 
 ---
 
@@ -4664,7 +4667,13 @@ upload_..._bigtest_1200mb.bin  1.2 GB
 | --- | --- |
 | **优先级** | 🟠 P1 |
 | **归属** | Go / 协议侦察 |
-| **状态** | ✅ 已结论（真实字节标定）|
+| **状态** | ⚠️ **结论已被 [ISS-057](#iss-057-drive-上传上限是云上贵州区特有国际区无此限制) 修正** |
+
+> [!WARNING]
+> **本文的“上限 1 GiB 无法绕过”是错的。**
+> 实测数据本身没错，但解释错了：1 GiB 是**云上贵州区（`.com.cn`）特有**的限制，
+> 国际区能单次 POST 2.1 GB。请直接看 [ISS-057](#iss-057-drive-上传上限是云上贵州区特有国际区无此限制)。
+> 保留本文仅作排查过程记录。
 
 ### 背景
 
@@ -4726,6 +4735,167 @@ upload_..._bigtest_1200mb.bin  1.2 GB
 | 云端残留 | ✅ 无可见节点（探针从未调用 `/update/documents` 提交）|
 | 回归 | ✅ `go test -race` 与 309 项 Android 单测全过 |
 | 典型应用行为 | ✅ 失败后横幅显示“上传失败 (N 个文件)”与具体原因，不再静默消失 |
+
+---
+
+## ISS-057 Drive 上传上限是云上贵州区特有，国际区无此限制
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🔴 P0 |
+| **归属** | 全局 / 协议 |
+| **状态** | ✅ 已定案（三账号 DevTools 抓包对照）|
+| **重开** | 修正 [ISS-052](CHANGELOG_ISSUES.md#iss-052-drive-单次-body-上传大文件被-cdn-以-413-拒绝1gb-不是-clouddocs-的限制) / [ISS-053](CHANGELOG_ISSUES.md#iss-053-drive-分片上传探针content-range-可用但分片不能拼装) / [ISS-056](#iss-056-drive-上传上限实测为-1-gib且无法绕过) |
+
+### 结论
+
+**1 GiB 上传限制是云上贵州区（`.com.cn`）特有，不属于 iCloud Drive 协议。**
+国际区账号单次 POST 上传 2.1 GB 正常完成。
+
+### 对照实验（同一个文件，三个账号）
+
+文件：`arknights-hg-2761.apk`，**2,109,579,544 字节（1.96 GiB）**
+
+| 账号 | 主机 | 结果 |
+| --- | --- | --- |
+| 云上贵州账号1 | `p203-docws.icloud.com.cn` / `cws.icloud-content.com.cn` | ❌ 413 |
+| 云上贵州账号2 | `p227-docws.icloud.com.cn` / `cws.icloud-content.com.cn` | ❌ 413 |
+| **国际区** | `p141-docws.icloud.com` / `cws.icloud-content.com` | ✅ **200** |
+
+三者的**请求完全同构**：
+
+```
+POST /ws/com.apple.CloudDocs/upload/web
+  {"filename":"arknights-hg-2761.apk","type":"FILE",
+   "content_type":"...","size":2109579544}
+
+POST /{ownerId}/singleFileUpload?tk=...
+  Content-Length: 2109579544
+```
+
+**没有分片、没有第二套端点、没有特殊头部。**
+国际区响应头：`x-responding-instance: contentws:...:prod-p00-contentws-uswest2a-95`。
+
+### 云上贵州区内部的分界线（同一账号）
+
+| 文件大小 | 结果 |
+| --- | --- |
+| 364 MB | ✅ |
+| 790 MB | ✅ |
+| 1.49 GB | ❌ 413 |
+| 2.11 GB | ❌ 413 |
+
+与本项目设备实测（**1024 MB ✅ / 1100 MB ❌**）完全吻合。
+
+### 网页端同样传不了（已抓包证实）
+
+之前曾假设“网页端能传 1.9 GB，所以一定有另一条通道”。**这个前提是错的。**
+实际抓包（`/Users/syh/Downloads/download`）：
+
+```
+POST /upload/web            -> 200，发下 singleFileUpload 令牌
+POST singleFileUpload       -> 413 (Content-Length: 1478709456)
+```
+
+云上贵州网页端**也会失败**，且只调 `retryUpload~31632a63.js` 重试，不换方式。
+那个 1.9 GB 文件极可能是 **Mac/iOS 客户端**上传的，它们走 `cloudd` 二进制协议，与 HTTP 单次 POST 不同。
+
+### 排查过程复盘：三个错误结论是怎么产生的
+
+| 错误结论 | 为何错 | 教训 |
+| --- | --- | --- |
+| “单次请求体上限 11 MB” | 只测了一个点（1.2 GB 在 11 MB 处被拒）就归因 | **单点数据不能外推成阈值** |
+| “1.17 GB 可接受” | 探针只声明 `Content-Length` 不发字节，客户端阻塞被当成“接受” | **涉及流量闸口必须用真实传输验证** |
+| “1 GiB 是全局硬上限” | 只在本账号（贵州区）测，未做跌区对照 | **限制类结论必须先问“是不是账号属性的”** |
+
+> [!IMPORTANT]
+> **最重要的教训：一个只在单环境下成立的限制，不能写成全局约束。**
+> 本项目已有三次因“单点观察→全局结论”而走弯路的记录（ISS-040 / ISS-052 / ISS-056）。
+
+### 代码影响
+
+- **不能**全局硬编码 1 GiB 预检：国际区用户可以正常传大文件
+- 判定方式：检查 `docsEndpoint` 是否包含 `.com.cn`
+- 云上贵州区：>1 GiB 提前拦截 + 说明是**账号区域限制**（非 App 限制）
+- 国际区：不做任何人为大小限制
+
+---
+
+## ISS-058 Drive 上传任务在「排队中」长期卡住：`APPEND_OR_REPLACE` 链式死锁、僵尸 work 占位与 `markUploading` 时序混淆
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🔴 P0 |
+| **归属** | Android / WorkManager + DriveRepository + AppStartup |
+| **状态** | ✅ 已修复 |
+
+### 现象
+
+用户反馈：点击选择文件后，上传横幅展开列表中新文件长时间显示 `bigtest_1200mb.bin · 排队中` 或卡在 `UPLOADING`，即使队列中有小文件也完全不开始传输。
+
+### 根因分析（三重交织故障）
+
+1. **`APPEND_OR_REPLACE` 产生的 WorkManager 链式依赖死锁**：
+   `DriveUploadWorker.enqueue()` 使用 `ExistingWorkPolicy.APPEND_OR_REPLACE`，WorkManager 会把新 enqueue 的 Worker 挂为上一个 Worker 的 **Dependent**。
+   当应用崩溃或进程被杀时，最上游的 Worker 在数据库中保持 `RUNNING` 僵尸状态，导致整个依赖链 downstream 的 Worker 永远处于 `ENQUEUED` 等待上游，无法被调度器执行：
+   ```
+   7681baf5 (RUNNING, attempt=2)  ← 僵尸 Work，上游阻塞
+       ↓
+   befb1fad (ENQUEUED, attempt=4) ← 新任务卡在排队
+   ```
+
+2. **`WorkInfo.state` 与底层数据库 `WorkSpec.state` 不一致导致清理失效**：
+   原有的 `pruneStaleWork` 过滤 `WorkInfo.State.RUNNING`，但被 kill 的 Worker 在 `WorkInfo` 接口中已呈现 `SUCCEEDED`/`CANCELLED` 假象，导致 filter 认为无需清理，而在底层 `WorkSpec` 中它仍挂着 `RUNNING` 占有 unique name，使得后续 `KEEP` 入队无声被系统丢弃。
+
+3. **`markUploading` 在 `dataMutationLock` 之前提前更新状态**：
+   `executeUpload` 在未拿到 `dataMutationLock` 之前便执行 `uploadQueue.markUploading(uploadId)`，UI 立即呈现「传输中...」，而此时底层协程正阻塞等待 `syncIncremental` 或照片刷新的数据锁，造成「显示传输中但进度与字节恒为 0」的假象。
+
+### 修复方案
+
+1. **WorkManager 入队策略调整**：`APPEND_OR_REPLACE` 改为 `ExistingWorkPolicy.KEEP`。串行化已由 `DriveRepository.uploadDrainMutex` 保证，WorkManager 无需再构建链式依赖。
+2. **启动与入队强力解锁**：`DriveUploadWorker.pruneStaleWork()` 改为基于 `UNIQUE_WORK_NAME` 直接 `cancelUniqueWork()`，不依赖易出假象的 `WorkInfo.state` 过滤；在 `IClouDroidApp.onCreate()` 启动异步任务中进行僵尸 WorkPrune 与队列状态重置。
+3. **正确的状态更新时序**：将 `uploadQueue.markUploading(uploadId)` 移动至 `dataMutationLock.withLock { ... }` 内部，仅在真正取得数据锁、开始执行哈希与流式传输时才变更为 `UPLOADING`。
+4. **启动恢复自动补漏**：`IClouDroidApp` 在 `ensureGoSession()` 确认会话就绪后，检测到 `hasPendingWork()` 自动执行 `forceEnqueue()`，解决杀后台重启后队列无人消费的问题。
+
+---
+
+## ISS-059 Drive 上传失败任务支持重试与云上贵州账号首次上传 1GB 限制预警弹窗
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🟠 P1 |
+| **归属** | Android / UI + Repository + SessionManager |
+| **状态** | ✅ 已完成 |
+
+### 需求与场景
+
+1. **失败任务重试 (Retry)**：原先上传失败时虽保留在 UI 列表中，但只有「移除记录 (✕)」按钮。因网络瞬断或会话过期的任务无法方便重新触发。
+2. **云上贵州账号 1GB 限制预警**：根据 [ISS-057](#iss-057-drive-上传上限是云上贵州区特有国际区无此限制) 结论，国区账号不支持 >1GB 单文件上传。为了防止用户选择大文件后消耗数分钟计算 SHA-256 再被拒绝，需在用户首次点击上传按钮时给予明确弹窗引导。
+
+### 实现细节
+
+1. **上传任务重试全链路**：
+   - `DriveUploadDao` 新增 `resetForRetry(id)`：将指定任务状态重置为 `QUEUED`，同时重置 `bytesUploaded = 0`、`errorMessage = null`、`speedText = null`。
+   - `DriveRepository` 新增 `retryUpload(uploadId)`：触发 DB 重置并调用 `DriveUploadWorker.enqueue()`。
+   - 调整 `executeUpload` 缓存清理逻辑：失败时不立即 `delete()` 缓存文件，保留在 `cacheDir/drive_uploads` 供重试读取；用户点击「移除记录」或离线清理时才删除文件。
+   - `DriveScreen` 展开横幅中为 `FAILED` 状态条目添加 `IconButton(Icons.Default.Refresh)`「重试上传」按钮。
+
+2. **云上贵州账号首次上传提示弹窗**：
+   - `SessionManager` 新增 `hasShownChinaUploadNotice()` 与 `setHasShownChinaUploadNotice(true)` 持久化状态。
+   - 当用户点击云盘页面右下角 `+` (FAB) 按钮时：
+     - 若 `sessionManager.isChinaMainland() == true` 且 `!hasShownNotice`，弹出 Compose `AlertDialog`：
+       - **标题**：`云上贵州账号上传提示`
+       - **正文**：`由于 Apple 服务端区域限制，云上贵州（中国大陆）账号暂不支持超过 1 GB 的单文件上传。超过 1 GB 的文件上传将在服务端被拒绝。\n\n国区特有限制，外区账号不受此限制。`
+       - **确认按钮**：`我知道了`（点击后标记 `hasShownNotice = true`，并唤起文件选择器 `filePickerLauncher.launch("*/*")`）。
+     - 若已提示过或为外区/国际区账号，则不弹窗，直接打开文件选择器。
+
+### 验证
+
+- **单元测试**：`DriveUploadQueueTest.testRetryUpload` 验证重试状态重置逻辑，310 项单元测试全过。
+- **真机验证**：
+  - 首次点击上传 FAB 成功弹出提示对话框；点击「我知道了」后成功唤起文件选择器，再次点击直接打开选择器。
+  - 失败任务（如 1.2GB 大文件拒绝）条目右侧正常显示 `↻` (重试) 与 `✕` (移除) 按钮；点击 `↻` 成功将任务重置为 `QUEUED` 并重新触发预检与上传。
+
 
 
 

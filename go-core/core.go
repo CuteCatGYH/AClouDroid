@@ -28,13 +28,22 @@ func GetSessionStateSummary() string {
 		cookieKeys = append(cookieKeys, k)
 	}
 
+	// docwsURL is the CloudDocs transfer endpoint. It is exposed separately from drivewsURL
+	// because uploads resolve it from `webservices.docws` and fail with
+	// `AUTH_EXPIRED: docws endpoint is not set` when it is empty — a terminal error the caller
+	// cannot retry. Kotlin needs to see both fields to tell "session ready" apart from
+	// "session has drivews but is not yet usable for transfer".
+	docsURL := docsEndpointFromAccountInfo(s.AccountInfoJSON)
+
 	summary := map[string]interface{}{
 		"isChina":          s.IsChinaMainland,
 		"baseURL":          s.BaseURL,
 		"dsid":             s.DSID,
 		"ckDatabaseURL":    s.CKDatabaseURL,
 		"drivewsURL":       s.DrivewsURL,
+		"docwsURL":         docsURL,
 		"hasDriveEndpoint": s.DrivewsURL != "",
+		"hasDocsEndpoint":  docsURL != "",
 		"cookieCount":      len(s.CookieMap),
 		"cookieNames":      cookieKeys,
 		"hasAuthToken":     s.HasCookieIgnoreCase("X-APPLE-WEBAUTH-TOKEN"),

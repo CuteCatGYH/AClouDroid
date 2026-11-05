@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
@@ -40,6 +41,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -109,6 +111,7 @@ fun DriveScreen(
     val context = LocalContext.current
     val container = rememberAppContainer()
     val imageLoader = ICloudImageLoaderFactory.get(context, container)
+    var showChinaUploadLimitDialog by remember { mutableStateOf(false) }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()
@@ -116,6 +119,31 @@ fun DriveScreen(
         if (uris.isNotEmpty()) {
             viewModel.uploadFiles(uris, context)
         }
+    }
+
+    if (showChinaUploadLimitDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showChinaUploadLimitDialog = false
+            },
+            title = {
+                Text("云上贵州账号上传提示")
+            },
+            text = {
+                Text("由于 Apple 服务端区域限制，云上贵州（中国大陆）账号暂不支持超过 1 GB 的单文件上传。超过 1 GB 的文件上传将在服务端被拒绝。\n\n国区特有限制，外区账号不受此限制。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showChinaUploadLimitDialog = false
+                        container.sessionManager.setHasShownChinaUploadNotice(true)
+                        filePickerLauncher.launch("*/*")
+                    }
+                ) {
+                    Text("我知道了")
+                }
+            }
+        )
     }
 
     // Intercept back while inside a folder. At the root we let the event through so the shell
@@ -140,7 +168,8 @@ fun DriveScreen(
             if (state.activeUploads.isNotEmpty()) {
                 DriveUploadBanner(
                     activeUploads = state.activeUploads,
-                    onCancelUpload = viewModel::cancelUpload
+                    onCancelUpload = viewModel::cancelUpload,
+                    onRetryUpload = viewModel::retryUpload
                 )
             }
 
@@ -217,7 +246,16 @@ fun DriveScreen(
         }
 
         FloatingActionButton(
-            onClick = { filePickerLauncher.launch("*/*") },
+            onClick = {
+                val sessionManager = container.sessionManager
+                val isChina = sessionManager.isChinaMainland()
+                val hasShownNotice = sessionManager.hasShownChinaUploadNotice()
+                if (isChina && !hasShownNotice) {
+                    showChinaUploadLimitDialog = true
+                } else {
+                    filePickerLauncher.launch("*/*")
+                }
+            },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(contentPadding)
@@ -497,7 +535,8 @@ private fun formatIsoDate(raw: String?): String? {
 @Composable
 private fun DriveUploadBanner(
     activeUploads: List<DriveUploadEntity>,
-    onCancelUpload: (Long) -> Unit
+    onCancelUpload: (Long) -> Unit,
+    onRetryUpload: (Long) -> Unit
 ) {
     var isExpanded by remember { mutableStateOf(false) }
     val count = activeUploads.size
@@ -644,6 +683,19 @@ private fun DriveUploadBanner(
                                         color = MaterialTheme.colorScheme.primary
                                     )
                                 }
+                            }
+                        }
+                        if (upload.status == DriveUploadStatus.FAILED) {
+                            IconButton(
+                                onClick = { onRetryUpload(upload.id) },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = "重试上传",
+                                    modifier = Modifier.size(18.dp),
+                                    tint = contentColor
+                                )
                             }
                         }
                         IconButton(

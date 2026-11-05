@@ -12,6 +12,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.ForegroundInfo
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.getup.iClouDroid.R
@@ -239,6 +240,45 @@ class DriveUploadWorker(
          */
         private const val FOREGROUND_NOTIFICATION_ID = 2002
 
+        /**
+         * Cancels any work for [UNIQUE_WORK_NAME] that cannot make progress.
+         *
+         * A work is "stale" when it claims to be active but its process is gone. WorkManager
+         * keeps such a record in RUNNING indefinitely, and under [ExistingWorkPolicy.KEEP] that
+         * record owns the unique name — so every subsequent enqueue is silently dropped and the
+         * upload sits at "排队中" with no worker log at all. Cancelling it lets the next enqueue
+         * through.
+         *
+         * Safe to call at any time: cancelling a work that is genuinely running just ends its
+         * pass, and the queue rows it did not reach stay QUEUED for the next pass.
+         */
+        fun pruneStaleWork(context: Context) {
+            val workManager = WorkManager.getInstance(context.applicationContext)
+
+            // Cancel by unique name rather than filtering on WorkInfo.state.
+            //
+            // Filtering looked correct but did not work on device: a work whose process had been
+            // killed was reported by `getWorkInfosForUniqueWork` with a terminal state (so the
+            // filter skipped it) while the WorkSpec row was still RUNNING and still owned the
+            // unique name. KEEP then silently dropped every subsequent enqueue, and the banner sat
+            // at "排队中" indefinitely.
+            //
+            // Cancelling the whole unique name sidesteps the reporting mismatch: it moves any
+            // lingering spec to a terminal state, freeing the name. Nothing is lost by doing this
+            // aggressively — the queue lives in `drive_upload_queue`, not in the work, so the next
+            // pass re-reads it and uploads whatever is still QUEUED.
+            val outstanding = workManager.getWorkInfosForUniqueWork(UNIQUE_WORK_NAME).get()
+            if (outstanding.isNotEmpty()) {
+                Log.w(
+                    TAG,
+                    "Cancelling ${outstanding.size} outstanding upload work(s) to free the " +
+                        "unique name: ${outstanding.map { "${it.id.toString().take(8)}=${it.state}" }}"
+                )
+            }
+            runCatching { workManager.cancelUniqueWork(UNIQUE_WORK_NAME) }
+                .onFailure { Log.w(TAG, "cancelUniqueWork failed: ${it.message}") }
+        }
+
         fun enqueue(context: Context) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -248,18 +288,92 @@ class DriveUploadWorker(
                 .setConstraints(constraints)
                 .build()
 
-            // APPEND_OR_REPLACE, not REPLACE.
+            // KEEP, not APPEND_OR_REPLACE.
             //
-            // REPLACE cancels the running worker outright. On device this was observable as the
-            // upload restarting from zero (`Work ... was cancelled` followed by
-            // `DriveUploadWorker started processing upload queue...` for the same file), because
-            // picking a second file enqueued a brand-new unique work while the first was mid-flight.
-            // APPEND_OR_REPLACE lets the current pass finish and then runs the new request, and the
-            // shared drain mutex in DriveRepository makes the mutual exclusion explicit either way.
-            WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
+            // APPEND_OR_REPLACE chains each new request as a DEPENDENT of the previous one, so a
+            // new upload cannot start until every earlier work finishes. That is wrong here for
+            // two reasons:
+            //
+            //   1. Serialisation is already handled — `DriveRepository.drainUploadQueue()` takes
+            //      `uploadDrainMutex`, and a drain pass processes the WHOLE queue anyway. A second
+            //      worker starting concurrently just blocks on the mutex, finds an empty queue and
+            //      exits. The WorkManager-level chaining only adds latency.
+            //   2. The chain can deadlock permanently. Observed on device: one work stuck in
+            //      RUNNING after its process was killed, so every later upload sat in ENQUEUED
+            //      forever and the banner showed "排队中" indefinitely. The dependency table read
+            //      7681baf5(RUNNING) -> befb1fad(ENQUEUED) -> 93e0a19f(FAILED) -> 0dcfd99e(FAILED).
+            //
+            // KEEP is also what makes the queue table the single source of truth: if a pass is
+            // already scheduled it will drain whatever is queued, including the row we just added.
+            // Surviving a process kill does not depend on the work chain — it depends on
+            // `drive_upload_queue`, whose QUEUED rows are re-scanned by the next pass.
+            //
+            // KEEP has its own hazard: a work left RUNNING by a killed process keeps the unique
+            // name occupied forever, and KEEP would then silently ignore every new enqueue. That
+            // is why stale work is pruned just below.
+            val workManager = WorkManager.getInstance(context.applicationContext)
+
+            // Do NOT prune here.
+            //
+            // Pruning on every enqueue actively broke uploads: observed on device as
+            //
+            //   05.806 Enqueued upload #10
+            //   05.839 Cancelling 2 outstanding upload work(s)
+            //   05.886 DriveUploadWorker started processing...
+            //   05.913 Worker executing upload #9      <- only #9, #10 never ran
+            //
+            // The cancel killed the pass that was about to pick up #10, and KEEP then declined to
+            // schedule a replacement because the cancelled work had not finished transitioning
+            // out of its slot yet — so #10 sat in QUEUED with no worker at all.
+            //
+            // Stale-work repair belongs to process startup (see IClouDroidApp), where it can run
+            // before any upload exists. Here it would race the very pass it is meant to help.
+
+            workManager.enqueueUniqueWork(
                 UNIQUE_WORK_NAME,
-                ExistingWorkPolicy.APPEND_OR_REPLACE,
+                ExistingWorkPolicy.KEEP,
                 request
+            )
+        }
+
+        /**
+         * True when a work for [UNIQUE_WORK_NAME] is currently running or about to run.
+         *
+         * Reads WorkInfo state rather than the WorkSpec row: the row can stay RUNNING long after
+         * the process died, which is precisely the condition this check must not misread as
+         * "active".
+         */
+        fun isWorkActive(context: Context): Boolean = runCatching {
+            WorkManager.getInstance(context.applicationContext)
+                .getWorkInfosForUniqueWork(UNIQUE_WORK_NAME)
+                .get()
+                .any { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
+        }.getOrDefault(false)
+
+        /**
+         * Schedules a drain pass for whatever is queued, ignoring the existing-work state.
+         *
+         * This is the safety net for the one failure mode KEEP cannot recover from on its own: a
+         * work that the system dropped while its WorkSpec still held the unique name. `cancelUniqueWork`
+         * is what actually frees the slot — KEEP alone would keep declining to schedule.
+         *
+         * Only call this when a QUEUED row is known to exist and nothing is currently draining;
+         * cancelling unconditionally mid-upload would restart the transfer.
+         */
+        fun forceEnqueue(context: Context) {
+            val workManager = WorkManager.getInstance(context.applicationContext)
+            runCatching { workManager.cancelUniqueWork(UNIQUE_WORK_NAME) }
+                .onFailure { Log.w(TAG, "forceEnqueue: cancel failed: ${it.message}") }
+            workManager.enqueueUniqueWork(
+                UNIQUE_WORK_NAME,
+                ExistingWorkPolicy.REPLACE,
+                OneTimeWorkRequestBuilder<DriveUploadWorker>()
+                    .setConstraints(
+                        Constraints.Builder()
+                            .setRequiredNetworkType(NetworkType.CONNECTED)
+                            .build()
+                    )
+                    .build()
             )
         }
     }

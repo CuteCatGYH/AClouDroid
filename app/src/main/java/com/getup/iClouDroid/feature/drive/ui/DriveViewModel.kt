@@ -228,7 +228,23 @@ class DriveViewModel(
                 repository.enqueueUpload(uri, folderId, folderPath)
             }
 
+            // KEEP semantics: no-op when a drain pass is already scheduled or running, and that
+            // pass will pick up the rows just added.
             DriveUploadWorker.enqueue(context)
+
+            // One recovery attempt for the case KEEP cannot handle: the unique name is held by a
+            // work that the system dropped, so `enqueue` was silently a no-op and nothing will
+            // ever drain the queue. Waiting briefly first avoids cancelling a pass that is merely
+            // still starting up.
+            kotlinx.coroutines.delay(ENQUEUE_RECOVERY_DELAY_MS)
+            val stillQueued = repository.uploadQueue.hasPendingWork()
+            if (stillQueued && !DriveUploadWorker.isWorkActive(context)) {
+                android.util.Log.w(
+                    TAG,
+                    "No active upload work after enqueue; forcing a drain pass"
+                )
+                DriveUploadWorker.forceEnqueue(context)
+            }
         }
     }
 
@@ -236,6 +252,13 @@ class DriveViewModel(
     fun cancelUpload(uploadId: Long) {
         viewModelScope.launch {
             repository.cancelUpload(uploadId)
+        }
+    }
+
+    /** Retries a failed upload task by ID. */
+    fun retryUpload(uploadId: Long) {
+        viewModelScope.launch {
+            repository.retryUpload(uploadId)
         }
     }
 
@@ -304,5 +327,14 @@ class DriveViewModel(
 
     companion object {
         private const val TAG = "DriveViewModel"
+
+        /**
+         * Grace period before checking whether the enqueue actually produced a running worker.
+         *
+         * Long enough that a work which is merely starting up is not cancelled and restarted, short
+         * enough that a genuinely dropped work is repaired before the user notices the queue sitting
+         * at "排队中".
+         */
+        private const val ENQUEUE_RECOVERY_DELAY_MS = 3_000L
     }
 }

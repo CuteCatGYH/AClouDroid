@@ -60,6 +60,9 @@ interface DriveUploadDao {
     @Query("UPDATE drive_upload_queue SET status = 'FAILED', errorMessage = :errorMessage, retryCount = retryCount + 1, updatedAt = :updatedAt WHERE id = :id")
     suspend fun markFailed(id: Long, errorMessage: String, updatedAt: Long = System.currentTimeMillis())
 
+    @Query("UPDATE drive_upload_queue SET status = 'QUEUED', errorMessage = NULL, speedText = NULL, bytesUploaded = 0, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun resetForRetry(id: Long, updatedAt: Long = System.currentTimeMillis())
+
     @Query("DELETE FROM drive_upload_queue WHERE id = :id")
     suspend fun deleteById(id: Long)
 

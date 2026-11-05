@@ -63,6 +63,12 @@ class SessionManager(context: Context) {
 
     fun isChinaMainland(): Boolean = prefs.getBoolean(KEY_IS_CHINA, true)
 
+    fun hasShownChinaUploadNotice(): Boolean = prefs.getBoolean(KEY_HAS_SHOWN_CHINA_UPLOAD_NOTICE, false)
+
+    fun setHasShownChinaUploadNotice(shown: Boolean = true) {
+        prefs.edit().putBoolean(KEY_HAS_SHOWN_CHINA_UPLOAD_NOTICE, shown).apply()
+    }
+
     fun getDsid(): String? = prefs.getString(KEY_DSID, null)
 
     fun getCkDatabaseUrl(): String? = prefs.getString(KEY_CK_DB_URL, null)
@@ -103,5 +109,6 @@ class SessionManager(context: Context) {
         private const val KEY_CK_DB_URL = "ck_database_url"
         private const val KEY_IS_LOGGED_IN = "is_logged_in"
         private const val KEY_SESSION_GENERATION = "session_generation"
+        private const val KEY_HAS_SHOWN_CHINA_UPLOAD_NOTICE = "has_shown_china_upload_notice"
     }
 }

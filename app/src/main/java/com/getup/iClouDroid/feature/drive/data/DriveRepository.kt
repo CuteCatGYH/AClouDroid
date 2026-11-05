@@ -12,6 +12,7 @@ import com.getup.iClouDroid.data.lock.DataMutationLock
 import com.getup.iClouDroid.data.session.SessionManager
 import com.getup.iClouDroid.feature.drive.data.db.DriveItemEntity
 import com.getup.iClouDroid.feature.drive.data.db.DriveUploadEntity
+import com.getup.iClouDroid.feature.drive.work.DriveUploadWorker
 import com.getup.icloudcore.Icloudcore
 import java.io.File
 import kotlinx.coroutines.CancellationException
@@ -450,9 +451,18 @@ class DriveRepository(
                             JSONObject(Icloudcore.getSessionStateSummary())
                         }.getOrNull()
 
+                        // `docws` must be checked too, not just `drivews`.
+                        //
+                        // Uploads and downloads resolve their endpoint from
+                        // `webservices.docws`, so a session with drivews but no docws passed this
+                        // guard and then failed inside the Go call with
+                        // `AUTH_EXPIRED: docws endpoint is not set`. That is a terminal error with
+                        // no retry, so a queued file was marked FAILED instead of waiting for the
+                        // session to finish initialising — observed right after a cold start.
                         val hasActiveSession = summaryJson != null &&
                             summaryJson.optBoolean("hasAuthToken", false) &&
-                            summaryJson.optString("drivewsURL", "").isNotBlank()
+                            summaryJson.optString("drivewsURL", "").isNotBlank() &&
+                            summaryJson.optString("docwsURL", "").isNotBlank()
 
                         if (hasActiveSession) return@withContext Result.success(Unit)
                     }
@@ -743,6 +753,43 @@ class DriveRepository(
         }
     }
 
+    suspend fun retryUpload(uploadId: Long): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val upload = database.driveUploadDao().getById(uploadId)
+            if (upload != null) {
+                uploadQueue.retryUpload(uploadId)
+                Log.i(TAG, "Retrying upload #$uploadId for ${upload.filename}")
+                DriveUploadWorker.enqueue(appContext)
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "retryUpload failed for #$uploadId", e)
+            Result.failure(e)
+        }
+    }
+
+    /**
+     * Returns a user-facing reason when [filesize] can never be uploaded by this account, else null.
+     *
+     * The ceiling is a property of the account's region, not of the app (ISS-057): the same 1.96 GB
+     * file uploads fine on icloud.com and returns 413 on icloud.com.cn. International accounts
+     * therefore report a limit of 0 and must never be blocked here.
+     *
+     * Failing open on any error is deliberate — a broken region probe should degrade to "try the
+     * upload" rather than silently refusing valid files.
+     */
+    private fun checkRegionUploadLimit(filesize: Long): String? {
+        val info: JSONObject = runCatching {
+            JSONObject(Icloudcore.getDriveUploadLimitInfo())
+        }.getOrNull() ?: return null
+
+        val limit = info.optLong("singleFileLimitBytes", 0L)
+        if (limit <= 0L || filesize <= limit) return null
+
+        return "文件过大 (${formatSize(filesize)})。当前账号（云上贵州区）不支持超过 " +
+            "${formatSize(limit)} 的单文件上传，这是国区特有限制，外区账号不受此限制。"
+    }
+
     suspend fun executeUpload(uploadId: Long): Result<String> = withContext(Dispatchers.IO) {
         wipeBlocked()?.let { return@withContext Result.failure(it) }
 
@@ -761,11 +808,34 @@ class DriveRepository(
             return@withContext Result.failure(wipeErr)
         }
 
-        // Mark status as UPLOADING immediately so UI shows "传输中..." while waiting for lock / streaming
-        uploadQueue.markUploading(uploadId)
+        // Reject a file the account's region can never upload BEFORE spending minutes hashing it.
+        //
+        // 云上贵州 accounts cap a single POST at 1 GiB (ISS-057) — measured, and confirmed against
+        // three accounts. Without this check the user waits through a full SHA-256 pass and a
+        // partial transfer only to get a 413, which is the exact complaint that started this
+        // investigation. International accounts report a limit of 0 and are never blocked.
+        checkRegionUploadLimit(upload.filesize)?.let { reason ->
+            uploadQueue.markFailed(uploadId, reason)
+            Log.w(TAG, "Upload #$uploadId rejected before transfer: $reason")
+            runCatching { File(upload.localPath).delete() }
+            return@withContext Result.failure(Exception(reason))
+        }
 
         coroutineScope {
             dataMutationLock.withLock {
+                // Only NOW claim the task.
+                //
+                // This used to run *before* `withLock`, on the theory that the UI should say
+                // "传输中..." as soon as work started. What it actually did was display
+                // "传输中" for the entire time the task was blocked on `dataMutationLock` —
+                // which `syncIncremental` holds while walking the folder tree, and the photo
+                // refresh takes it too. On device upload #8 sat at `UPLOADING / 0 bytes` for
+                // over two minutes with zero worker logs, because it had not been started at
+                // all; it was waiting for a lock the UI never mentioned.
+                //
+                // Marking inside the lock makes the displayed state mean what it says: QUEUED
+                // while waiting, UPLOADING only once this task actually owns the transfer.
+                uploadQueue.markUploading(uploadId)
                 // Per-phase stopwatch rather than one global clock.
                 //
                 // A single startTime produced a nonsensical speed the moment the phase changed:
@@ -866,25 +936,27 @@ class DriveRepository(
                             // CloudDocs rejects a second file with the same name in the same folder
                             // with 409 UNIQUE_FIELD_FAILURE.
                             rawErrMsg.contains("UNIQUE_FIELD_FAILURE") -> "同名文件已存在：${upload.filename}"
+
+                            // 413 is a REGION limit, not an app limit (ISS-057).
+                            //
+                            // Captured from three accounts with the SAME 1.96 GB file: both
+                            // icloud.com.cn (云上贵州) accounts returned 413 while the icloud.com
+                            // account uploaded it in a single POST. The requests were byte-for-byte
+                            // the same protocol, so this cannot be fixed client-side — and it must
+                            // not be reported as a generic failure, because the user would reasonably
+                            // blame the app rather than their account region.
                             rawErrMsg.contains("413") || rawErrMsg.contains("Too Large") ->
-                                "文件过大 (${formatSize(upload.filesize)})，服务端拒绝了本次上传"
+                                "文件过大 (${formatSize(upload.filesize)})。" +
+                                    "当前账号（云上贵州区）不支持超过 1 GB 的单文件上传，这是账号区域限制。"
+
                             else -> rawErrMsg
                         }
                         uploadQueue.markFailed(uploadId, displayErr)
                         Log.w(TAG, "Upload #$uploadId failed for ${upload.filename}: $displayErr")
 
-                        // Drop the cached copy on failure too.
-                        //
-                        // Only the success path used to delete it, so every rejected large file
-                        // left a full-size copy in cacheDir forever. Four failed attempts (1.4 GB
-                        // drone clips + 1.2 GB test files) accumulated 5.3 GB on the device before
-                        // anyone noticed — and the most likely uploads to fail are exactly the
-                        // biggest ones.
-                        //
-                        // The row keeps its metadata, so the user can still see what failed and
-                        // retry, but the bytes are gone.
-                        runCatching { File(upload.localPath).delete() }
-
+                        // Keep the cached copy while the failed task remains in the queue so the user
+                        // can click Retry. When the user dismisses/cancels the item, `cancelUpload`
+                        // deletes the file. `sweepOrphanedUploadCache` prunes old orphans on startup.
                         Result.failure(Exception(displayErr))
                     }
                 } catch (ce: kotlinx.coroutines.CancellationException) {

@@ -90,6 +90,18 @@ class DriveUploadQueueTest {
             }
         }
 
+        override suspend fun resetForRetry(id: Long, updatedAt: Long) {
+            uploads[id]?.let {
+                uploads[id] = it.copy(
+                    status = DriveUploadStatus.QUEUED,
+                    errorMessage = null,
+                    speedText = null,
+                    bytesUploaded = 0L,
+                    updatedAt = updatedAt
+                )
+            }
+        }
+
         override suspend fun deleteById(id: Long) {
             uploads.remove(id)
         }
@@ -264,6 +276,38 @@ class DriveUploadQueueTest {
             "failure reason must survive so the banner can show it",
             visible.first().errorMessage!!.contains("文件过大")
         )
+    }
+
+    /** Retrying a failed task resets its status to QUEUED and clears failure metadata. */
+    @Test
+    fun testRetryUpload() = runBlocking {
+        val dao = FakeDriveUploadDao()
+        val queue = DriveUploadQueue(dao)
+
+        val id = queue.enqueue(
+            DriveUploadEntity(
+                localPath = "/cache/failed.txt",
+                targetFolderDrivewsId = "FOLDER::root",
+                targetFolderPath = "/",
+                filename = "failed.txt",
+                filesize = 1000L,
+                mimeType = "text/plain"
+            )
+        )
+        queue.markUploading(id)
+        queue.markFailed(id, "network error")
+
+        assertNull(queue.getNextPending())
+
+        queue.retryUpload(id)
+
+        val pending = queue.getNextPending()
+        assertNotNull(pending)
+        assertEquals(id, pending!!.id)
+        assertEquals(DriveUploadStatus.QUEUED, pending.status)
+        assertNull(pending.errorMessage)
+        assertEquals(0L, pending.bytesUploaded)
+        assertNull(pending.speedText)
     }
 
     /** Old failures must fall outside the window instead of accumulating forever. */
