@@ -661,7 +661,7 @@ adb logcat | grep -E "Glide|VideoDecoder|setDataSource|Failed to find any load p
 | 当前激活的云端源 | `content call --uri content://media/ --method get_cloud_provider` |
 | 白名单是否生效 | `dumpsys activity provider .../MediaProvider \| grep allowedCloudProviderPackages` |
 | 系统缓存的代数 | `dumpsys ... \| grep cachedCloudMediaCollectionInfo` |
-| 预览文件是否落盘 | `run-as com.getup.iClouDroid ls -la cache/cmp_previews` |
+| 预览文件是否落盘 | `run-as app.acloudroid.qwq ls -la cache/cmp_previews` |
 | 文件格式 | `run-as ... cat xxx.thumb \| head -c 12 \| od -An -tx1`（`ffd8ffe0` = JPEG）|
 
 自己的日志侧也加了两个可归因信号：

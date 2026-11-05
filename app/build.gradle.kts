@@ -5,13 +5,13 @@ plugins {
 }
 
 android {
-    namespace = "com.getup.iClouDroid"
+    namespace = "app.acloudroid.qwq"
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
-        applicationId = "com.getup.iClouDroid"
+        applicationId = "app.acloudroid.qwq"
         minSdk = 29
         targetSdk = 37
         versionCode = 1

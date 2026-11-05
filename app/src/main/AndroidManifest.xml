@@ -69,7 +69,7 @@
         <!-- CloudMediaProvider for Android 13+ (API 33) -->
         <provider
             android:name=".provider.ICloudMediaProvider"
-            android:authorities="com.getup.iClouDroid.cloudmedia"
+            android:authorities="app.acloudroid.qwq.cloudmedia"
             android:enabled="@bool/is_cloud_media_provider_enabled"
             android:exported="true"
             android:permission="com.android.providers.media.permission.MANAGE_CLOUD_MEDIA_PROVIDERS">
@@ -83,7 +83,7 @@
             android:name=".feature.drive.data.DriveDownloadReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.getup.iClouDroid.ACTION_CANCEL_DOWNLOAD" />
+                <action android:name="app.acloudroid.qwq.ACTION_CANCEL_DOWNLOAD" />
             </intent-filter>
         </receiver>
 
