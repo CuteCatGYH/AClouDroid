@@ -25,6 +25,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -204,8 +205,8 @@ class DriveRepository(
      */
     suspend fun syncIncremental(
         maxContainers: Int = DEFAULT_SYNC_CONTAINER_BUDGET
-    ): Result<DriveDeltaPlanner.SyncReport> = dataMutationLock.withLock {
-        withContext(Dispatchers.IO) { syncIncrementalLocked(maxContainers) }
+    ): Result<DriveDeltaPlanner.SyncReport> = withContext(Dispatchers.IO) {
+        syncIncrementalLocked(maxContainers)
     }
 
     private suspend fun syncIncrementalLocked(
@@ -345,12 +346,14 @@ class DriveRepository(
                 // Stamp the successful probe so the staleness window restarts. Without this a
                 // container is judged stale forever once DEFAULT_MAX_AGE_MS has passed, even
                 // though every probe is succeeding.
-                dao.updateProbeResult(
-                    drivewsid = candidate.drivewsid,
-                    etag = freshEtag,
-                    childCount = probe?.directChildrenCount ?: 0,
-                    now = now
-                )
+                dataMutationLock.withLock {
+                    dao.updateProbeResult(
+                        drivewsid = candidate.drivewsid,
+                        etag = freshEtag,
+                        childCount = probe?.directChildrenCount ?: 0,
+                        now = now
+                    )
+                }
                 SyncOne.Skipped
             }
 
@@ -388,22 +391,24 @@ class DriveRepository(
         val children = DriveItemMapper.parseFolderList(candidate.drivewsid, json)
             ?: return SyncOne.Failed("响应不是有效的目录列表")
 
-        val freshIds = children.mapTo(HashSet()) { it.drivewsid }
-        val localIds = dao.childIdsOf(candidate.drivewsid)
-        val removedIds = DriveDeltaPlanner.removedChildren(localIds, freshIds)
+        return dataMutationLock.withLock {
+            val freshIds = children.mapTo(HashSet()) { it.drivewsid }
+            val localIds = dao.childIdsOf(candidate.drivewsid)
+            val removedIds = DriveDeltaPlanner.removedChildren(localIds, freshIds)
 
-        dao.replaceChildrenRaw(candidate.drivewsid, children)
-        dao.markChildrenFetched(candidate.drivewsid, now)
+            dao.replaceChildrenRaw(candidate.drivewsid, children)
+            dao.markChildrenFetched(candidate.drivewsid, now)
 
-        if (removedIds.isNotEmpty()) {
-            // A removed folder takes its whole subtree with it, otherwise the descendants stay
-            // cached pointing at a row that no longer exists (orphans the UI can never reach).
-            val subtree = collectSubtree(removedIds)
-            dao.deleteByIds(subtree)
-            Log.d(TAG, "syncIncremental: purged ${subtree.size} rows under ${candidate.drivewsid}")
+            if (removedIds.isNotEmpty()) {
+                // A removed folder takes its whole subtree with it, otherwise the descendants stay
+                // cached pointing at a row that no longer exists (orphans the UI can never reach).
+                val subtree = collectSubtree(removedIds)
+                dao.deleteByIds(subtree)
+                Log.d(TAG, "syncIncremental: purged ${subtree.size} rows under ${candidate.drivewsid}")
+            }
+
+            SyncOne.Listed(removed = removedIds.size)
         }
-
-        return SyncOne.Listed(removed = removedIds.size)
     }
 
     /**
@@ -659,16 +664,7 @@ class DriveRepository(
 
             val id = uploadQueue.enqueue(uploadEntity)
             Log.i(TAG, "Enqueued upload #$id for $filename into $targetFolderPath")
-            // NOTE: deliberately does NOT start a processor here.
-            //
-            // It used to call triggerUploadProcessor() while DriveViewModel.uploadFiles() also
-            // called DriveUploadWorker.enqueue() — two engines draining the same queue. Observed on
-            // device: upload #20 claimed simultaneously by both, hashed and streamed twice, and the
-            // WorkManager copy restarting from zero after being cancelled.
-            //
-            // DriveUploadWorker is now the single drain engine (it survives process death, which the
-            // in-process coroutine does not). Keeping the trigger here would only reintroduce the
-            // race, and the shared drain mutex would then make the UI path block for no benefit.
+            triggerUploadProcessor()
             Result.success(id)
         } catch (e: Exception) {
             Log.e(TAG, "enqueueUpload failed", e)
@@ -821,137 +817,144 @@ class DriveRepository(
             return@withContext Result.failure(Exception(reason))
         }
 
-        coroutineScope {
-            dataMutationLock.withLock {
-                // Only NOW claim the task.
-                //
-                // This used to run *before* `withLock`, on the theory that the UI should say
-                // "传输中..." as soon as work started. What it actually did was display
-                // "传输中" for the entire time the task was blocked on `dataMutationLock` —
-                // which `syncIncremental` holds while walking the folder tree, and the photo
-                // refresh takes it too. On device upload #8 sat at `UPLOADING / 0 bytes` for
-                // over two minutes with zero worker logs, because it had not been started at
-                // all; it was waiting for a lock the UI never mentioned.
-                //
-                // Marking inside the lock makes the displayed state mean what it says: QUEUED
-                // while waiting, UPLOADING only once this task actually owns the transfer.
-                uploadQueue.markUploading(uploadId)
-                // Per-phase stopwatch rather than one global clock.
-                //
-                // A single startTime produced a nonsensical speed the moment the phase changed:
-                // right after the hash finished, `read` reset to 0 for the upload phase, but the
-                // elapsed time still included the whole hash, so the first upload samples read as
-                // "0 MB/s" (or an absurdly low rate) until the average caught up.
-                var phaseStartMs = System.currentTimeMillis()
-                var lastPhase = ""
+        uploadQueue.markUploading(uploadId)
 
-                val pollJob = launch {
-                    while (isActive) {
-                        kotlinx.coroutines.delay(250)
-                        val pObj: JSONObject = runCatching {
-                            JSONObject(Icloudcore.getDriveUploadProgress(upload.localPath))
-                        }.getOrNull() ?: continue
+        var phaseStartMs = System.currentTimeMillis()
+        var lastPhase = ""
 
-                        val read = pObj.optLong("bytesUploaded", 0L)
-                        val total = pObj.optLong("totalBytes", upload.filesize)
-                        val phase = pObj.optString("phase", "UPLOAD")
-                        val now = System.currentTimeMillis()
+        val pollJob = scope.launch(Dispatchers.IO) {
+            while (isActive) {
+                kotlinx.coroutines.delay(250)
+                val pObj: JSONObject = runCatching {
+                    JSONObject(Icloudcore.getDriveUploadProgress(upload.localPath))
+                }.getOrNull() ?: continue
 
-                        if (phase != lastPhase) {
-                            lastPhase = phase
-                            phaseStartMs = now
-                        }
+                val read = pObj.optLong("bytesUploaded", 0L)
+                val total = pObj.optLong("totalBytes", upload.filesize)
+                val phase = pObj.optString("phase", "UPLOAD")
+                val now = System.currentTimeMillis()
 
-                        // The hash phase hashes the whole file *before* any network traffic, so a
-                        // 178 MB APK spends a real, measurable amount of time there. Previously
-                        // this window reported `read == 0` and the UI fell back to a static
-                        // "传输中..." for minutes, which read as "stuck".
-                        val pct = if (total > 0) ((read * 100) / total).toInt().coerceIn(0, 100) else 0
-                        val speedText = when (phase) {
-                            "HASH" -> "校验中 $pct%"
-                            "COMMIT" -> "正在写入云盘..."
-                            else -> {
-                                val elapsedSec = ((now - phaseStartMs) / 1000.0).coerceAtLeast(0.001)
-                                val bps = (read / elapsedSec).toLong()
-                                "${formatSpeed(bps)} ($pct%)"
-                            }
-                        }
+                if (phase != lastPhase) {
+                    lastPhase = phase
+                    phaseStartMs = now
+                }
 
-                        uploadQueue.updateProgressAndSpeed(uploadId, read, speedText)
+                val pct = if (total > 0) ((read * 100) / total).toInt().coerceIn(0, 100) else 0
+                val speedText = when (phase) {
+                    "HASH" -> "校验中 $pct%"
+                    "COMMIT" -> "正在写入云盘..."
+                    else -> {
+                        val elapsedSec = ((now - phaseStartMs) / 1000.0).coerceAtLeast(0.001)
+                        val bps = (read / elapsedSec).toLong()
+                        "${formatSpeed(bps)} ($pct%)"
                     }
                 }
 
-                try {
-                    var jsonResult = Icloudcore.uploadDriveItemByPath(
+                uploadQueue.updateProgressAndSpeed(uploadId, read, speedText)
+            }
+        }
+
+        try {
+            var jsonResult = Icloudcore.uploadDriveItemByPath(
+                upload.localPath,
+                upload.filename,
+                upload.mimeType,
+                upload.targetFolderPath
+            )
+
+            var obj = JSONObject(jsonResult)
+            if (!obj.optBoolean("success", false) && isAuthError(jsonResult)) {
+                Log.w(TAG, "executeUpload got auth error, forcing session rebuild…")
+                val rebuildCheck = ensureGoSession(force = true)
+                if (rebuildCheck.isSuccess) {
+                    jsonResult = Icloudcore.uploadDriveItemByPath(
                         upload.localPath,
                         upload.filename,
                         upload.mimeType,
                         upload.targetFolderPath
                     )
+                    obj = JSONObject(jsonResult)
+                }
+            }
 
-                    var obj = JSONObject(jsonResult)
-                    if (!obj.optBoolean("success", false) && isAuthError(jsonResult)) {
-                        Log.w(TAG, "executeUpload got auth error, forcing session rebuild…")
-                        val rebuildCheck = ensureGoSession(force = true)
-                        if (rebuildCheck.isSuccess) {
-                            jsonResult = Icloudcore.uploadDriveItemByPath(
-                                upload.localPath,
-                                upload.filename,
-                                upload.mimeType,
-                                upload.targetFolderPath
-                            )
-                            obj = JSONObject(jsonResult)
-                        }
-                    }
+            val uploadElapsedSec = ((System.currentTimeMillis() - phaseStartMs) / 1000.0).coerceAtLeast(0.001)
+            val speedText = formatSpeed((upload.filesize / uploadElapsedSec).toLong())
 
-                    val uploadElapsedSec = ((System.currentTimeMillis() - phaseStartMs) / 1000.0).coerceAtLeast(0.001)
-                    val speedText = formatSpeed((upload.filesize / uploadElapsedSec).toLong())
+            if (obj.optBoolean("success", false)) {
+                val docId = obj.optString("documentId", "")
+                val drivewsid = obj.optString("drivewsId", "").ifBlank {
+                    if (docId.isNotBlank()) "FILE::$docId" else "FILE::${upload.targetFolderDrivewsId}::$uploadId"
+                }
 
-                    if (obj.optBoolean("success", false)) {
-                        val docId = obj.optString("documentId", "")
-                        uploadQueue.updateProgressAndSpeed(uploadId, upload.filesize, speedText)
-                        uploadQueue.markSuccess(uploadId, docId)
-                        Log.i(TAG, "Upload #$uploadId succeeded for ${upload.filename}, documentId=$docId, speed=$speedText")
+                // Upsert the newly uploaded file locally so it shows immediately
+                // even if server-side index refresh has a slight delay
+                val now = System.currentTimeMillis()
+                val newEntity = DriveItemEntity(
+                    drivewsid = drivewsid,
+                    docwsid = docId,
+                    parentDrivewsid = upload.targetFolderDrivewsId,
+                    name = upload.filename,
+                    type = DriveItemEntity.TYPE_FILE,
+                    zone = DriveItemEntity.CLOUD_DOCS_ZONE,
+                    size = upload.filesize,
+                    dateModified = null,
+                    dateChanged = null,
+                    dateCreated = null,
+                    etag = null,
+                    extension = upload.filename.substringAfterLast('.', "").takeIf { it.isNotBlank() },
+                    directChildrenCount = 0,
+                    itemId = docId,
+                    iconUrl = null,
+                    childrenFetched = false,
+                    lastSyncedAt = now
+                )
+                dataMutationLock.withLock {
+                    dao.upsert(newEntity)
+                }
 
-                        // Clean up cached upload copy
-                        runCatching { File(upload.localPath).delete() }
+                uploadQueue.updateProgressAndSpeed(uploadId, upload.filesize, speedText)
+                uploadQueue.markSuccess(uploadId, docId)
+                Log.i(TAG, "Upload #$uploadId succeeded for ${upload.filename}, documentId=$docId, speed=$speedText")
 
-                        // Trigger folder refresh to update current directory listing
-                        refreshFolder(upload.targetFolderDrivewsId)
+                // Clean up cached upload copy
+                runCatching { File(upload.localPath).delete() }
 
-                        Result.success(docId)
-                    } else {
-                        val rawErrMsg = obj.optString("errorMessage", "文件上传失败")
+                // Trigger folder refresh to update current directory listing
+                refreshFolder(upload.targetFolderDrivewsId)
 
-                        // Always log the server's verbatim message before rewriting it.
-                        //
-                        // The friendly-text branch below replaces the payload with a Chinese string,
-                        // which is exactly how the real cause of a large-file rejection became
-                        // undiagnosable: the log said "文件过大 … 服务端拒绝了本次上传" with no
-                        // indication of WHICH endpoint refused or with what code.
-                        Log.w(TAG, "Upload #$uploadId failed raw: status=${obj.optInt("httpStatus", 0)} " +
-                            "code=${obj.optString("errorCode", "?")} size=${upload.filesize} msg=$rawErrMsg")
+                Result.success(docId)
+            } else {
+                val rawErrMsg = obj.optString("errorMessage", "文件上传失败")
 
-                        val displayErr = when {
-                            // CloudDocs rejects a second file with the same name in the same folder
-                            // with 409 UNIQUE_FIELD_FAILURE.
-                            rawErrMsg.contains("UNIQUE_FIELD_FAILURE") -> "同名文件已存在：${upload.filename}"
+                // Always log the server's verbatim message before rewriting it.
+                //
+                // The friendly-text branch below replaces the payload with a Chinese string,
+                // which is exactly how the real cause of a large-file rejection became
+                // undiagnosable: the log said "文件过大 … 服务端拒绝了本次上传" with no
+                // indication of WHICH endpoint refused or with what code.
+                Log.w(TAG, "Upload #$uploadId failed raw: status=${obj.optInt("httpStatus", 0)} " +
+                    "code=${obj.optString("errorCode", "?")} size=${upload.filesize} msg=$rawErrMsg")
 
-                            // 413 is a REGION limit, not an app limit (ISS-057).
-                            //
-                            // Captured from three accounts with the SAME 1.96 GB file: both
-                            // icloud.com.cn (云上贵州) accounts returned 413 while the icloud.com
-                            // account uploaded it in a single POST. The requests were byte-for-byte
-                            // the same protocol, so this cannot be fixed client-side — and it must
-                            // not be reported as a generic failure, because the user would reasonably
-                            // blame the app rather than their account region.
-                            rawErrMsg.contains("413") || rawErrMsg.contains("Too Large") ->
-                                "文件过大 (${formatSize(upload.filesize)})。" +
-                                    "当前账号（云上贵州区）不支持超过 1 GB 的单文件上传，这是账号区域限制。"
+                val displayErr = when {
+                    // CloudDocs rejects a second file with the same name in the same folder
+                    // with 409 UNIQUE_FIELD_FAILURE.
+                    rawErrMsg.contains("UNIQUE_FIELD_FAILURE") -> "同名文件已存在：${upload.filename}"
 
-                            else -> rawErrMsg
-                        }
-                        uploadQueue.markFailed(uploadId, displayErr)
+                    // 413 is a REGION limit, not an app limit (ISS-057).
+                    //
+                    // Captured from three accounts with the SAME 1.96 GB file: both
+                    // icloud.com.cn (云上贵州) accounts returned 413 while the icloud.com
+                    // account uploaded it in a single POST. The requests were byte-for-byte
+                    // the same protocol, so this cannot be fixed client-side — and it must
+                    // not be reported as a generic failure, because the user would reasonably
+                    // blame the app rather than their account region.
+                    rawErrMsg.contains("413") || rawErrMsg.contains("Too Large") ->
+                        "文件过大 (${formatSize(upload.filesize)})。" +
+                            "当前账号（云上贵州区）不支持超过 1 GB 的单文件上传，这是账号区域限制。"
+
+                    else -> rawErrMsg
+                }
+                uploadQueue.markFailed(uploadId, displayErr)
                         Log.w(TAG, "Upload #$uploadId failed for ${upload.filename}: $displayErr")
 
                         // Keep the cached copy while the failed task remains in the queue so the user
@@ -975,8 +978,187 @@ class DriveRepository(
                 } finally {
                     pollJob.cancel()
                 }
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // D6 — Directory operations (Create, Rename, Move, Delete/Trash)
+    // ----------------------------------------------------------------------------------------
+
+    /**
+     * Creates a new folder under [parentDrivewsId] with the given [folderName].
+     */
+    suspend fun createFolder(parentDrivewsId: String, folderName: String): Result<DriveItemEntity> = withContext(Dispatchers.IO) {
+        wipeBlocked()?.let { return@withContext Result.failure(it) }
+
+        val sessionCheck = ensureGoSession()
+        if (sessionCheck.isFailure) {
+            return@withContext Result.failure(sessionCheck.exceptionOrNull() ?: Exception("会话建立失败"))
+        }
+
+        val jsonStr = Icloudcore.createDriveFolder(parentDrivewsId, folderName)
+        val obj = JSONObject(jsonStr)
+        if (!obj.optBoolean("success", false)) {
+            val errMsg = obj.optString("errorMessage", "新建文件夹失败")
+            return@withContext Result.failure(Exception(errMsg))
+        }
+
+        val itemsArr = obj.optJSONArray("items")
+        if (itemsArr == null || itemsArr.length() == 0) {
+            return@withContext Result.failure(Exception("服务端未返回新文件夹信息"))
+        }
+
+        val firstObj = itemsArr.getJSONObject(0)
+        val entity = DriveItemMapper.parseItem(firstObj, parentDrivewsId)
+            ?: return@withContext Result.failure(Exception("解析新文件夹属性失败"))
+
+        dataMutationLock.withLock {
+            dao.upsert(entity)
+        }
+
+        refreshFolder(parentDrivewsId)
+        Result.success(entity)
+    }
+
+    /**
+     * Renames a file or folder identified by [drivewsid] to [newName].
+     */
+    suspend fun renameItem(drivewsid: String, newName: String): Result<Unit> = withContext(Dispatchers.IO) {
+        wipeBlocked()?.let { return@withContext Result.failure(it) }
+
+        val item = dao.getById(drivewsid) ?: return@withContext Result.failure(Exception("找不到指定的项目"))
+
+        val sessionCheck = ensureGoSession()
+        if (sessionCheck.isFailure) {
+            return@withContext Result.failure(sessionCheck.exceptionOrNull() ?: Exception("会话建立失败"))
+        }
+
+        var jsonStr = Icloudcore.renameDriveItem(drivewsid, item.etag.orEmpty(), newName)
+        var obj = JSONObject(jsonStr)
+
+        if (!obj.optBoolean("success", false) && isAuthError(obj.optString("errorCode", ""))) {
+            Log.w(TAG, "renameItem got auth error, forcing session rebuild…")
+            ensureGoSession(force = true)
+            jsonStr = Icloudcore.renameDriveItem(drivewsid, item.etag.orEmpty(), newName)
+            obj = JSONObject(jsonStr)
+        }
+
+        if (!obj.optBoolean("success", false)) {
+            val errMsg = obj.optString("errorMessage", "重命名失败")
+            return@withContext Result.failure(Exception(errMsg))
+        }
+
+        val itemsArr = obj.optJSONArray("items")
+        val newEtag = if (itemsArr != null && itemsArr.length() > 0) {
+            itemsArr.getJSONObject(0).optString("etag", item.etag)
+        } else item.etag
+
+        dataMutationLock.withLock {
+            dao.updateNameAndEtag(drivewsid, newName, newEtag)
+        }
+        refreshFolder(item.parentDrivewsid)
+
+        Result.success(Unit)
+    }
+
+    /**
+     * Moves a set of [items] into the folder [targetDrivewsId].
+     */
+    suspend fun moveItems(items: List<DriveItemEntity>, targetDrivewsId: String): Result<Unit> = withContext(Dispatchers.IO) {
+        if (items.isEmpty()) return@withContext Result.success(Unit)
+        wipeBlocked()?.let { return@withContext Result.failure(it) }
+
+        val sessionCheck = ensureGoSession()
+        if (sessionCheck.isFailure) {
+            return@withContext Result.failure(sessionCheck.exceptionOrNull() ?: Exception("会话建立失败"))
+        }
+
+        val reqArr = JSONArray()
+        items.forEach { item ->
+            val o = JSONObject()
+            o.put("drivewsid", item.drivewsid)
+            o.put("etag", item.etag.orEmpty())
+            reqArr.put(o)
+        }
+
+        var jsonStr = Icloudcore.moveDriveItems(targetDrivewsId, reqArr.toString())
+        var obj = JSONObject(jsonStr)
+
+        if (!obj.optBoolean("success", false) && isAuthError(obj.optString("errorCode", ""))) {
+            Log.w(TAG, "moveItems got auth error, forcing session rebuild…")
+            ensureGoSession(force = true)
+            jsonStr = Icloudcore.moveDriveItems(targetDrivewsId, reqArr.toString())
+            obj = JSONObject(jsonStr)
+        }
+
+        if (!obj.optBoolean("success", false)) {
+            val errMsg = obj.optString("errorMessage", "移动失败")
+            return@withContext Result.failure(Exception(errMsg))
+        }
+
+        val sourceParents = items.map { it.parentDrivewsid }.distinct()
+        dataMutationLock.withLock {
+            items.forEach { item ->
+                dao.updateParentAndEtag(item.drivewsid, targetDrivewsId, item.etag)
             }
         }
+
+        sourceParents.forEach { refreshFolder(it) }
+        refreshFolder(targetDrivewsId)
+
+        Result.success(Unit)
+    }
+
+    /**
+     * Moves a set of [items] to Trash.
+     */
+    suspend fun deleteItems(items: List<DriveItemEntity>): Result<Unit> = withContext(Dispatchers.IO) {
+        if (items.isEmpty()) return@withContext Result.success(Unit)
+        wipeBlocked()?.let { return@withContext Result.failure(it) }
+
+        val sessionCheck = ensureGoSession()
+        if (sessionCheck.isFailure) {
+            return@withContext Result.failure(sessionCheck.exceptionOrNull() ?: Exception("会话建立失败"))
+        }
+
+        val reqArr = JSONArray()
+        items.forEach { item ->
+            val o = JSONObject()
+            o.put("drivewsid", item.drivewsid)
+            o.put("etag", item.etag.orEmpty())
+            reqArr.put(o)
+        }
+
+        var jsonStr = Icloudcore.moveDriveItemsToTrash(reqArr.toString())
+        var obj = JSONObject(jsonStr)
+
+        if (!obj.optBoolean("success", false) && isAuthError(obj.optString("errorCode", ""))) {
+            Log.w(TAG, "deleteItems got auth error, forcing session rebuild…")
+            ensureGoSession(force = true)
+            jsonStr = Icloudcore.moveDriveItemsToTrash(reqArr.toString())
+            obj = JSONObject(jsonStr)
+        }
+
+        if (!obj.optBoolean("success", false)) {
+            val errMsg = obj.optString("errorMessage", "移入最近删除失败")
+            return@withContext Result.failure(Exception(errMsg))
+        }
+
+        val ids = items.map { it.drivewsid }
+        val sourceParents = items.map { it.parentDrivewsid }.distinct()
+
+        dataMutationLock.withLock {
+            dao.deleteByIds(ids)
+        }
+        sourceParents.forEach { refreshFolder(it) }
+
+        Result.success(Unit)
+    }
+
+    /**
+     * Returns all cached containers for the move target picker.
+     */
+    suspend fun getAllContainers(): List<DriveItemEntity> = withContext(Dispatchers.IO) {
+        dao.getAllContainers()
     }
 
     // ----------------------------------------------------------------------------------------

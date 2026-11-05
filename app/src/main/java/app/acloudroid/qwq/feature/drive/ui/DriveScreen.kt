@@ -1,5 +1,7 @@
 package app.acloudroid.qwq.feature.drive.ui
 
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -20,25 +22,44 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DriveFileMove
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -108,10 +129,17 @@ fun DriveScreen(
     contentPadding: PaddingValues = PaddingValues()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val allContainers by viewModel.allContainers.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val container = rememberAppContainer()
     val imageLoader = ICloudImageLoaderFactory.get(context, container)
     var showChinaUploadLimitDialog by remember { mutableStateOf(false) }
+
+    var showCreateFolderDialog by remember { mutableStateOf(false) }
+    var showTrashWebDialog by remember { mutableStateOf(false) }
+    var renameTargetItem by remember { mutableStateOf<DriveItemEntity?>(null) }
+    var deleteTargetItem by remember { mutableStateOf<DriveItemEntity?>(null) }
+    var moveTargetItem by remember { mutableStateOf<DriveItemEntity?>(null) }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetMultipleContents()
@@ -146,9 +174,75 @@ fun DriveScreen(
         )
     }
 
+    if (showCreateFolderDialog) {
+        CreateFolderDialog(
+            onDismiss = { showCreateFolderDialog = false },
+            onConfirm = { folderName ->
+                showCreateFolderDialog = false
+                viewModel.createFolder(folderName)
+            }
+        )
+    }
+
+    renameTargetItem?.let { item ->
+        RenameDialog(
+            item = item,
+            onDismiss = { renameTargetItem = null },
+            onConfirm = { newName ->
+                renameTargetItem = null
+                viewModel.renameItem(item, newName)
+            }
+        )
+    }
+
+    deleteTargetItem?.let { item ->
+        DeleteConfirmDialog(
+            item = item,
+            onDismiss = { deleteTargetItem = null },
+            onConfirm = {
+                deleteTargetItem = null
+                viewModel.deleteItems(listOf(item))
+            }
+        )
+    }
+
+    if (showTrashWebDialog) {
+        ICloudDriveTrashWebDialog(
+            onDismiss = { showTrashWebDialog = false }
+        )
+    }
+
+    moveTargetItem?.let { item ->
+        MoveTargetPickerModal(
+            item = item,
+            viewModel = viewModel,
+            onDismiss = { moveTargetItem = null },
+            onConfirm = { targetFolderId ->
+                moveTargetItem = null
+                viewModel.moveItems(listOf(item), targetFolderId)
+            }
+        )
+    }
+
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(state.currentDrivewsid) {
+        val pos = viewModel.getScrollPosition(state.currentDrivewsid)
+        if (pos != null) {
+            listState.scrollToItem(pos.first, pos.second)
+        } else {
+            listState.scrollToItem(0, 0)
+        }
+    }
+
     // Intercept back while inside a folder. At the root we let the event through so the shell
     // behaves normally.
     BackHandler(enabled = state.canGoUp) {
+        viewModel.saveScrollPosition(
+            state.currentDrivewsid,
+            listState.firstVisibleItemIndex,
+            listState.firstVisibleItemScrollOffset
+        )
         viewModel.goUp()
     }
 
@@ -156,9 +250,18 @@ fun DriveScreen(
         Column(modifier = Modifier.fillMaxSize().padding(contentPadding)) {
             DriveHeader(
                 state = state,
-                onCrumbClick = viewModel::navigateTo,
+                onCrumbClick = { index ->
+                    viewModel.saveScrollPosition(
+                        state.currentDrivewsid,
+                        listState.firstVisibleItemIndex,
+                        listState.firstVisibleItemScrollOffset
+                    )
+                    viewModel.navigateTo(index)
+                },
                 onRefresh = viewModel::refresh,
-                onSync = viewModel::syncIncremental
+                onSync = viewModel::syncIncremental,
+                onCreateFolderClick = { showCreateFolderDialog = true },
+                onOpenTrashWebClick = { showTrashWebDialog = true }
             )
 
             if (state.isRefreshing) {
@@ -220,19 +323,36 @@ fun DriveScreen(
                 }
 
                 else -> {
-                    LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize()
+                    ) {
                         items(state.items, key = { it.drivewsid }) { item ->
                             val taskState = state.downloadTasks[item.drivewsid]
                             DriveItemRow(
                                 item = item,
                                 imageLoader = imageLoader,
                                 onClick = {
-                                    if (item.isContainer) viewModel.open(item)
-                                    else viewModel.onFileClick(item, context)
+                                    if (item.isContainer) {
+                                        viewModel.saveScrollPosition(
+                                            state.currentDrivewsid,
+                                            listState.firstVisibleItemIndex,
+                                            listState.firstVisibleItemScrollOffset
+                                        )
+                                        viewModel.open(item)
+                                    } else {
+                                        viewModel.onFileClick(item, context)
+                                    }
                                 },
                                 onCancelClick = {
                                     viewModel.cancelDownload(item.drivewsid)
                                 },
+                                onRenameClick = { renameTargetItem = item },
+                                onMoveClick = {
+                                    viewModel.loadContainersForMove()
+                                    moveTargetItem = item
+                                },
+                                onDeleteClick = { deleteTargetItem = item },
                                 taskState = taskState
                             )
                             HorizontalDivider(
@@ -276,11 +396,14 @@ private fun DriveHeader(
     state: DriveUiState,
     onCrumbClick: (Int) -> Unit,
     onRefresh: () -> Unit,
-    onSync: () -> Unit
+    onSync: () -> Unit,
+    onCreateFolderClick: () -> Unit,
+    onOpenTrashWebClick: () -> Unit
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .statusBarsPadding()
             .padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 8.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -291,6 +414,12 @@ private fun DriveHeader(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
             )
+            IconButton(onClick = onCreateFolderClick) {
+                Icon(Icons.Default.CreateNewFolder, contentDescription = "新建文件夹")
+            }
+            IconButton(onClick = onOpenTrashWebClick) {
+                Icon(Icons.Default.Delete, contentDescription = "最近删除 (网页端)")
+            }
             IconButton(onClick = onSync, enabled = !state.isSyncing) {
                 Icon(Icons.Default.Sync, contentDescription = "增量同步")
             }
@@ -343,8 +472,13 @@ private fun DriveItemRow(
     imageLoader: coil.ImageLoader,
     onClick: () -> Unit,
     onCancelClick: () -> Unit,
+    onRenameClick: () -> Unit,
+    onMoveClick: () -> Unit,
+    onDeleteClick: () -> Unit,
     taskState: DriveDownloadTaskState? = null
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -390,12 +524,45 @@ private fun DriveItemRow(
                     tint = MaterialTheme.colorScheme.error
                 )
             }
-        } else if (item.isContainer) {
-            Icon(
-                Icons.Default.ChevronRight,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.outlineVariant
-            )
+        } else {
+            Box {
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(
+                        Icons.Default.MoreVert,
+                        contentDescription = "更多操作",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                DropdownMenu(
+                    expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("重命名") },
+                        leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onRenameClick()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("移动") },
+                        leadingIcon = { Icon(Icons.Default.DriveFileMove, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onMoveClick()
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("移入最近删除") },
+                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                        onClick = {
+                            menuExpanded = false
+                            onDeleteClick()
+                        }
+                    )
+                }
+            }
         }
     }
 }
@@ -488,11 +655,288 @@ private fun DriveItemIcon(
                 Icon(
                     Icons.AutoMirrored.Filled.InsertDriveFile,
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    tint = MaterialTheme.colorScheme.secondary
                 )
             }
         }
     }
+}
+
+@Composable
+private fun CreateFolderDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var text by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("新建文件夹") },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                label = { Text("文件夹名称") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(text) },
+                enabled = text.isNotBlank()
+            ) {
+                Text("新建")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
+}
+
+@Composable
+private fun RenameDialog(
+    item: DriveItemEntity,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var text by remember { mutableStateOf(item.displayName) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("重命名") },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                label = { Text("新名称") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(text) },
+                enabled = text.isNotBlank() && text != item.displayName
+            ) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
+}
+
+@Composable
+private fun DeleteConfirmDialog(
+    item: DriveItemEntity,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("移入最近删除") },
+        text = { Text("确定要将“${item.displayName}”移入 iCloud Drive 最近删除吗？") },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("移入最近删除", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ICloudDriveTrashWebDialog(
+    onDismiss: () -> Unit
+) {
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(
+            usePlatformDefaultWidth = false
+        )
+    ) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(
+                                text = "最近删除 (iCloud 网页版)",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "https://www.icloud.com.cn/iclouddrive/",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onDismiss) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "关闭"
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
+                )
+            },
+            modifier = Modifier.fillMaxSize()
+        ) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+            ) {
+                app.acloudroid.qwq.ui.FeatureWebViewScreen(url = "https://www.icloud.com.cn/iclouddrive/")
+            }
+        }
+    }
+}
+
+private data class FolderNavNode(val drivewsid: String, val name: String)
+
+@Composable
+private fun MoveTargetPickerModal(
+    item: DriveItemEntity,
+    viewModel: DriveViewModel,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var pathStack by remember {
+        mutableStateOf(listOf(FolderNavNode(DriveItemEntity.ROOT_DRIVEWSID, "iCloud Drive")))
+    }
+    val currentFolder = pathStack.last()
+
+    val subFolders by remember(currentFolder.drivewsid) {
+        viewModel.observeFolderContainers(currentFolder.drivewsid)
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
+
+    val validFolders = remember(subFolders, item) {
+        subFolders.filter { it.drivewsid != item.drivewsid }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text(
+                    text = "移动“${item.displayName}”至",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (pathStack.size > 1) {
+                        IconButton(
+                            onClick = { pathStack = pathStack.dropLast(1) },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "返回上一级",
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(4.dp))
+                    }
+                    Text(
+                        text = pathStack.joinToString(" > ") { it.name },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        },
+        text = {
+            if (validFolders.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "该目录下无可用子文件夹",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            } else {
+                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
+                    items(validFolders, key = { it.drivewsid }) { containerItem ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable {
+                                    pathStack = pathStack + FolderNavNode(containerItem.drivewsid, containerItem.displayName)
+                                }
+                                .padding(horizontal = 12.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Folder,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = containerItem.displayName,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                if (containerItem.directChildrenCount > 0) {
+                                    Text(
+                                        text = "${containerItem.directChildrenCount} 项",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                            Icon(
+                                Icons.Default.ChevronRight,
+                                contentDescription = "进入",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(currentFolder.drivewsid) },
+                enabled = currentFolder.drivewsid != item.parentDrivewsid
+            ) {
+                Text("移动至此 (${currentFolder.name})")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
 }
 
 private fun subtitleFor(item: DriveItemEntity): String {

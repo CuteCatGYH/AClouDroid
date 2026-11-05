@@ -13,9 +13,11 @@ import app.acloudroid.qwq.feature.drive.data.db.DriveItemEntity
 import app.acloudroid.qwq.feature.drive.data.db.DriveUploadEntity
 import app.acloudroid.qwq.feature.drive.work.DriveUploadWorker
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -82,6 +84,15 @@ class DriveViewModel(
     private val _uiState = MutableStateFlow(DriveUiState())
     val uiState: StateFlow<DriveUiState> = _uiState.asStateFlow()
 
+    /**
+     * Observes sub-folders under [parentDrivewsid] for hierarchical folder picking.
+     */
+    fun observeFolderContainers(parentDrivewsid: String): Flow<List<DriveItemEntity>> {
+        return repository.observeChildren(parentDrivewsid).map { items ->
+            items.filter { it.isContainer }
+        }
+    }
+
     private var observeJob: Job? = null
     private var refreshJob: Job? = null
     private var syncJob: Job? = null
@@ -139,6 +150,16 @@ class DriveViewModel(
             // Kicking it off here still helps on a warm start, where the tree is already cached.
             syncIncremental()
         }
+    }
+
+    private val scrollPositions = mutableMapOf<String, Pair<Int, Int>>()
+
+    fun saveScrollPosition(drivewsid: String, index: Int, offset: Int) {
+        scrollPositions[drivewsid] = index to offset
+    }
+
+    fun getScrollPosition(drivewsid: String): Pair<Int, Int>? {
+        return scrollPositions[drivewsid]
     }
 
     /** Jumps to a crumb by index, truncating everything below it. */
@@ -295,6 +316,86 @@ class DriveViewModel(
     fun cancelDownload(drivewsid: String) {
         viewModelScope.launch {
             repository.cancelDownload(drivewsid)
+        }
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // D6 — Directory Operations (Create, Rename, Move, Delete)
+    // ----------------------------------------------------------------------------------------
+
+    private val _allContainers = MutableStateFlow<List<DriveItemEntity>>(emptyList())
+    val allContainers: StateFlow<List<DriveItemEntity>> = _allContainers.asStateFlow()
+
+    fun loadContainersForMove() {
+        viewModelScope.launch {
+            _allContainers.value = repository.getAllContainers()
+        }
+    }
+
+    /** Creates a new folder under current directory with [folderName]. */
+    fun createFolder(folderName: String) {
+        val trimmed = folderName.trim()
+        if (trimmed.isBlank()) return
+        viewModelScope.launch {
+            val parentId = _uiState.value.currentDrivewsid
+            repository.createFolder(parentId, trimmed).fold(
+                onSuccess = {
+                    Log.i(TAG, "Created folder ${it.name} under $parentId")
+                },
+                onFailure = { e ->
+                    Log.w(TAG, "createFolder failed", e)
+                    _uiState.value = _uiState.value.copy(errorMessage = e.message ?: "新建文件夹失败")
+                }
+            )
+        }
+    }
+
+    /** Renames [item] to [newName]. */
+    fun renameItem(item: DriveItemEntity, newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isBlank() || trimmed == item.name) return
+        viewModelScope.launch {
+            repository.renameItem(item.drivewsid, trimmed).fold(
+                onSuccess = {
+                    Log.i(TAG, "Renamed item ${item.drivewsid} to $trimmed")
+                },
+                onFailure = { e ->
+                    Log.w(TAG, "renameItem failed", e)
+                    _uiState.value = _uiState.value.copy(errorMessage = e.message ?: "重命名失败")
+                }
+            )
+        }
+    }
+
+    /** Moves [items] into [targetDrivewsId]. */
+    fun moveItems(items: List<DriveItemEntity>, targetDrivewsId: String) {
+        if (items.isEmpty() || targetDrivewsId.isBlank()) return
+        viewModelScope.launch {
+            repository.moveItems(items, targetDrivewsId).fold(
+                onSuccess = {
+                    Log.i(TAG, "Moved ${items.size} items to $targetDrivewsId")
+                },
+                onFailure = { e ->
+                    Log.w(TAG, "moveItems failed", e)
+                    _uiState.value = _uiState.value.copy(errorMessage = e.message ?: "移动失败")
+                }
+            )
+        }
+    }
+
+    /** Moves [items] to Trash. */
+    fun deleteItems(items: List<DriveItemEntity>) {
+        if (items.isEmpty()) return
+        viewModelScope.launch {
+            repository.deleteItems(items).fold(
+                onSuccess = {
+                    Log.i(TAG, "Deleted/Trashed ${items.size} items")
+                },
+                onFailure = { e ->
+                    Log.w(TAG, "deleteItems failed", e)
+                    _uiState.value = _uiState.value.copy(errorMessage = e.message ?: "移入最近删除失败")
+                }
+            )
         }
     }
 

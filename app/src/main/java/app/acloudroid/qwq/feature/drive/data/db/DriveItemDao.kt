@@ -50,6 +50,15 @@ interface DriveItemDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(items: List<DriveItemEntity>)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(item: DriveItemEntity)
+
+    @Query("UPDATE drive_items SET name = :name, etag = :etag WHERE drivewsid = :drivewsid")
+    suspend fun updateNameAndEtag(drivewsid: String, name: String, etag: String?)
+
+    @Query("UPDATE drive_items SET parentDrivewsid = :targetParentDrivewsid, etag = :etag WHERE drivewsid = :drivewsid")
+    suspend fun updateParentAndEtag(drivewsid: String, targetParentDrivewsid: String, etag: String?)
+
     /**
      * Replaces a container's listing atomically: drop the old children, insert the new ones.
      *
