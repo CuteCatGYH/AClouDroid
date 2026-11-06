@@ -26,6 +26,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -249,13 +250,16 @@ class PhotoRepository(
     private val scanStateDao = database.scanStateDao()
     internal val scanSeenIdDao = database.scanSeenIdDao()
     private val purgedIdDao = database.purgedIdDao()
-    private val sessionMutex = Mutex()
+    private val sessionMutex get() = sessionManager.sessionMutex
 
     // ----------------------------------------------------------------------------------------
     // URL refresh de-duplication (P2-008)
     // ----------------------------------------------------------------------------------------
 
     private val refreshMutex = Mutex()
+
+    /** Limits concurrent batch URL lookup requests across the app to prevent network & DB starvation. */
+    private val batchRefreshGate = Semaphore(permits = 3)
 
     /** Dedicated scope for sharing in-flight refreshes across concurrent API + Coil callers. */
     private val refreshScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -1345,60 +1349,67 @@ class PhotoRepository(
             }
 
             wipeBlocked()?.let { return@withContext Result.failure(it.exceptionOrNull()!!) }
-            ensureGoSession().onFailure { return@withContext Result.failure(it) }
 
-            try {
-                val payload = JSONArray().apply { unique.forEach { put(it) } }.toString()
-                Log.d(TAG, "refreshUrlsForMasters batch size=${unique.size}")
+            val out = mutableMapOf<String, RefreshedUrls>()
+            // Chunk into batches of max 80 to prevent oversized JSON payloads
+            val chunks = unique.chunked(80)
 
-                var jsonStr = Icloudcore.refreshAssetUrls(payload)
-                if (isAuthError(jsonStr)) {
-                    ensureGoSession(force = true).onFailure { return@withContext Result.failure(it) }
-                    jsonStr = Icloudcore.refreshAssetUrls(payload)
-                }
+            for (chunk in chunks) {
+                val chunkResult = batchRefreshGate.withPermit {
+                    ensureGoSession().onFailure { return@withPermit Result.failure<Map<String, RefreshedUrls>>(it) }
 
-                val json = JSONObject(jsonStr)
-                if (!json.optBoolean("success", false)) {
-                    val err = json.optString("errorMessage", "批量刷新直链失败")
-                    return@withContext Result.failure(Exception(err))
-                }
+                    try {
+                        val payload = JSONArray().apply { chunk.forEach { put(it) } }.toString()
+                        Log.d(TAG, "refreshUrlsForMasters batch size=${chunk.size}")
 
-                val urlsObj = json.optJSONObject("urls")
-                val now = System.currentTimeMillis()
-                // Stamp the refreshed rows with the *current* generation, otherwise they stay
-                // permanently "stale" and every subsequent load re-triggers a lookup.
-                val generation = sessionManager.getSessionGeneration()
-                val out = mutableMapOf<String, RefreshedUrls>()
-
-                database.withTransaction {
-                    for (masterId in unique) {
-                        val masterUrls = urlsObj?.optJSONObject(masterId) ?: continue
-                        val thumb = masterUrls.optString("thumbUrl").ifBlank { null }
-                        val med = masterUrls.optString("medUrl").ifBlank { null }
-                        val orig = masterUrls.optString("originalUrl").ifBlank { null }
-                        val vid = masterUrls.optString("videoComplUrl").ifBlank { null }
-
-                        // `/records/lookup` answers per master, but rows are keyed per asset: several
-                        // assets can share one master, so every row pointing at it receives the same
-                        // fresh signature (each with its own `urlFetchedAt`, which is what the Coil
-                        // interceptor's staleness check reads).
-                        val rows = photoDao.getPhotosByMasterId(masterId)
-                        for (row in rows) {
-                            photoDao.updateUrls(row.id, thumb, med, orig, vid, now, generation)
+                        var jsonStr = Icloudcore.refreshAssetUrls(payload)
+                        if (isAuthError(jsonStr)) {
+                            ensureGoSession(force = true).onFailure { return@withPermit Result.failure<Map<String, RefreshedUrls>>(it) }
+                            jsonStr = Icloudcore.refreshAssetUrls(payload)
                         }
-                        out[masterId] = RefreshedUrls(thumb, med, orig, vid)
+
+                        val json = JSONObject(jsonStr)
+                        if (!json.optBoolean("success", false)) {
+                            val err = json.optString("errorMessage", "批量刷新直链失败")
+                            return@withPermit Result.failure<Map<String, RefreshedUrls>>(Exception(err))
+                        }
+
+                        val urlsObj = json.optJSONObject("urls")
+                        val now = System.currentTimeMillis()
+                        val generation = sessionManager.getSessionGeneration()
+                        val batchOut = mutableMapOf<String, RefreshedUrls>()
+
+                        database.withTransaction {
+                            for (masterId in chunk) {
+                                val masterUrls = urlsObj?.optJSONObject(masterId) ?: continue
+                                val thumb = masterUrls.optString("thumbUrl").ifBlank { null }
+                                val med = masterUrls.optString("medUrl").ifBlank { null }
+                                val orig = masterUrls.optString("originalUrl").ifBlank { null }
+                                val vid = masterUrls.optString("videoComplUrl").ifBlank { null }
+
+                                val rows = photoDao.getPhotosByMasterId(masterId)
+                                for (row in rows) {
+                                    photoDao.updateUrls(row.id, thumb, med, orig, vid, now, generation)
+                                }
+                                batchOut[masterId] = RefreshedUrls(thumb, med, orig, vid)
+                            }
+                        }
+
+                        refreshMutex.withLock {
+                            batchOut.keys.forEach { recentRefreshes[it] = now }
+                        }
+
+                        Result.success(batchOut)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "refreshUrlsForMasters chunk error", e)
+                        Result.failure(e)
                     }
                 }
 
-                refreshMutex.withLock {
-                    out.keys.forEach { recentRefreshes[it] = now }
-                }
-
-                Result.success(out)
-            } catch (e: Exception) {
-                Log.e(TAG, "refreshUrlsForMasters error", e)
-                Result.failure(e)
+                chunkResult.onSuccess { out.putAll(it) }
             }
+
+            Result.success(out)
         }
 
     private suspend fun readUrlsFromDb(masterId: String): Result<RefreshedUrls> {

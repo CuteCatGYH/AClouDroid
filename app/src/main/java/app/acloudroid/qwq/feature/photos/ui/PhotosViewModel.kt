@@ -269,6 +269,7 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
      * flinging is worth far more than trimming that.
      */
     fun subscribeToAllMonths(yearMonths: Collection<Int>) {
+        val topRecentMonths = yearMonths.take(3).toSet()
         for (ym in yearMonths) {
             if (monthJobs[ym] != null) continue
             monthJobs[ym] = viewModelScope.launch {
@@ -276,7 +277,9 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
                     _monthPhotos.update { it + (ym to photos) }
                     val dayGroups = app.acloudroid.qwq.feature.photos.data.DayBucketing.groupPhotosByDay(photos)
                     _monthDaysMap.update { it + (ym to dayGroups) }
-                    prewarmUrlsIfNeeded(photos)
+                    if (ym in topRecentMonths) {
+                        prewarmUrlsIfNeeded(photos)
+                    }
                 }
             }
         }

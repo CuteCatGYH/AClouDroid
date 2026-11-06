@@ -72,6 +72,9 @@ func GetAccountInfoJSON() string {
 // InitSession initializes a new iCloud session with cookie string and region setting.
 // Returns a JSON string containing SessionInitResult.
 func InitSession(cookieStr string, isChinaMainland bool) string {
+	sessionMu.Lock()
+	defer sessionMu.Unlock()
+
 	session, err := NewSession(cookieStr, isChinaMainland)
 	if err != nil {
 		res, _ := json.Marshal(SessionInitResult{
@@ -111,6 +114,8 @@ func InitSession(cookieStr string, isChinaMainland bool) string {
 		session.DrivewsURL = result.DrivewsURL
 	}
 	session.mu.Unlock()
+
+	currentSession = session
 
 	resBytes, _ := json.Marshal(result)
 	return string(resBytes)

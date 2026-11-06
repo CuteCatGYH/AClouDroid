@@ -4990,6 +4990,66 @@ POST singleFileUpload       -> 413 (Content-Length: 1478709456)
 3. **状态栏自适应 Padding**：
    - `DriveHeader` 加上 `Modifier.statusBarsPadding()`，顶部标题与图标自适应避让手机/平板设备的状态栏。
 
+---
+
+## ISS-063 冷启动卡顿在“正在连接 iCloud / 正在检查增量更新”、缩略图与云盘完全不加载根因排查与并发治理
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🔴 P0 |
+| **归属** | Android / Go 核心层全链路 |
+| **状态** | ✅ 已修复 |
+
+### 现象与日志
+
+有时冷启动或间隔一段时间打开 App 时：
+1. 主页顶部状态栏长时间卡在“正在连接 iCloud 照片库...”或“正在检查增量更新...”。
+2. 照片画廊后续缩略图全部黑格/加载失败，无法渲染图片。
+3. 切换到“云盘 (Drive)”页面，目录列表一直空白或转圈，完全无法加载。
+
+### 根因分析
+
+1. **画廊全量月份直链预热轰炸 (Photo Prewarm Storm)**：
+   - `PhotosScreen` 在加载时将全库所有月份（例如 78 个月份）传给 `PhotosViewModel.subscribeToAllMonths()`；
+   - 78 个月份的 Flow 在冷启动时并发 emit，触发 `prewarmUrlsIfNeeded`；
+   - 导致**瞬间并发发起了 78 批次 `refreshUrlsForMasters`（每批次包含几百到上千个 master ID）**；
+   - 80+ 个并发 POST 请求轰炸 Apple CloudKit `/records/lookup` 接口，触发苹果限流/超时；同时 80 个协程竞争 Room 数据库单写锁（`database.withTransaction`）和 `Dispatchers.IO` 线程池，导致耗尽主协程池。
+   - `PhotosViewModel.syncIncremental()` 和 `DriveRepository.refreshFolder()` 被死死卡在协程队列后方，使得 UI 始终处于“正在检查增量更新...”，Drive 页面也因等待 IO / 锁而无法加载。
+
+2. **Go 核心层 `InitSession` 未加锁与 `currentSession` 被覆盖 (Go Core Race Condition)**：
+   - `PhotoRepository` 与 `DriveRepository` 原先各自持有一把私有的 `sessionMutex`；
+   - 冷启动时两个 Repository 并发调用 `Icloudcore.initSession()`，进入 Go 侧 `NewSession`；
+   - 原 `NewSession` 在未完成 `ValidateSession()` 校验前就提前给全局变量 `currentSession = s` 赋值；
+   - 导致两个协程同时覆盖 `currentSession`，且未校验完成的 Session 缺少 `CKDatabaseURL` / `DrivewsURL`，并发调用 JNI API 时产生 `unsupported protocol scheme ""` 或授权失效报错。
+
+3. **直链批量刷新缺乏并发阀门与分片 (Unbounded Batch Lookups)**：
+   - `refreshUrlsForMasters` 对传入的 masterIds 未限制单次 JSON Payload 上限（日志中出现 `batch size=1214`）；
+   - 且没有限制并发 batch 请求数，造成上万 master ID 在同一秒内发起大量 HTTP 请求。
+
+### 修复方案
+
+1. **Go 核心层 Session 初始化全局原子化 (`go-core`)**：
+   - 在 `go-core/core.go` 的 `InitSession()` 函数头部使用 `sessionMu.Lock()` 包裹全流程；
+   - 移除了 `NewSession()` 中提前对 `currentSession` 的赋值，仅在 `ValidateSession()` **真正成功后**才原子赋值给 `currentSession`，彻底解决并发冲突和空 Scheme 报错。
+
+2. **Kotlin 统一跨 feature 会话互斥锁 (`SessionManager`)**：
+   - 在 `SessionManager` 中新增全局 `val sessionMutex = Mutex()`；
+   - `PhotoRepository` 与 `DriveRepository` 统一使用 `sessionManager.sessionMutex`，避免照片与云盘并发触发 `/validate`。
+
+3. **批量直链刷新分片与并发控频 (`PhotoRepository`)**：
+   - `PhotoRepository` 引入 `batchRefreshGate = Semaphore(permits = 3)`，将全 App 范围内的直链批量刷新并发数限制为最多 3 个；
+   - 对 `masterIds` 按 `chunked(80)` 进行分片，防止单次 POST 请求 Payload 过大被 CloudKit 拒绝或造成 SQLite 事务阻塞。
+
+4. **月份直链预热精细化 (`PhotosViewModel`)**：
+   - 在 `subscribeToAllMonths` 中仅对最近 3 个月份（顶部可见/近期区域）进行主动直链预热；
+   - 历史早期月份仅订阅 Room 数据变更，划至对应位置时由 Coil 的 `ICloudPhotoInterceptor` 按需触发增量刷新，消除冷启动并发轰炸。
+
+### 验证结果
+
+1. **单元测试**：运行 `./gradlew app:testDebugUnitTest` 310 个单测全部通过。
+2. **实机验证**：重新编译并部署至设备，冷启动增量同步在 **1~2 秒内即完成**（显示“同步完成，共 15991 项”），照片网格缩略图瞬间全量渲染，切换至“云盘 (Drive)”标签页目录列表秒级加载，卡顿问题彻底解决。
+
+
 
 
 

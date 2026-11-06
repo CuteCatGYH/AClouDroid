@@ -159,10 +159,6 @@ func NewSession(cookieStr string, isChinaMainland bool) (*Session, error) {
 		ClientID: generateClientID(),
 	}
 
-	sessionMu.Lock()
-	currentSession = s
-	sessionMu.Unlock()
-
 	return s, nil
 }
 

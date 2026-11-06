@@ -58,8 +58,8 @@ class DriveRepository(
     /** Publishes downloaded bytes into MediaStore. Stateless, so one instance is enough. */
     private val downloader = DriveDownloader(appContext)
 
-    /** Serialises session rebuilds so N concurrent folder opens do not each call /validate. */
-    private val sessionMutex = Mutex()
+    /** Serialises session rebuilds across all features so N concurrent API calls do not each call /validate. */
+    private val sessionMutex get() = sessionManager.sessionMutex
 
     @Volatile
     private var isWiping = false

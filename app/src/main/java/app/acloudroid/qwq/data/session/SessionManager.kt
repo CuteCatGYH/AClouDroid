@@ -7,6 +7,9 @@ import androidx.security.crypto.MasterKeys
 
 class SessionManager(context: Context) {
 
+    /** Shared mutex across all feature repositories to serialize Go core session initialization. */
+    val sessionMutex = kotlinx.coroutines.sync.Mutex()
+
     private val prefs: SharedPreferences by lazy {
         try {
             val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
