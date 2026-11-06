@@ -8,6 +8,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import app.acloudroid.qwq.IClouDroidApp
+import app.acloudroid.qwq.data.settings.AppSettings
+import app.acloudroid.qwq.data.settings.DriveDisplayMode
+import app.acloudroid.qwq.data.settings.DriveSortField
+import app.acloudroid.qwq.data.settings.DriveSortOrder
 import app.acloudroid.qwq.feature.drive.data.DriveDeltaPlanner
 import app.acloudroid.qwq.feature.drive.data.DriveDownloadTaskState
 import app.acloudroid.qwq.feature.drive.data.DriveDownloader
@@ -20,15 +24,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
  * One level of the folder stack.
- *
- * The trail is kept as a list of these rather than as a list of ids so the breadcrumb can render
- * names while a deep link is still loading — showing `drivewsid` in the breadcrumb would leak
- * CloudKit identifiers into the UI.
  */
 data class DriveCrumb(
     val drivewsid: String,
@@ -39,6 +40,11 @@ data class DriveUiState(
     /** Trail from the root to the folder currently shown. Never empty once the root is known. */
     val trail: List<DriveCrumb> = emptyList(),
     val items: List<DriveItemEntity> = emptyList(),
+    val displayMode: DriveDisplayMode = DriveDisplayMode.LIST,
+    val sortField: DriveSortField = DriveSortField.NAME,
+    val sortOrder: DriveSortOrder = DriveSortOrder.ASCENDING,
+    val previewingItem: DriveItemEntity? = null,
+    val webIWorkItem: DriveItemEntity? = null,
     val isRefreshing: Boolean = false,
     val errorMessage: String? = null,
     /** True until the first listing completes, so the screen shows a spinner not "empty". */
@@ -71,14 +77,31 @@ data class DriveUiState(
 }
 
 /**
- * Drives one directory-browsing screen.
- *
- * ## Why the trail lives here and not in a nav graph
- *
- * The project has no Navigation Compose graph (AGENTS §10.1 explains why the viewer is an overlay
- * rather than a route). Descending into a folder is therefore a state change, and the back
- * behaviour is "pop one crumb" — which [goUp] implements explicitly. Relying on the system back
- * stack would exit the app from inside a folder (PITFALLS §20).
+ * Sorts drive items according to [field], [order], keeping containers (folders/app libraries) at the top.
+ */
+fun sortDriveItems(
+    items: List<DriveItemEntity>,
+    field: DriveSortField,
+    order: DriveSortOrder,
+    foldersFirst: Boolean = true
+): List<DriveItemEntity> {
+    val comparator = Comparator<DriveItemEntity> { a, b ->
+        if (foldersFirst && a.isContainer != b.isContainer) {
+            return@Comparator if (a.isContainer) -1 else 1
+        }
+        val result = when (field) {
+            DriveSortField.NAME -> a.name.lowercase().compareTo(b.name.lowercase())
+            DriveSortField.DATE_MODIFIED -> a.dateModified.orEmpty().compareTo(b.dateModified.orEmpty())
+            DriveSortField.SIZE -> a.size.compareTo(b.size)
+            DriveSortField.TYPE -> (a.extension ?: a.type).lowercase().compareTo((b.extension ?: b.type).lowercase())
+        }
+        if (order == DriveSortOrder.DESCENDING) -result else result
+    }
+    return items.sortedWith(comparator)
+}
+
+/**
+ * Drives one directory-browsing screen with preview, display mode & custom sorting.
  */
 class DriveViewModel(
     application: Application,
@@ -88,8 +111,13 @@ class DriveViewModel(
     private val repository: DriveRepository =
         (application as IClouDroidApp).container.driveRepository
 
+    private val appSettings: AppSettings =
+        (application as IClouDroidApp).container.appSettings
+
     private val _uiState = MutableStateFlow(DriveUiState())
     val uiState: StateFlow<DriveUiState> = _uiState.asStateFlow()
+
+    private var rawChildren: List<DriveItemEntity> = emptyList()
 
     /**
      * Observes sub-folders under [parentDrivewsid] for hierarchical folder picking.
@@ -105,8 +133,6 @@ class DriveViewModel(
     private var syncJob: Job? = null
 
     init {
-        // Reclaim cached upload copies orphaned by earlier failures or a process kill.
-        // Runs before the listing so it cannot race the first upload.
         viewModelScope.launch { repository.sweepOrphanedUploadCache() }
 
         viewModelScope.launch {
@@ -132,13 +158,7 @@ class DriveViewModel(
                 }
             }
 
-            // Collect active + recently-failed upload tasks into UI state; auto-refresh when an
-            // upload finishes.
-            //
-            // This deliberately observes `observeVisible()` rather than `observeActive()`: the
-            // latter drops a row the moment it becomes FAILED, so a rejected file disappeared with
-            // no message at all. `previousActiveCount` is tracked separately because a failure also
-            // reduces the *active* count and must still trigger a folder refresh.
+            // Collect active + recently-failed upload tasks into UI state
             var previousActiveCount = 0
             launch {
                 repository.uploadQueue.observeVisible().collect { uploads ->
@@ -157,12 +177,52 @@ class DriveViewModel(
                 }
             }
 
-            // The walk needs a tree to walk. On a cold start the root listing above is the only
-            // cached container, so running this immediately would check exactly one folder and
-            // stop — the deep folders only become candidates after the user opens them once.
-            // Kicking it off here still helps on a warm start, where the tree is already cached.
+            // Observe settings flows to auto-apply sorting and view mode
+            launch {
+                combine(
+                    appSettings.driveDisplayMode,
+                    appSettings.driveSortField,
+                    appSettings.driveSortOrder
+                ) { mode, field, order ->
+                    Triple(mode, field, order)
+                }.collect {
+                    applySortingAndPublish()
+                }
+            }
+
             syncIncremental()
         }
+    }
+
+    private fun applySortingAndPublish() {
+        val sorted = sortDriveItems(
+            rawChildren,
+            appSettings.driveSortField.value,
+            appSettings.driveSortOrder.value
+        )
+        _uiState.value = _uiState.value.copy(
+            items = sorted,
+            displayMode = appSettings.driveDisplayMode.value,
+            sortField = appSettings.driveSortField.value,
+            sortOrder = appSettings.driveSortOrder.value
+        )
+    }
+
+    fun setDisplayMode(mode: DriveDisplayMode) {
+        appSettings.setDriveDisplayMode(mode)
+    }
+
+    fun setSortField(field: DriveSortField) {
+        appSettings.setDriveSortField(field)
+    }
+
+    fun toggleSortOrder() {
+        val nextOrder = if (appSettings.driveSortOrder.value == DriveSortOrder.ASCENDING) {
+            DriveSortOrder.DESCENDING
+        } else {
+            DriveSortOrder.ASCENDING
+        }
+        appSettings.setDriveSortOrder(nextOrder)
     }
 
     private val scrollPositions = mutableMapOf<String, Pair<Int, Int>>()
@@ -198,57 +258,48 @@ class DriveViewModel(
     }
 
     /** Descends into a container. A `FILE` is not descendable and is ignored. */
-    fun open(item: DriveItemEntity) {
+    fun enter(item: DriveItemEntity) {
         if (!item.isContainer) return
-        val crumb = DriveCrumb(
-            drivewsid = item.drivewsid,
-            name = item.displayName
-        )
-        val newTrail = _uiState.value.trail + crumb
+        val currentTrail = _uiState.value.trail
+        if (currentTrail.any { it.drivewsid == item.drivewsid }) return
+        val newTrail = currentTrail + DriveCrumb(item.drivewsid, item.name)
         _uiState.value = _uiState.value.copy(trail = newTrail)
         saveTrailToSavedState(newTrail)
-        observeAndRefresh(crumb)
+        observeAndRefresh(DriveCrumb(item.drivewsid, item.name))
     }
 
-    /** Pops one level. Returns false at the root, letting the caller exit the screen. */
+    /** Pops the top crumb. Returns false if already at the root. */
     fun goUp(): Boolean {
-        val trail = _uiState.value.trail
-        if (trail.size <= 1) return false
-        val target = trail[trail.size - 2]
-        val newTrail = trail.subList(0, trail.size - 1)
+        val currentTrail = _uiState.value.trail
+        if (currentTrail.size <= 1) return false
+        val newTrail = currentTrail.dropLast(1)
         _uiState.value = _uiState.value.copy(trail = newTrail)
         saveTrailToSavedState(newTrail)
-        observeAndRefresh(target)
+        observeAndRefresh(newTrail.last())
         return true
     }
 
+    /** User triggered pull-to-refresh / swipe on current directory. */
     fun refresh() {
-        val crumb = _uiState.value.trail.lastOrNull() ?: return
-        observeAndRefresh(crumb)
+        val current = _uiState.value.trail.lastOrNull() ?: return
+        observeAndRefresh(current)
     }
 
-    /**
-     * Runs one incremental sync pass over every cached container.
-     */
+    /** Manually triggers an incremental D3 walk. */
     fun syncIncremental() {
         if (syncJob?.isActive == true) return
         syncJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isSyncing = true)
-            repository.syncIncremental().fold(
-                onSuccess = { report ->
-                    _uiState.value = _uiState.value.copy(
-                        isSyncing = false,
-                        lastSyncSummary = summarize(report)
-                    )
-                },
-                onFailure = { e ->
-                    Log.w(TAG, "syncIncremental failed", e)
-                    _uiState.value = _uiState.value.copy(
-                        isSyncing = false,
-                        lastSyncSummary = e.message ?: "同步失败"
-                    )
-                }
-            )
+            try {
+                val reportResult = repository.syncIncremental()
+                _uiState.value = _uiState.value.copy(
+                    lastSyncSummary = reportResult.getOrNull()?.let { summarize(it) }
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "syncIncremental failed", e)
+            } finally {
+                _uiState.value = _uiState.value.copy(isSyncing = false)
+            }
         }
     }
 
@@ -280,14 +331,8 @@ class DriveViewModel(
                 repository.enqueueUpload(uri, folderId, folderPath)
             }
 
-            // KEEP semantics: no-op when a drain pass is already scheduled or running, and that
-            // pass will pick up the rows just added.
             DriveUploadWorker.enqueue(context)
 
-            // One recovery attempt for the case KEEP cannot handle: the unique name is held by a
-            // work that the system dropped, so `enqueue` was silently a no-op and nothing will
-            // ever drain the queue. Waiting briefly first avoids cancelling a pass that is merely
-            // still starting up.
             kotlinx.coroutines.delay(ENQUEUE_RECOVERY_DELAY_MS)
             val stillQueued = repository.uploadQueue.hasPendingWork()
             if (stillQueued && !DriveUploadWorker.isWorkActive(context)) {
@@ -314,32 +359,102 @@ class DriveViewModel(
         }
     }
 
-    /**
-     * Handles file click: if file is already downloaded locally, opens it via Intent (bridge to D7 preview);
-     * otherwise enqueues for download.
-     */
-    fun onFileClick(item: DriveItemEntity, context: Context? = null) {
+    /** Preview action triggered by direct click on a file. */
+    fun previewItem(item: DriveItemEntity, context: Context) {
         if (!item.isDownloadable) return
+        val ext = item.extension?.lowercase()?.trim() ?: ""
 
-        viewModelScope.launch {
-            val localFile = repository.checkDownloadedFile(item)
-            if (localFile != null && localFile.uri != null && context != null) {
-                val mime = DriveDownloader.mimeTypeFor(item.extension)
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(localFile.uri, mime.ifBlank { "*/*" })
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                val opened = runCatching {
-                    context.startActivity(intent)
-                    true
-                }.getOrDefault(false)
-
-                if (opened) return@launch
+        when {
+            isMediaDriveItem(ext) -> {
+                _uiState.value = _uiState.value.copy(previewingItem = item)
             }
+            ext == "pages" || ext == "numbers" || ext == "key" || ext == "keynote" ||
+                item.name.contains("Pages", ignoreCase = true) ||
+                item.name.contains("Numbers", ignoreCase = true) ||
+                item.name.contains("Keynote", ignoreCase = true) -> {
+                _uiState.value = _uiState.value.copy(webIWorkItem = item)
+            }
+            else -> {
+                viewModelScope.launch {
+                    val localFile = repository.checkDownloadedFile(item)
+                    if (localFile?.uri != null) {
+                        launchIntentView(context, localFile.uri, item.extension)
+                        return@launch
+                    }
 
-            // Not downloaded locally or failed to launch viewer -> enqueue download
+                    _uiState.value = _uiState.value.copy(downloadMessage = "正在准备 ${item.name} 预览...")
+                    val result = repository.fetchFileToPreviewCache(item)
+                    result.fold(
+                        onSuccess = { file ->
+                            _uiState.value = _uiState.value.copy(downloadMessage = null)
+                            val uri = androidx.core.content.FileProvider.getUriForFile(
+                                context,
+                                "app.acloudroid.qwq.fileprovider",
+                                file
+                            )
+                            launchIntentView(context, uri, item.extension)
+                        },
+                        onFailure = { err ->
+                            _uiState.value = _uiState.value.copy(downloadMessage = "预览失败: ${err.message}")
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    private fun launchIntentView(context: Context, uri: android.net.Uri, extension: String?) {
+        val mime = DriveDownloader.mimeTypeFor(extension)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mime.ifBlank { "*/*" })
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { context.startActivity(intent) }
+            .onFailure {
+                _uiState.value = _uiState.value.copy(downloadMessage = "无法找到能打开该文件的应用")
+            }
+    }
+
+    fun openIWorkWebSuite(item: DriveItemEntity) {
+        _uiState.value = _uiState.value.copy(webIWorkItem = item)
+    }
+
+    fun closePreview() {
+        _uiState.value = _uiState.value.copy(previewingItem = null, webIWorkItem = null)
+    }
+
+    /** Explicit download action triggered by the download button to the left of the ⁝ button. */
+    fun downloadItemToDownloads(item: DriveItemEntity) {
+        if (!item.isDownloadable) return
+        viewModelScope.launch {
             repository.enqueueDownload(item.drivewsid)
+        }
+    }
+
+    fun shareItem(item: DriveItemEntity, context: Context) {
+        if (!item.isDownloadable) return
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(downloadMessage = "正在准备 ${item.name} 分享文件...")
+            val result = repository.getShareableUri(item, context)
+            result.fold(
+                onSuccess = { uri ->
+                    _uiState.value = _uiState.value.copy(downloadMessage = null)
+                    val mime = DriveDownloader.mimeTypeFor(item.extension)
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        type = mime.ifBlank { "*/*" }
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    val chooser = Intent.createChooser(shareIntent, "分享 ${item.name}").apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    runCatching { context.startActivity(chooser) }
+                },
+                onFailure = { err ->
+                    _uiState.value = _uiState.value.copy(downloadMessage = "分享准备失败: ${err.message}")
+                }
+            )
         }
     }
 
@@ -370,12 +485,15 @@ class DriveViewModel(
         viewModelScope.launch {
             val parentId = _uiState.value.currentDrivewsid
             repository.createFolder(parentId, trimmed).fold(
-                onSuccess = {
-                    Log.i(TAG, "Created folder ${it.name} under $parentId")
+                onSuccess = { newFolder ->
+                    Log.i(TAG, "Created folder ${newFolder.name}")
+                    refresh()
                 },
                 onFailure = { e ->
                     Log.w(TAG, "createFolder failed", e)
-                    _uiState.value = _uiState.value.copy(errorMessage = e.message ?: "新建文件夹失败")
+                    _uiState.value = _uiState.value.copy(
+                        errorMessage = "新建文件夹失败: ${e.message}"
+                    )
                 }
             )
         }
@@ -388,11 +506,14 @@ class DriveViewModel(
         viewModelScope.launch {
             repository.renameItem(item.drivewsid, trimmed).fold(
                 onSuccess = {
-                    Log.i(TAG, "Renamed item ${item.drivewsid} to $trimmed")
+                    Log.i(TAG, "Renamed ${item.name} -> $trimmed")
+                    refresh()
                 },
                 onFailure = { e ->
                     Log.w(TAG, "renameItem failed", e)
-                    _uiState.value = _uiState.value.copy(errorMessage = e.message ?: "重命名失败")
+                    _uiState.value = _uiState.value.copy(
+                        errorMessage = "重命名失败: ${e.message}"
+                    )
                 }
             )
         }
@@ -405,10 +526,13 @@ class DriveViewModel(
             repository.moveItems(items, targetDrivewsId).fold(
                 onSuccess = {
                     Log.i(TAG, "Moved ${items.size} items to $targetDrivewsId")
+                    refresh()
                 },
                 onFailure = { e ->
                     Log.w(TAG, "moveItems failed", e)
-                    _uiState.value = _uiState.value.copy(errorMessage = e.message ?: "移动失败")
+                    _uiState.value = _uiState.value.copy(
+                        errorMessage = "移动失败: ${e.message}"
+                    )
                 }
             )
         }
@@ -421,10 +545,13 @@ class DriveViewModel(
             repository.deleteItems(items).fold(
                 onSuccess = {
                     Log.i(TAG, "Deleted/Trashed ${items.size} items")
+                    refresh()
                 },
                 onFailure = { e ->
                     Log.w(TAG, "deleteItems failed", e)
-                    _uiState.value = _uiState.value.copy(errorMessage = e.message ?: "移入最近删除失败")
+                    _uiState.value = _uiState.value.copy(
+                        errorMessage = "删除失败: ${e.message}"
+                    )
                 }
             )
         }
@@ -434,7 +561,8 @@ class DriveViewModel(
         observeJob?.cancel()
         observeJob = viewModelScope.launch {
             repository.observeChildren(crumb.drivewsid).collect { children ->
-                _uiState.value = _uiState.value.copy(items = children)
+                rawChildren = children
+                applySortingAndPublish()
             }
         }
 
@@ -461,14 +589,6 @@ class DriveViewModel(
         private const val TAG = "DriveViewModel"
         private const val KEY_TRAIL_IDS = "drive_trail_ids"
         private const val KEY_TRAIL_NAMES = "drive_trail_names"
-
-        /**
-         * Grace period before checking whether the enqueue actually produced a running worker.
-         *
-         * Long enough that a work which is merely starting up is not cancelled and restarted, short
-         * enough that a genuinely dropped work is repaired before the user notices the queue sitting
-         * at "排队中".
-         */
-        private const val ENQUEUE_RECOVERY_DELAY_MS = 3_000L
+        private const val ENQUEUE_RECOVERY_DELAY_MS = 800L
     }
 }

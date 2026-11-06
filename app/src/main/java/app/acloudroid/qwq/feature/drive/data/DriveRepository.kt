@@ -23,7 +23,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -57,6 +59,9 @@ class DriveRepository(
 
     /** Publishes downloaded bytes into MediaStore. Stateless, so one instance is enough. */
     private val downloader = DriveDownloader(appContext)
+
+    /** Manages temporary sandbox preview cache (`cache/drive_preview/`). */
+    val previewCache = DrivePreviewCache(appContext)
 
     /** Serialises session rebuilds across all features so N concurrent API calls do not each call /validate. */
     private val sessionMutex get() = sessionManager.sessionMutex
@@ -1250,20 +1255,87 @@ class DriveRepository(
         null
     }
 
+    private val thumbnailUrlCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val thumbnailSemaphore = kotlinx.coroutines.sync.Semaphore(4)
+
     /**
-     * Bridge for D7: mints signed thumbnail URL for file preview.
+     * Bridge for D7: mints signed thumbnail URL for file preview, caching in memory.
      */
-    suspend fun fetchThumbnailUrl(drivewsid: String): Result<String> = withContext(Dispatchers.IO) {
+    suspend fun fetchThumbnailUrl(drivewsid: String, filesize: Long = 0L): Result<String> = withContext(Dispatchers.IO) {
+        thumbnailUrlCache[drivewsid]?.let { return@withContext Result.success(it) }
+
         ensureGoSession().onFailure { return@withContext Result.failure(it) }
         runCatching {
             val jsonStr = Icloudcore.retrieveDownloadURL(drivewsid)
+            Log.d(TAG, "retrieveDownloadURL for $drivewsid -> $jsonStr")
             val obj = JSONObject(jsonStr)
             if (!obj.optBoolean("success", false)) {
                 throw Exception(obj.optString("errorMessage", "获取缩略图地址失败"))
             }
-            val thumbUrl = obj.optJSONObject("token")?.optString("thumbnailUrl").orEmpty()
-            if (thumbUrl.isBlank()) throw Exception("缺少缩略图地址")
-            thumbUrl
+            val tokenObj = obj.optJSONObject("token")
+            val thumbUrl = tokenObj?.optString("thumbnailUrl").orEmpty()
+            val fullUrl = tokenObj?.optString("url").orEmpty()
+            val selectedUrl = when {
+                thumbUrl.isNotBlank() -> thumbUrl
+                filesize in 1..35_000_000L -> fullUrl
+                filesize == 0L -> fullUrl
+                else -> ""
+            }
+            if (selectedUrl.isBlank()) throw Exception("缺少缩略图地址 (filesize=$filesize, token=$tokenObj)")
+            thumbnailUrlCache[drivewsid] = selectedUrl
+            selectedUrl
+        }
+    }
+
+    suspend fun getOrFetchThumbnailUrl(drivewsid: String, filesize: Long = 0L): String? {
+        return fetchThumbnailUrl(drivewsid, filesize).getOrNull()
+    }
+
+    /**
+     * Fetches and caches a media file's thumbnail image to `cacheDir/drive_thumbs/<hash>.jpg`.
+     */
+    suspend fun getOrFetchThumbnailFile(item: DriveItemEntity): File? = withContext(Dispatchers.IO) {
+        val ext = item.extension?.lowercase()?.trim() ?: ""
+        if (!app.acloudroid.qwq.feature.drive.ui.isMediaDriveItem(ext)) return@withContext null
+
+        val thumbDir = File(appContext.cacheDir, "drive_thumbs").apply { if (!exists()) mkdirs() }
+        val targetFile = File(thumbDir, "${item.drivewsid.hashCode()}.jpg")
+
+        if (targetFile.exists() && targetFile.length() > 0) {
+            return@withContext targetFile
+        }
+
+        val previewFile = previewCache.findPreviewFile(item.drivewsid)
+        if (previewFile != null && previewFile.length() > 0) {
+            return@withContext previewFile
+        }
+
+        thumbnailSemaphore.withPermit {
+            if (targetFile.exists() && targetFile.length() > 0) {
+                return@withPermit targetFile
+            }
+
+            val sessionCheck = ensureGoSession()
+            if (sessionCheck.isFailure) return@withPermit null
+
+            val urlResult = fetchThumbnailUrl(item.drivewsid, item.size)
+            val url = urlResult.getOrNull() ?: return@withPermit null
+
+            val tempFile = File(thumbDir, "${item.drivewsid.hashCode()}.tmp")
+            val resultJson = Icloudcore.downloadToFileWithID(url, tempFile.absolutePath, 0L, item.docwsid)
+            val downloadObj = JSONObject(resultJson)
+            if (downloadObj.optBoolean("success", false) && tempFile.exists() && tempFile.length() > 0) {
+                if (tempFile.renameTo(targetFile) || (targetFile.exists() && targetFile.length() > 0)) {
+                    targetFile
+                } else {
+                    tempFile.copyTo(targetFile, overwrite = true)
+                    tempFile.delete()
+                    targetFile
+                }
+            } else {
+                tempFile.delete()
+                null
+            }
         }
     }
 
@@ -1290,6 +1362,54 @@ class DriveRepository(
         }
 
         return downloader.download(item, onProgress)
+    }
+
+    /**
+     * Downloads [item] to the sandbox temporary preview cache (`cache/drive_preview/`).
+     *
+     * Returns the cached [File] on success.
+     */
+    suspend fun fetchFileToPreviewCache(
+        item: DriveItemEntity,
+        onProgress: ((Int) -> Unit)? = null
+    ): Result<File> = withContext(Dispatchers.IO) {
+        wipeBlocked()?.let { return@withContext Result.failure(it) }
+        val cached = previewCache.findPreviewFile(item.drivewsid)
+        if (cached != null && cached.length() > 0) {
+            return@withContext Result.success(cached)
+        }
+        val sessionCheck = ensureGoSession()
+        if (sessionCheck.isFailure) {
+            return@withContext Result.failure(sessionCheck.exceptionOrNull() ?: Exception("会话建立失败"))
+        }
+
+        val targetFile = previewCache.getPreviewFile(item.drivewsid, item.extension.orEmpty())
+        val result = downloader.downloadToCacheFile(item, targetFile, onProgress)
+        if (result.isSuccess) {
+            previewCache.cleanOldPreviews()
+        }
+        result
+    }
+
+    /**
+     * Resolves a shareable FileProvider [Uri] for [item].
+     *
+     * Prefers already downloaded file in Downloads; falls back to fetching to [previewCache].
+     */
+    suspend fun getShareableUri(item: DriveItemEntity, context: Context): Result<Uri> = withContext(Dispatchers.IO) {
+        val outcome = checkDownloadedFile(item)
+        if (outcome?.uri != null) {
+            return@withContext Result.success(outcome.uri)
+        }
+
+        val fileResult = fetchFileToPreviewCache(item)
+        fileResult.mapCatching { file ->
+            androidx.core.content.FileProvider.getUriForFile(
+                context,
+                "app.acloudroid.qwq.fileprovider",
+                file
+            )
+        }
     }
 
     private fun formatSize(bytes: Long): String = when {

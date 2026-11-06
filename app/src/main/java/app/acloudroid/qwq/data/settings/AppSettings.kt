@@ -17,6 +17,32 @@ enum class GalleryViewMode(val label: String) {
 }
 
 /**
+ * View display modes for iCloud Drive items.
+ */
+enum class DriveDisplayMode(val label: String) {
+    LIST("列表"),
+    GRID("大图标")
+}
+
+/**
+ * Sorting field options for iCloud Drive items.
+ */
+enum class DriveSortField(val label: String) {
+    NAME("名称"),
+    DATE_MODIFIED("修改日期"),
+    SIZE("大小"),
+    TYPE("类型")
+}
+
+/**
+ * Sorting direction for iCloud Drive items.
+ */
+enum class DriveSortOrder(val label: String) {
+    ASCENDING("正序"),
+    DESCENDING("倒序")
+}
+
+/**
  * Schedule for the periodic full-library reconciliation walk.
  *
  * ## Why these units
@@ -268,6 +294,46 @@ class AppSettings(context: Context) {
         _periodicBackupInterval.value = clamped
     }
 
+    // ---------------------------------------------------------------------------------------
+    // iCloud Drive Display & Sorting Preferences
+    // ---------------------------------------------------------------------------------------
+
+    private val _driveDisplayMode = MutableStateFlow(
+        DriveDisplayMode.entries
+            .firstOrNull { it.name == prefs.getString(KEY_DRIVE_DISPLAY_MODE, null) }
+            ?: DriveDisplayMode.LIST
+    )
+    val driveDisplayMode: StateFlow<DriveDisplayMode> = _driveDisplayMode.asStateFlow()
+
+    fun setDriveDisplayMode(value: DriveDisplayMode) {
+        prefs.edit { putString(KEY_DRIVE_DISPLAY_MODE, value.name) }
+        _driveDisplayMode.value = value
+    }
+
+    private val _driveSortField = MutableStateFlow(
+        DriveSortField.entries
+            .firstOrNull { it.name == prefs.getString(KEY_DRIVE_SORT_FIELD, null) }
+            ?: DriveSortField.NAME
+    )
+    val driveSortField: StateFlow<DriveSortField> = _driveSortField.asStateFlow()
+
+    fun setDriveSortField(value: DriveSortField) {
+        prefs.edit { putString(KEY_DRIVE_SORT_FIELD, value.name) }
+        _driveSortField.value = value
+    }
+
+    private val _driveSortOrder = MutableStateFlow(
+        DriveSortOrder.entries
+            .firstOrNull { it.name == prefs.getString(KEY_DRIVE_SORT_ORDER, null) }
+            ?: DriveSortOrder.ASCENDING
+    )
+    val driveSortOrder: StateFlow<DriveSortOrder> = _driveSortOrder.asStateFlow()
+
+    fun setDriveSortOrder(value: DriveSortOrder) {
+        prefs.edit { putString(KEY_DRIVE_SORT_ORDER, value.name) }
+        _driveSortOrder.value = value
+    }
+
     companion object {
         private const val PREFS_NAME = "icloud_droid_settings"
         private const val KEY_THEME_MODE = "theme_mode"
@@ -285,6 +351,9 @@ class AppSettings(context: Context) {
         private const val KEY_SHOW_BACKUP_NOTIFICATION = "show_backup_notification"
         private const val KEY_FORCE_UPLOAD_UNTIL = "force_upload_until"
         private const val KEY_PERIODIC_BACKUP_INTERVAL = "periodic_backup_interval"
+        private const val KEY_DRIVE_DISPLAY_MODE = "drive_display_mode"
+        private const val KEY_DRIVE_SORT_FIELD = "drive_sort_field"
+        private const val KEY_DRIVE_SORT_ORDER = "drive_sort_order"
 
         const val MIN_CUSTOM_DAYS = 1
         const val MAX_CUSTOM_DAYS = 365

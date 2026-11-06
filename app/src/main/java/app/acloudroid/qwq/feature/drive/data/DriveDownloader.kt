@@ -280,6 +280,55 @@ class DriveDownloader(
     }
 
     /**
+     * Downloads [item] to a specific sandbox cache [targetFile].
+     */
+    suspend fun downloadToCacheFile(
+        item: DriveItemEntity,
+        targetFile: File,
+        onProgress: ((Int) -> Unit)? = null
+    ): Result<File> = withContext(Dispatchers.IO) {
+        if (item.type != DriveItemEntity.TYPE_FILE) {
+            return@withContext Result.failure(Exception("只有文件可以下载"))
+        }
+        if (targetFile.exists() && targetFile.length() > 0) {
+            return@withContext Result.success(targetFile)
+        }
+        val tempFile = File(targetFile.parentFile, "${item.docwsid}_preview.part")
+        var resumeFrom = if (tempFile.exists()) tempFile.length() else 0L
+        if (item.size > 0 && resumeFrom >= item.size) {
+            tempFile.delete()
+            resumeFrom = 0L
+        }
+
+        try {
+            val tokenJson = Icloudcore.retrieveDownloadURL(item.drivewsid)
+            val token = parseToken(tokenJson)
+                ?: throw Exception(formatDownloadError(tokenErrorMessage(tokenJson)))
+
+            val resultJson = Icloudcore.downloadToFileWithID(
+                token.url,
+                tempFile.absolutePath,
+                resumeFrom,
+                item.docwsid
+            )
+            val download = parseDownloadResult(resultJson)
+            if (!download.success) {
+                throw Exception(formatDownloadError(download.errorMessage))
+            }
+
+            val renamed = tempFile.renameTo(targetFile)
+            if (!renamed && tempFile.exists()) {
+                tempFile.copyTo(targetFile, overwrite = true)
+                tempFile.delete()
+            }
+            onProgress?.invoke(100)
+            Result.success(targetFile)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /**
      * Returns `displayName`, or `name (1).ext` / `name (2).ext` if that name is taken.
      *
      * The suffix goes **before** the extension (`report (1).pdf`, not `report.pdf (1)`) so the

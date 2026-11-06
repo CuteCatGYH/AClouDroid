@@ -39,22 +39,31 @@ class DriveIconFetcher(
         val fileName = "${url.hashCode()}.png"
         val targetFile = File(iconDir, fileName)
 
-        if (!targetFile.exists() || targetFile.length() == 0L) {
-            // Ensure Go core session is initialized before requesting the icon
-            val sessionCheck = container.driveRepository.ensureGoSession()
-            if (sessionCheck.isFailure) {
-                Log.w(TAG, "Drive session not ready for icon fetch $url: ${sessionCheck.exceptionOrNull()?.message}")
-                return@withContext null
-            }
+        if (targetFile.exists() && targetFile.length() > 0L) {
+            return@withContext SourceResult(
+                source = ImageSource(
+                    file = targetFile.toOkioPath(),
+                    diskCacheKey = "drive_icon_${url.hashCode()}"
+                ),
+                mimeType = "image/png",
+                dataSource = DataSource.DISK
+            )
+        }
 
-            val jsonResult = Icloudcore.fetchDriveIconToPath(url, targetFile.absolutePath)
-            Log.d(TAG, "Icloudcore.fetchDriveIconToPath for $url -> $jsonResult")
-            val json = JSONObject(jsonResult)
-            if (!json.optBoolean("success", false)) {
-                Log.w(TAG, "Failed to download icon for $url: ${json.optString("errorMessage")}")
-                targetFile.delete()
-                return@withContext null
-            }
+        // Ensure Go core session is initialized before requesting the icon
+        val sessionCheck = container.driveRepository.ensureGoSession()
+        if (sessionCheck.isFailure) {
+            Log.w(TAG, "Drive session not ready for icon fetch $url: ${sessionCheck.exceptionOrNull()?.message}")
+            return@withContext null
+        }
+
+        val jsonResult = Icloudcore.fetchDriveIconToPath(url, targetFile.absolutePath)
+        Log.d(TAG, "Icloudcore.fetchDriveIconToPath for $url -> $jsonResult")
+        val json = JSONObject(jsonResult)
+        if (!json.optBoolean("success", false)) {
+            Log.w(TAG, "Failed to download icon for $url: ${json.optString("errorMessage")}")
+            targetFile.delete()
+            return@withContext null
         }
 
         if (!targetFile.exists() || targetFile.length() == 0L) {
