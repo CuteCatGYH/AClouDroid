@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -148,4 +149,96 @@ func RetrieveItemDetailsInFolders(parentDrivewsID string) string {
 	}
 
 	return marshalDriveFolderListResult(okBase(), parentDrivewsID, items)
+}
+
+func marshalFetchIconResult(base ResultBase, length int, contentType string, finalURL string) string {
+	res := struct {
+		ResultBase
+		Length      int    `json:"len"`
+		ContentType string `json:"type,omitempty"`
+		FinalURL    string `json:"finalUrl,omitempty"`
+	}{
+		ResultBase:  base,
+		Length:      length,
+		ContentType: contentType,
+		FinalURL:    finalURL,
+	}
+	b, _ := json.Marshal(res)
+	return string(b)
+}
+
+// FetchDriveIcon fetches the icon at iconURL using the Go session credentials.
+func FetchDriveIcon(iconURL string) string {
+	s := GetSession()
+	if s == nil {
+		return marshalFetchIconResult(failBase(ErrCodeAuthExpired, 0, "No active session"), 0, "", "")
+	}
+
+	req, err := s.NewRequest(http.MethodGet, iconURL, "")
+	if err != nil {
+		return marshalFetchIconResult(failBase(ClassifyNetErr(err), 0, err.Error()), 0, "", "")
+	}
+
+	resp, err := s.Client.Do(req)
+	if err != nil {
+		return marshalFetchIconResult(failBase(ClassifyNetErr(err), 0, err.Error()), 0, "", "")
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return marshalFetchIconResult(failBase(ErrCodeNetwork, resp.StatusCode, err.Error()), 0, "", "")
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		preview := string(bodyBytes)
+		if len(preview) > 256 {
+			preview = preview[:256]
+		}
+		return marshalFetchIconResult(failBase(ClassifyHTTPStatus(resp.StatusCode), resp.StatusCode, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, preview)), 0, "", "")
+	}
+
+	return marshalFetchIconResult(okBase(), len(bodyBytes), resp.Header.Get("Content-Type"), resp.Request.URL.String())
+}
+
+// FetchDriveIconToPath downloads the icon at iconURL using session credentials and writes it to targetPath.
+func FetchDriveIconToPath(iconURL string, targetPath string) string {
+	s := GetSession()
+	if s == nil {
+		return marshalFetchIconResult(failBase(ErrCodeAuthExpired, 0, "No active session"), 0, "", "")
+	}
+
+	req, err := s.NewRequest(http.MethodGet, iconURL, "")
+	if err != nil {
+		return marshalFetchIconResult(failBase(ClassifyNetErr(err), 0, err.Error()), 0, "", "")
+	}
+
+	resp, err := s.Client.Do(req)
+	if err != nil {
+		return marshalFetchIconResult(failBase(ClassifyNetErr(err), 0, err.Error()), 0, "", "")
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		preview := string(bodyBytes)
+		if len(preview) > 256 {
+			preview = preview[:256]
+		}
+		return marshalFetchIconResult(failBase(ClassifyHTTPStatus(resp.StatusCode), resp.StatusCode, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, preview)), 0, "", "")
+	}
+
+	out, err := os.Create(targetPath)
+	if err != nil {
+		return marshalFetchIconResult(failBase(ErrCodeNetwork, 0, "Failed to create target file: "+err.Error()), 0, "", "")
+	}
+
+	n, err := io.Copy(out, resp.Body)
+	out.Close()
+	if err != nil {
+		os.Remove(targetPath)
+		return marshalFetchIconResult(failBase(ErrCodeNetwork, resp.StatusCode, "Failed to write icon file: "+err.Error()), 0, "", "")
+	}
+
+	return marshalFetchIconResult(okBase(), int(n), resp.Header.Get("Content-Type"), targetPath)
 }

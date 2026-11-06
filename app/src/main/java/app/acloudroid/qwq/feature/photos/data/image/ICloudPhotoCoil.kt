@@ -13,6 +13,7 @@ import coil.request.Options
 import app.acloudroid.qwq.BuildConfig
 import app.acloudroid.qwq.data.session.SessionManager
 import app.acloudroid.qwq.di.AppContainer
+import app.acloudroid.qwq.feature.drive.data.image.DriveIconFetcher
 import app.acloudroid.qwq.feature.photos.data.PhotoRepository
 import app.acloudroid.qwq.feature.photos.data.RefreshedUrls
 import app.acloudroid.qwq.feature.photos.data.db.PhotoAssetEntity
@@ -265,8 +266,34 @@ class ICloudPhotoInterceptor(
         }
     }
 
+    private fun attachICloudHeaders(
+        request: coil.request.ImageRequest,
+        urlStr: String
+    ): coil.request.ImageRequest {
+        val builder = request.newBuilder()
+        val cookie = sessionManager.getCookieString()
+        if (!cookie.isNullOrBlank()) {
+            builder.setHeader("Cookie", cookie)
+        }
+        val isChina = sessionManager.isChinaMainland()
+        builder.setHeader(
+            "User-Agent",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        )
+        builder.setHeader("Origin", if (isChina) "https://www.icloud.com.cn" else "https://www.icloud.com")
+        builder.setHeader("Referer", if (isChina) "https://www.icloud.com.cn/" else "https://www.icloud.com/")
+        return builder.build()
+    }
+
     companion object {
         private const val TAG = "ICloudPhotoCoil"
+
+        fun isICloudApiUrl(urlStr: String): Boolean {
+            val lower = urlStr.lowercase()
+            return (lower.startsWith("http://") || lower.startsWith("https://")) &&
+                (lower.contains("icloud.com") || lower.contains("icloud.com.cn")) &&
+                !lower.contains("icloud-content.com")
+        }
 
         /**
          * How old a stored `downloadURL` may be before it is proactively re-minted.
@@ -295,6 +322,49 @@ class ICloudPhotoInterceptor(
     }
 }
 
+/**
+ * OkHttp Network Interceptor that handles headers for iCloud API endpoints and redirects.
+ *
+ * 1. API endpoints (`*drivews.icloud.com*`, `*docws.icloud.com*` etc.): Requires session `Cookie`,
+ *    `User-Agent`, `Origin`, and `Referer`.
+ * 2. Redirects to CDN (`*icloud-content.com*`): MUST NOT carry `Origin`, `Referer` or `Cookie` (AGENTS §4.4).
+ *    Stripping forbidden headers when following cross-domain redirects from `drivews` to `cvws`
+ *    prevents HTTP 503 Bad Gateway errors.
+ */
+class ICloudHeaderInterceptor(
+    private val sessionManager: SessionManager
+) : okhttp3.Interceptor {
+    override fun intercept(chain: okhttp3.Interceptor.Chain): okhttp3.Response {
+        val request = chain.request()
+        val host = request.url.host.lowercase()
+
+        val newBuilder = request.newBuilder()
+
+        if (host.contains("icloud-content.com")) {
+            // CDN endpoints MUST NOT carry Origin, Referer or Cookie
+            newBuilder.removeHeader("Origin")
+            newBuilder.removeHeader("Referer")
+            newBuilder.removeHeader("Cookie")
+        } else if (host.contains("icloud.com") || host.contains("icloud.com.cn")) {
+            // API endpoints (like drivews/getIcons) require session Cookies and Headers
+            val cookie = sessionManager.getCookieString()
+            if (!cookie.isNullOrBlank() && request.header("Cookie").isNullOrBlank()) {
+                newBuilder.header("Cookie", cookie)
+            }
+            val isChina = sessionManager.isChinaMainland()
+            newBuilder.header(
+                "User-Agent",
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+            )
+            newBuilder.header("Origin", if (isChina) "https://www.icloud.com.cn" else "https://www.icloud.com")
+            newBuilder.header("Referer", if (isChina) "https://www.icloud.com.cn/" else "https://www.icloud.com/")
+        }
+
+        val builtRequest = newBuilder.build()
+        return chain.proceed(builtRequest)
+    }
+}
+
 object ICloudImageLoaderFactory {
     @Volatile
     private var INSTANCE: ImageLoader? = null
@@ -316,7 +386,13 @@ object ICloudImageLoaderFactory {
      */
     fun get(context: Context, container: AppContainer): ImageLoader {
         return INSTANCE ?: synchronized(this) {
+            val okHttpClient = okhttp3.OkHttpClient.Builder()
+                .protocols(listOf(okhttp3.Protocol.HTTP_1_1))
+                .addNetworkInterceptor(ICloudHeaderInterceptor(container.sessionManager))
+                .build()
+
             val loader = ImageLoader.Builder(context)
+                .okHttpClient(okHttpClient)
                 .components {
                     // P2-010: iCloud hands back the native HEIC for `resOriginalRes`, and some of
                     // those carry an HDR gain map (compatible brand `MiHE` rather than `MiPr`).
@@ -325,6 +401,7 @@ object ICloudImageLoaderFactory {
                     // transcoded server-side) were fine.
                     // ImageDecoder handles gain maps and multi-image HEIF correctly.
                     add(ImageDecoderDecoder.Factory())
+                    add(DriveIconFetcher.Factory(container))
                     add(ICloudPhotoKeyer())
                     add(ICloudPhotoInterceptor(container.photoRepository, container.sessionManager))
                 }

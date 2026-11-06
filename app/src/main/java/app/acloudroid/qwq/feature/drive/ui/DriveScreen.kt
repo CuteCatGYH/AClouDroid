@@ -48,6 +48,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -627,6 +628,12 @@ private fun DriveItemIcon(
     val remoteIcon = item.iconUrl
     val boxModifier = Modifier.size(36.dp)
 
+    val fallbackIcon = if (item.isContainer) {
+        Icons.Default.Folder
+    } else {
+        Icons.AutoMirrored.Filled.InsertDriveFile
+    }
+
     when {
         !remoteIcon.isNullOrBlank() -> {
             Box(modifier = boxModifier, contentAlignment = Alignment.Center) {
@@ -635,6 +642,8 @@ private fun DriveItemIcon(
                     contentDescription = null,
                     contentScale = ContentScale.Fit,
                     imageLoader = imageLoader,
+                    error = rememberVectorPainter(fallbackIcon),
+                    fallback = rememberVectorPainter(fallbackIcon),
                     modifier = Modifier.size(30.dp)
                 )
             }
