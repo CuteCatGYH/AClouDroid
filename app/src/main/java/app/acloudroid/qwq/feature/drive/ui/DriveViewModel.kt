@@ -1,10 +1,13 @@
 package app.acloudroid.qwq.feature.drive.ui
 
+import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
+import app.acloudroid.qwq.IClouDroidApp
 import app.acloudroid.qwq.feature.drive.data.DriveDeltaPlanner
 import app.acloudroid.qwq.feature.drive.data.DriveDownloadTaskState
 import app.acloudroid.qwq.feature.drive.data.DriveDownloader
@@ -78,8 +81,12 @@ data class DriveUiState(
  * stack would exit the app from inside a folder (PITFALLS §20).
  */
 class DriveViewModel(
-    private val repository: DriveRepository
-) : ViewModel() {
+    application: Application,
+    private val savedStateHandle: SavedStateHandle
+) : AndroidViewModel(application) {
+
+    private val repository: DriveRepository =
+        (application as IClouDroidApp).container.driveRepository
 
     private val _uiState = MutableStateFlow(DriveUiState())
     val uiState: StateFlow<DriveUiState> = _uiState.asStateFlow()
@@ -104,13 +111,19 @@ class DriveViewModel(
 
         viewModelScope.launch {
             repository.ensureRoot()
+            val restoredTrail = restoreTrailFromSavedState()
             val root = repository.getItem(DriveItemEntity.ROOT_DRIVEWSID)
             val rootCrumb = DriveCrumb(
                 drivewsid = DriveItemEntity.ROOT_DRIVEWSID,
                 name = root?.name?.takeIf { it.isNotBlank() } ?: "iCloud Drive"
             )
-            _uiState.value = _uiState.value.copy(trail = listOf(rootCrumb))
-            observeAndRefresh(rootCrumb)
+            val currentTrail = if (!restoredTrail.isNullOrEmpty()) {
+                restoredTrail
+            } else {
+                listOf(rootCrumb)
+            }
+            _uiState.value = _uiState.value.copy(trail = currentTrail)
+            currentTrail.lastOrNull()?.let { observeAndRefresh(it) }
 
             // Collect download queue task states into UI state
             launch {
@@ -162,11 +175,25 @@ class DriveViewModel(
         return scrollPositions[drivewsid]
     }
 
+    private fun saveTrailToSavedState(trail: List<DriveCrumb>) {
+        savedStateHandle[KEY_TRAIL_IDS] = ArrayList(trail.map { it.drivewsid })
+        savedStateHandle[KEY_TRAIL_NAMES] = ArrayList(trail.map { it.name })
+    }
+
+    private fun restoreTrailFromSavedState(): List<DriveCrumb>? {
+        val ids = savedStateHandle.get<ArrayList<String>>(KEY_TRAIL_IDS) ?: return null
+        val names = savedStateHandle.get<ArrayList<String>>(KEY_TRAIL_NAMES) ?: return null
+        if (ids.isEmpty() || ids.size != names.size) return null
+        return ids.zip(names) { id, name -> DriveCrumb(id, name) }
+    }
+
     /** Jumps to a crumb by index, truncating everything below it. */
     fun navigateTo(index: Int) {
         val trail = _uiState.value.trail
         if (index !in trail.indices) return
-        _uiState.value = _uiState.value.copy(trail = trail.subList(0, index + 1))
+        val newTrail = trail.subList(0, index + 1)
+        _uiState.value = _uiState.value.copy(trail = newTrail)
+        saveTrailToSavedState(newTrail)
         observeAndRefresh(trail[index])
     }
 
@@ -177,7 +204,9 @@ class DriveViewModel(
             drivewsid = item.drivewsid,
             name = item.displayName
         )
-        _uiState.value = _uiState.value.copy(trail = _uiState.value.trail + crumb)
+        val newTrail = _uiState.value.trail + crumb
+        _uiState.value = _uiState.value.copy(trail = newTrail)
+        saveTrailToSavedState(newTrail)
         observeAndRefresh(crumb)
     }
 
@@ -186,7 +215,9 @@ class DriveViewModel(
         val trail = _uiState.value.trail
         if (trail.size <= 1) return false
         val target = trail[trail.size - 2]
-        _uiState.value = _uiState.value.copy(trail = trail.subList(0, trail.size - 1))
+        val newTrail = trail.subList(0, trail.size - 1)
+        _uiState.value = _uiState.value.copy(trail = newTrail)
+        saveTrailToSavedState(newTrail)
         observeAndRefresh(target)
         return true
     }
@@ -428,6 +459,8 @@ class DriveViewModel(
 
     companion object {
         private const val TAG = "DriveViewModel"
+        private const val KEY_TRAIL_IDS = "drive_trail_ids"
+        private const val KEY_TRAIL_NAMES = "drive_trail_names"
 
         /**
          * Grace period before checking whether the enqueue actually produced a running worker.

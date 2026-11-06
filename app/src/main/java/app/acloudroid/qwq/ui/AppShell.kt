@@ -49,6 +49,7 @@ import app.acloudroid.qwq.ui.settings.SettingsContainer
 fun AppShell(
     photosViewModel: PhotosViewModel,
     localAlbumsViewModel: app.acloudroid.qwq.feature.local.ui.LocalAlbumsViewModel,
+    driveViewModel: app.acloudroid.qwq.feature.drive.ui.DriveViewModel,
     onOpenAccountInfo: () -> Unit,
     modifier: Modifier = Modifier,
     windowSizeClass: WindowSizeClass? = null,
@@ -108,6 +109,7 @@ fun AppShell(
                     selected = selected,
                     photosViewModel = photosViewModel,
                     localAlbumsViewModel = localAlbumsViewModel,
+                    driveViewModel = driveViewModel,
                     onOpenAccountInfo = onOpenAccountInfo,
                     viewerOpen = viewerOpen,
                     onViewerOpenChange = { viewerOpen = it },
@@ -160,6 +162,7 @@ fun AppShell(
                         selected = selected,
                         photosViewModel = photosViewModel,
                         localAlbumsViewModel = localAlbumsViewModel,
+                        driveViewModel = driveViewModel,
                         onOpenAccountInfo = onOpenAccountInfo,
                         viewerOpen = viewerOpen,
                         onViewerOpenChange = { viewerOpen = it },
@@ -206,6 +209,7 @@ private fun MainContentArea(
     selected: AppDestination,
     photosViewModel: PhotosViewModel,
     localAlbumsViewModel: app.acloudroid.qwq.feature.local.ui.LocalAlbumsViewModel,
+    driveViewModel: app.acloudroid.qwq.feature.drive.ui.DriveViewModel,
     onOpenAccountInfo: () -> Unit,
     viewerOpen: Boolean,
     onViewerOpenChange: (Boolean) -> Unit,
@@ -229,6 +233,7 @@ private fun MainContentArea(
         // cannot be rendered usefully through the web UI, and the point of the Drive work is
         // to stop relying on it.
         AppDestination.Drive -> app.acloudroid.qwq.feature.drive.ui.DriveEntry(
+            viewModel = driveViewModel,
             contentPadding = contentPadding
         )
         AppDestination.Notes -> FeatureWebViewScreen(url = "https://www.icloud.com.cn/notes/")

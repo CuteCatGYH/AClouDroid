@@ -98,13 +98,10 @@ import java.util.Locale
  */
 @Composable
 fun DriveEntry(
+    viewModel: DriveViewModel,
     modifier: Modifier = Modifier,
     contentPadding: PaddingValues = PaddingValues()
 ) {
-    val container = rememberAppContainer()
-    val viewModel = remember(container) {
-        DriveViewModel(container.driveRepository)
-    }
     DriveScreen(
         viewModel = viewModel,
         modifier = modifier,

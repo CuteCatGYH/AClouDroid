@@ -37,6 +37,7 @@ class MainActivity : ComponentActivity() {
     private val authViewModel: AuthViewModel by viewModels()
     private val photosViewModel: PhotosViewModel by viewModels()
     private val localAlbumsViewModel: app.acloudroid.qwq.feature.local.ui.LocalAlbumsViewModel by viewModels()
+    private val driveViewModel: app.acloudroid.qwq.feature.drive.ui.DriveViewModel by viewModels()
 
     /**
      * Asks for POST_NOTIFICATIONS once (Android 13+), so the background scan can show its
@@ -98,6 +99,7 @@ class MainActivity : ComponentActivity() {
                             AppShell(
                                 photosViewModel = photosViewModel,
                                 localAlbumsViewModel = localAlbumsViewModel,
+                                driveViewModel = driveViewModel,
                                 windowSizeClass = windowSizeClass,
                                 openSettings = openSettings,
                                 onOpenSettingsHandled = { openSettings = false },
