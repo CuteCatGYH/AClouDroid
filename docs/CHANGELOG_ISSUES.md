@@ -73,6 +73,8 @@
 | [ISS-059](#iss-059-drive-上传失败任务支持重试与云上贵州账号首次上传-1gb-限制预警弹窗) | **Drive 失败任务重试** 与 云上贵州账号首次上传 1GB 预警弹窗 | 🟠 P1 | Android / UI + Repository + SessionManager | ✅ 已完成 |
 | [ISS-060](#iss-060-drive-目录写操作-http-400-bad-request-与-datamutationlock-网络-io-死锁cpu-高占用修复) | **Drive 目录写操作 HTTP 400** 与 `dataMutationLock` 网络 IO 死锁/CPU 高占用修复 | 🔴 P0 | Go / Android | ✅ 已修复 |
 | [ISS-061](#iss-061-drive-队列卡排队queueddocws-endpoint-is-not-set-错报与上传成功瞬时隐形修复) | **Drive 队列卡排队（QUEUED）**、`docws endpoint is not set` 错报与上传成功瞬时隐形修复 | 🔴 P0 | Go / Android | ✅ 已修复 |
+| [ISS-062](#iss-062-drive-上传很慢408-超时重传循环双-drain-引擎速度算法错误与通知线程抖动) | **Drive 上传「很慢」**：408 超时重传循环 / 双 drain 引擎 / 速度算法错误 / 通知线程抖动 | 🔴 P0 | Go / Android | ✅ 已修复 |
+| [ISS-063](#iss-063-go-层-30-个测试长期红着newSession-不再安装全局会话导致) | **Go 层 30 个测试长期红着**：`NewSession` 不再安装全局会话导致 | 🟠 P1 | Go / 测试基础设施 | ✅ 已修复 |
 | [ISS-062](#iss-062-drive-列表层级跳转滚动条位置恢复scrollpositions网页版最近删除免登录-webview-弹窗与-topappbar-状态栏自适应-padding-优化) | **Drive 列表层级跳转滚动条位置恢复**、网页版最近删除免登录 WebView 弹窗与 TopAppBar 状态栏自适应 Padding 优化 | 🟠 P1 | Android / UI + ViewModel | ✅ 已完成 |
 
 ---
@@ -5048,6 +5050,217 @@ POST singleFileUpload       -> 413 (Content-Length: 1478709456)
 
 1. **单元测试**：运行 `./gradlew app:testDebugUnitTest` 310 个单测全部通过。
 2. **实机验证**：重新编译并部署至设备，冷启动增量同步在 **1~2 秒内即完成**（显示“同步完成，共 15991 项”），照片网格缩略图瞬间全量渲染，切换至“云盘 (Drive)”标签页目录列表秒级加载，卡顿问题彻底解决。
+
+---
+
+## ISS-062 Drive 上传「很慢」：408 超时重传循环、双 drain 引擎、速度算法错误与通知线程抖动
+
+| 项 | 内容 |
+| --- | --- |
+| **发现时间** | 2026-11-06 21:55（真机 `RFGL71AVC3V` / SM-F9760） |
+| **现象** | 4 个 6~7 MB 的 `.heic` 传了近 10 分钟仍未完成；进度条到 100% 后继续挂 2 分钟才失败；通知里速度从 `1.6 MB/s` 掉到 `652 KB/s` 却始终 100% |
+| **严重级别** | 🔴 P0（核心功能不可用） |
+| **涉及模块** | Go / `drive_upload.go`、`errors.go`；Android / `DriveRepository`、`DriveUploadWorker`、`DriveUploadQueue`、`DriveUploadDao` |
+| **状态** | ✅ 已修复（实机验证通过） |
+
+### 现象与日志证据
+
+```
+21:55:30.867  Upload #13 failed raw: status=408 code=UNKNOWN size=6745072
+21:56:34.351  Retrying upload #13 for 20261106_110622.heic
+21:57:31.201  Explicit concurrent mark compact GC freed 78MB, 1406 LOS objects, total 127ms
+21:57:32.117  Upload #14 failed raw: status=408 code=UNKNOWN size=6997327
+21:57:32.119  Upload finished (active 4 -> 3)        <- 通知侧引擎
+21:57:32.119  Processor executing upload #13         <- 同一毫秒，另一个引擎
+```
+
+通知文本随时间：`1.6 MB/s (100%)` → 30 秒后 `652 KB/s (100%)`。
+
+### 根因（四条独立缺陷叠加）
+
+1. **两个 drain 引擎并跑**：`enqueueUpload` 调 `triggerUploadProcessor()`，`DriveViewModel` 又调
+   `DriveUploadWorker.enqueue()`。`uploadDrainMutex` 只防**并发**、不防**重复** —— A 传完释放锁后
+   B 立刻又扫一遍队列，同一文件传两次。这是 [ISS-050](#iss-050-drive-上传双引擎并跑同一任务重复上传与等待重启循环) 未彻底收口的残留路径。
+
+2. **速度是「累计平均」且能被冻结计数器蒙混**：
+   `bps = read / (now - phaseStartMs)` 按构造**单调下降**，且对停滞完全无感。
+
+3. **通知轮询每 500ms 换一个 IO 线程**：`observeActiveSnapshot()` 读的正是每 250ms 写一次的
+   同一张表，每次 emit 落在 `Dispatchers.IO` 不同线程（实测在 `30362`/`32625` 间来回跳），
+   7 MB 文件换来 **78 MB GC**。这是 [ISS-051](#iss-051-drive-上传通知卡在-18-后跳到-100通知更新被系统合并) 的同源问题，只是表现换成了 GC 抖动。
+
+4. **提交阶段没有超时（最致命）**：字节传完后进入 `/update/documents`，该请求走的是
+   `session.go` 的**共享 Client `Timeout: 30s`**。CWS 侧 `cwsIdleTimeout=120s` 又只在
+   「零字节变动」时触发。两者叠加 → 大量任务在**恰好 2 分钟**节点收到 408。
+   `ClassifyHTTPStatus(408)` 当时落到 `UNKNOWN` → 不重试，缓存副本不删 → 下次从 0 重新哈希重传。
+
+### 修复方案
+
+**Go（`drive_upload.go` / `errors.go`）**
+
+| 项 | 改动 |
+| --- | --- |
+| 新增 `cwsTotalTimeout = 100s` | 整段 body 写入的硬上限，**低于** CWS 边缘的 ~120s，让客户端先决定失败原因 |
+| 新增 `commitTimeout = 120s` | `/update/documents` 改用克隆 Transport 的独立 Client，不再继承共享 30s |
+| 新增 `progressEntryTTL = 5min` | `GetDriveUploadProgress` 现在会剔除过期条目；模糊匹配改取**最新**的一条，而不是 map 遍历撞上的第一条 |
+| 新增 `ClearDriveUploadProgress(key)` | 导出给 Kotlin。JNI 不返回时 `defer` 不执行，残留条目会被下一个文件继承 |
+| `ClassifyHTTPStatus(408) → ErrCodeTimeout` | 408 是传输超时，必须退避重试，绝不能当鉴权/数据错误 |
+| 失败时报告已传字节 | `传输停滞：120s 内无任何字节变动（已传 X/Y 字节）` / `传输超时：超过 100s 仍未完成`，不再以“HTTP 408”冒充服务端拒绝 |
+| 成功后先写 `PhaseUpload 100%` | 否则 reader 的最后一次定时采样可能落在 EOF 之前，UI 在提交阶段长时间停在 99% |
+
+**Android**
+
+| 项 | 改动 |
+| --- | --- |
+| 单一 drain 引擎 | `enqueueUpload` 只入队，改用 `DriveUploadWorker.enqueue()` 启动；删除 `triggerUploadProcessor()` |
+| 滑动窗口速度 | `SPEED_WINDOW_MS = 2_000`，速率 `(read - winStartRead) / Δt`；计数器回退时立即重置窗口（重传从 0 开始不能算出负速度） |
+| 100% 之后不再报速率 | `total>0 && read>=total` 时显示「正在写入云盘...」，不再出现 `652 KB/s (100%)` 这种误导 |
+| `totalBytes` 以 Go 为准 | 入队时拿到的 `filesize` 可能为 0（picker 无 SIZE 列），旧的兜底会把进度钉在 100% |
+| 通知固定单线程 | `Dispatchers.IO.limitedParallelism(1)`，消除线程抖动与 GC 风暴 |
+| `finally` 清理进度表 | `Icloudcore.clearDriveUploadProgress(upload.localPath)` |
+| **重试判定改看队列** | 新增 `DriveUploadDao.countFailed()` 与 `DriveUploadQueue.hasFailedWork()`；`doWork` 不再用 `failureCount == 0` 判定成功 |
+
+> [!CAUTION]
+> **最后一个改动是修完前三条才暴露出来的。** 实机第二轮日志：
+>
+> ```
+> 22:03:01 finished pass: processed=0, failed=1  -> Result.retry()
+> 22:03:32 finished pass: processed=0, failed=0  -> Result.success()   <- 错
+> ```
+>
+> 因为 `executeUpload` 失败时已把该行 `markFailed` 成 FAILED，它不再是 QUEUED，
+> `getNextPending()` 永远返回 null，pass 因而报告 `failed=0`。结果是
+> **WorkManager 认为全部完成，通知说“上传完成”，而文件其实还停在一个「重试」按钮上**。
+> 判定必须问「队列里还有没有 FAILED 行」，不能问「这一趟失败了几次」。
+
+### 验证结果
+
+1. **单测**：`:app:testDebugUnitTest` **320 个全绿**（新增 `failedUploadIsStillReportedAsOutstandingWork`）。
+2. **实机**（清空日志后连续两次上传）：
+
+```
+22:05:26.551 Enqueued upload #18 for 截屏2026-04-17 22.45.58.heic
+22:05:26.594 DriveUploadWorker started
+22:05:26.610 Worker executing upload #18          <- 只有一次，无 Processor 并行
+22:05:27.932 Upload #18 succeeded, speed=341 KB/s  (1.3 秒)
+22:05:28.819 finished pass: processed=1, failed=0, stillPending=false, stillFailed=false
+22:05:37.794 Worker executing upload #19: 1793289465659.png
+22:05:38.980 Upload #19 succeeded, speed=191 KB/s  (1.2 秒)
+22:05:40.006 finished pass: processed=1, failed=0, stillPending=false, stillFailed=false
+```
+
+3. **对比指标**：
+
+| 指标 | 修复前 | 修复后 |
+| --- | --- | --- |
+| 通知写入线程 | 2 个来回跳（`30362`/`32625`） | **固定 1 个** |
+| 单次 7 MB 上传 GC | 78 MB / 1406 LOS objects | **0**（全程仅 1 次轻量回收） |
+| 同一文件上传次数 | 2（双引擎各一遍） | **1** |
+| 408 失败 | 每个文件必然出现 | **未复现** |
+| 7 MB 文件耗时 | >10 分钟未完成 | **1.3 秒** |
+
+### 通用陷阱（已同步到 AGENTS.md §6.7.9）
+
+- **互斥锁防的是并发，不是重复。** 要杜绝“同一件事做两遍”，必须保证**只有一个入口**，
+  而不是给两个入口加锁。
+- **共享 `http.Client` 的 `Timeout` 是全局的。** 长耗时请求（上传 body、提交、下载）
+  必须用独立 Client，否则任何调大都会拖垮同 Client 上的短请求。
+- **「这一趟失败了几次」不等于「还有没有失败的任务」。** 状态机里的终态行不会被
+  领取循环再次返回，用循环计数判断整体进度必然漏账。
+- **累计平均不能当速度。** 它单调下降、对停滞无感，用户看到的是“越来越慢”。
+
+---
+
+## ISS-063 Go 层 30 个测试长期红着（`NewSession` 不再安装全局会话导致）
+
+| 项 | 内容 |
+| --- | --- |
+| **发现时间** | 2026-11-06（修 ISS-062 时注意到 `go test ./...` 有 30 个 FAIL） |
+| **现象** | `go test ./...` 输出 30 个 FAIL，但永远没人看 —— 每次都要先判断“是不是又那批老问题” |
+| **严重级别** | 🟠 P1（不直接影响用户，但让整个 Go 测试网失效） |
+| **涉及模块** | Go / `*_test.go` |
+| **状态** | ✅ 已修复（**112 passed / 0 failed**，`-shuffle=on` 连跑 3 次稳定） |
+
+### 根因
+
+全部 30 个失败都源于同一个错位：**`NewSession()` 不再把会话写进进程全局 `currentSession`**。
+
+这是 ISS-063 那次修复的副作用：为了让 `InitSession()` 只在 `ValidateSession()` **成功后**才安装会话
+（避免两个并发 `NewSession` 用半成品覆盖全局），安装被从构造里拆了出来。但测试里大量存在：
+
+```go
+session, err := NewSession("test=cookie", true)
+// ...
+session.CKDatabaseURL = ts.URL   // ← 写在一个没人读的结构上
+resJSON := CheckPrimaryZone()    // ← 读的是包级 currentSession，仍是 nil
+```
+
+于是每个用例都得到 `AUTH_EXPIRED / No active session`，**与它本来要验证的逻辑完全无关**。
+
+`session_test.go` 末尾甚至挂了句 `_ = session` —— 作者当时已经发现 session 没被用上，
+选择了压掉编译告警而不是修。
+
+### 连带伤害：测试顺序污染
+
+`resetSessionForTest()` 只在 `t.Cleanup` 里被少数测试调用。任何一个“设了 session 但没清理”
+的用例，都会让**下一个**用例拿着指向已关闭 `httptest` 服务器的会话去请求：
+
+```
+单跑  TestRetrieveItemDetailsInFoldersSuccess -> AUTH_EXPIRED
+全量                                               -> NETWORK / connection refused
+```
+
+同一个测试因运行顺序给出不同错误 —— 这是最难排查的一类测试故障。
+
+### 修复
+
+新增 `helper_test.go`：
+
+| 函数 | 职责 |
+| --- | --- |
+| `installSessionForTest(t, s)` | `sessionMu.Lock(); currentSession = s` + `t.Cleanup(resetSessionForTest)` |
+| `newTestSession(t)` | 统一 `NewSession` + 错误处理，消掉 4 行重复样板 |
+
+然后在 `drive_download_test.go`、`drive_test.go`、`drive_node_test.go`、`photos_test.go`、
+`photos_mediatype_test.go`、`session_test.go`、`upload_test.go` 的会话构造处一行接入。
+**没有任何测试断言的逻辑被削弱** —— 只是把“构造”补上了“安装”。
+
+### 这些测试保住了什么
+
+它们不是废弃代码，是 AGENTS.md 协议红线的可执行版本：
+
+| 测试组 | 守护的规则 |
+| --- | --- |
+| `TestRetrieveDownloadURL*` | ID 规范化（剥离 `FILE::` 前缀）、zone 推导、缺失 data_token 的处理 |
+| `TestDownloadToFile*` | `Range` 断点续传、**不发送 Origin/Referer**、401/404 映射 |
+| `TestRetrieveItemDetails*` | 包裹式请求体、空 items = NOT_FOUND |
+| `TestCheckPrimaryZone` / `TestFetchChanges` | syncToken 基线、增量同步 |
+| `TestFetchRecentlyDeleted` / `TestOrphanMastersNotAdded` | §4.8 的“孤儿 master 绝不能伪装成照片” |
+| `TestMediaType*` | Live Photo / QuickTime / duration-only 的 MIME 判定 |
+| `TestUploadPhotoAssetGuards` | `MISSING_PCS_PHOTOS` 前置校验 |
+| `TestSessionSummaryAndCookies` | 三要素 Cookie 与摘要上报 |
+
+### 验证
+
+```
+$ GOSUMDB=off go test -count=1 ./...
+ok  	icloudcore	0.952s          # 112 passed, 0 failed
+
+$ for i in 1 2 3; do go test -count=1 -shuffle=on ./...; done
+ok  	icloudcore	1.245s
+ok  	icloudcore	1.146s
+ok  	icloudcore	1.095s          # 顺序无关
+```
+
+### 教训
+
+> [!WARNING]
+> **“红着但没人看”的测试比没有测试更差。** 它同时浪费两件事：真正的回归会被
+> 30 条噪音淹没，而且团队会训练出“先忽略失败再说”的习惯。
+> 如果一次改动让一批测试红了，**当次就要修或删**，不能留给下一个人判断“哪些是真的”。
+>
+> 本项目已经在 [ISS-040](CHANGELOG_ISSUES.md) 上付过一次代价：那条 bug 活到线上，
+> 正是因为“编译通过 + 单测绿”被当成了验证。现在这里的 30 条红的，又让同一句话变成了空话。
 
 
 

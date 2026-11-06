@@ -26,11 +26,16 @@ func TestUploadPhotoAssetGuards(t *testing.T) {
 		t.Fatalf("Expected failure when invalid FD, got success")
 	}
 
-	// Test case 3: Active session without PCS-Photos cookie
-	_, err := NewSession("X-APPLE-WEBAUTH-TOKEN=token; X-APPLE-WEBAUTH-PCS-CloudKit=ck", true)
+	// Test case 3: Active session without PCS-Photos cookie.
+	//
+	// The session must be INSTALLED, not merely built: `UploadPhotoAssetByPath` reads the
+	// process-global session, so constructing one and discarding the result (which is what this
+	// test used to do) left it asserting against `NO_SESSION` instead of the guard it targets.
+	session, err := NewSession("X-APPLE-WEBAUTH-TOKEN=token; X-APPLE-WEBAUTH-PCS-CloudKit=ck", true)
 	if err != nil {
 		t.Fatalf("Failed to create mock session: %v", err)
 	}
+	installSessionForTest(t, session)
 
 	// Create temp file
 	tmp, err := os.CreateTemp("", "test_upload_*.jpg")

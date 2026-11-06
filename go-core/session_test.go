@@ -120,10 +120,14 @@ func TestBuildCookieHeaderPreservesValueBytes(t *testing.T) {
 
 func TestSessionSummaryAndCookies(t *testing.T) {
 	cookieStr := `X-APPLE-WEBAUTH-TOKEN="valid-token"; X-APPLE-WEBAUTH-HSA-TRUST="valid-trust"`
+
+	// GetSessionStateSummary / GetCurrentCookieString read the process-global session, not the
+	// struct returned by NewSession (ISS-063 keeps installation separate from construction).
 	session, err := NewSession(cookieStr, true)
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
+	installSessionForTest(t, session)
 
 	summary := GetSessionStateSummary()
 	if !strings.Contains(summary, `"hasAuthToken":true`) {
@@ -137,6 +141,4 @@ func TestSessionSummaryAndCookies(t *testing.T) {
 	if !strings.Contains(currentCookies, "X-APPLE-WEBAUTH-TOKEN=valid-token") {
 		t.Errorf("GetCurrentCookieString missing token: %s", currentCookies)
 	}
-
-	_ = session
 }

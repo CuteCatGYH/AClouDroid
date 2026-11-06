@@ -10,17 +10,18 @@ import (
 	"testing"
 )
 
-// newDownloadSession builds a session whose account info advertises `docws` at the test server.
+// newDownloadSession builds a session whose account info advertises `docws` at the test server,
+// and installs it as the process-global session so the API entry points can see it.
 func newDownloadSession(t *testing.T, docsURL string) *Session {
 	t.Helper()
-	resetSessionForTest()
-	t.Cleanup(resetSessionForTest)
 
-	session, err := NewSession("test=cookie", true)
-	if err != nil {
-		t.Fatalf("NewSession failed: %v", err)
-	}
+	session := newTestSession(t)
 	session.AccountInfoJSON = `{"webservices":{"docws":{"url":"` + docsURL + `"}}}`
+	// Retrieval paths resolve `docws` from account info first and fall back to DrivewsURL, so both
+	// need to point at the test server.
+	session.DrivewsURL = docsURL
+	session.DSID = "12345678"
+	installSessionForTest(t, session)
 	return session
 }
 

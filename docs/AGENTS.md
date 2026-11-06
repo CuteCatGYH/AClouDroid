@@ -692,10 +692,23 @@ adb logcat | grep -E "Glide|VideoDecoder|setDataSource|Failed to find any load p
 > [!CAUTION]
 > **`dataMutationLock` 救不了这个竞态。** 它在 `executeUpload` **内部**才获取，
 > 那时两个调用方已经各自决定要上传了。需要的是在**进入 drain 之前**的互斥。
+>
+> **而且互斥锁防的是「并发」，不是「重复」。** `uploadDrainMutex` 曾让两个引擎「轮流」
+> 而非「只跑一个」：A 传完释放锁，B 立即又扫一遍队列，同一文件传两次。
+> 实机日志：`Upload finished (active 4 -> 3)` 与 `Processor executing upload #13`
+> 处于**同一毫秒**。杜绝重复必须靠「只有一个入口」，不是靠加锁。见
+> [ISS-062](CHANGELOG_ISSUES.md#iss-062-drive-上传很慢408-超时重传循环双-drain-引擎速度算法错误与通知线程抖动)。
 
 **② `getNextPending()` 绝不得重置 `UPLOADING`。** 它每轮都被调用，一旦内部执行
 `resetUploadingToQueued()`，就要把刚领的任务又改回 QUEUED，循环永远前进不了、
 同一文件无限重传。孤儿恢复是**每次 drain 开始前一次**的事。
+
+> [!CAUTION]
+> **「这一趟失败了几次」不等于「还有没有失败的任务」。** 失败行会被 `markFailed` 成
+> FAILED，而 `getNextPending()` 只返回 QUEUED/UPLOADING —— 于是下一趟报告 `failed=0`，
+> `Result.success()` 被发出，**通知说“上传完成”而文件还停在一个「重试」按钮上**。
+> `DriveUploadWorker` 必须用 `DriveUploadQueue.hasFailedWork()`（查 `countFailed()`）
+> 判定，见实机日志 `failed=1 -> retry` 后跟 `failed=0 -> success`。
 
 **③ 长上传必须前台服务 + 有限重试。** 300 MB 传输要几分钟，普通后台 Worker
 随时被系统回收；`REPLACE` 会直接 kill 正在传的 Worker；无限 `retry()` 会把
@@ -706,8 +719,31 @@ adb logcat | grep -E "Glide|VideoDecoder|setDataSource|Failed to find any load p
 Android 会合并掉中间帧，表现为“卡在 18% 然后跳 100%”。用快照轮询 + 500ms +
 percent/text 不变则不发。**UI 横幅可以继续用 Flow**（Compose 状态没有合并问题）。
 
+> [!CAUTION]
+> **通知轮询必须锁定在单一线程上。** `observeActiveSnapshot()` 读的正是每 250ms 写一次的
+> 同一张表，落在 `Dispatchers.IO` 池上时每次 emit 会换一个线程（实测在 `30362`/`32625`
+> 之间来回跳）。代价是 7 MB 的文件换来 **78 MB GC**（`freed 78MB AllocSpace bytes,
+> 1406 LOS objects`）。用 `Dispatchers.IO.limitedParallelism(1)`。
+
+**⑤ 上传速度必须是滑动窗口，不能是累计平均。**
+`read / (now - phaseStartMs)` 按构造**单调下降**，并且对停滞完全无感（计数器冻结时它
+仍给出很大值）。实机表现为 `1.6 MB/s (100%)` → 30 秒后 `652 KB/s (100%)`。
+用 `(read - winStartRead) / Δt`（窗口 2s），计数器回退（重传）时立即重置。
+并在 `read >= total` 后停止报速率 —— 「652 KB/s (100%)」会被读成「还在传」。
+
+**⑥ 共享 `http.Client` 的 `Timeout` 是全局的，长耗时请求必须分开。**
+`Session.Client` 的 `Timeout: 30s` 不能调大（所有 CloudKit 短请求共用）。但
+`/update/documents` 与 CWS body 写入**曾经继承它**，结果是字节已传完却在提交阶段超时 ——
+用户看到的就是「进度 100% 后挂两分钟然后失败」。现在：`cwsTotalTimeout=100s`
+（低于 CWS 边缘的 ~120s，让我们先决定）、`commitTimeout=120s`（克隆 Transport 的独立
+Client）。且 **HTTP 408 必须分类为 `ErrCodeTimeout`**，不能落到 `UNKNOWN`——
+那会让一次被边缘切断的传输变成「不可重试」。
+
 另：Go 侧进度必须带 `Phase`（`HASH`/`UPLOAD`/`COMMIT`）。Drive 要对全文件做 SHA-256，
 这段窗口没有网络流量，不过报就会表现为“卡在传输中数分钟”。
+
+另：`Progress` 条目必须有 TTL（`progressEntryTTL = 5min`）且导出 `ClearDriveUploadProgress`。
+JNI 调用不返回时 `defer` 不执行，残留条目会被下一个文件继承，UI 显示「仍未开始的文件正在传」。
 
 **⑤ 上传上限是“账号区域”属性，不得硬编码成全局限制。**
 
@@ -860,6 +896,32 @@ val code = (error.cause as? HttpDataSource.InvalidResponseCodeException)?.respon
 > [!NOTE]
 > 本机环境 `sum.golang.org` 不可达，`scripts/build_aar.sh` 内部的 `go mod tidy` 会失败。
 > 需要 `GOSUMDB=off ./scripts/build_aar.sh`。
+
+### 9.4 测试必须全绿，不允许「已知红着」
+
+```bash
+cd go-core && GOSUMDB=off GOFLAGS=-mod=mod go test -count=1 ./...        # 112 passed / 0 failed
+cd go-core && GOSUMDB=off GOFLAGS=-mod=mod go test -count=1 -shuffle=on ./...   # 顺序无关
+```
+
+> [!CAUTION]
+> **「红着但没人看」的测试比没有测试更差。** 本项目的 Go 层曾长期有 **30 个测试是红的**，
+> 根因全部是同一个：`NewSession()` 在 ISS-063 后不再把会话写进进程全局 `currentSession`，
+> 而测试仍然只构造不安装，于是每个用例都撞 `No active session` 而失败 ——
+> **跟它本来要验证的逻辑毫无关系**。详见
+> [ISS-063](CHANGELOG_ISSUES.md#iss-063-go-层-30-个测试长期红着newSession-不再安装全局会话导致)。
+>
+> 代价是真实回归会被噪音淹没，而且团队会训练出“先忽略失败”的习惯。
+> **一次改动让测试红了，当次就要修或删，不能留给下一个人判断哪些是真的。**
+
+**写 Go 测试的两条硬规则：**
+
+| 规则 | 原因 |
+| --- | --- |
+| 需要让 API 入口看到会话，必须调 `installSessionForTest(t, s)` | `NewSession()` **只构造、不安装**。写到返回结构上的字段没人读 |
+| 不要在测试里直接赋值 `currentSession` | 它会污染后续测试（上一个用例指向已关闭的 httptest → 下一个报 `NETWORK`）。辅助函数已带 `t.Cleanup` |
+
+会话辅助函数在 `go-core/helper_test.go`。新增测试直接 `s := newTestSession(t)` 即可。
 
 ---
 

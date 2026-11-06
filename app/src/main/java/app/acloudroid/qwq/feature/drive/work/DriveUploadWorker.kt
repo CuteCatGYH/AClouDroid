@@ -23,10 +23,15 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 
 /**
  * Background WorkManager worker that drains the Drive upload queue and notifies progress.
+ *
+ * This is the ONLY drain engine. `DriveRepository.enqueueUpload` used to also start an in-process
+ * coroutine that drained the same queue; see the note on `uploadDrainMutex` there.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class DriveUploadWorker(
     appContext: Context,
     params: WorkerParameters
@@ -78,12 +83,24 @@ class DriveUploadWorker(
         // Polling at a rate below Android's coalescing threshold, and emitting only when the
         // rendered percent actually changes, fixes both. The UI banner keeps using the Room flow
         // (it is real Compose state and has no coalescing problem).
-        val notificationJob = CoroutineScope(Dispatchers.IO).launch {
+        //
+        // ## Why this now uses a dedicated single-thread dispatcher
+        //
+        // `observeActiveSnapshot()` issues a fresh SQLite query on every tick, and each call was
+        // landing on a *different* thread from `Dispatchers.IO`'s pool. Measured on device: the
+        // notification writes alternated between thread 30362 and 32625 twice a second, and a
+        // progress-only 7 MB upload produced a 78 MB concurrent-mark-compact GC
+        // (`freed 78MB AllocSpace bytes, 1406 LOS objects`) because every call re-materialised the
+        // entity list on a cold thread.
+        //
+        // One dedicated thread keeps the query warm, and makes the notification cadence
+        // predictable instead of scheduler-dependent.
+        val notificationDispatcher = Dispatchers.IO.limitedParallelism(1)
+        val notificationJob = CoroutineScope(notificationDispatcher).launch {
             var lastPercent = -1
             var lastText: String? = null
             while (isActive) {
-                val active = driveRepository.uploadQueue.observeActiveSnapshot()
-                val current = active.firstOrNull()
+                val current = driveRepository.uploadQueue.observeActiveSnapshot().firstOrNull()
                 if (current != null) {
                     val percent = if (current.filesize > 0) {
                         ((current.bytesUploaded * 100) / current.filesize).toInt().coerceIn(0, 100)
@@ -111,24 +128,47 @@ class DriveUploadWorker(
             notificationJob.cancel()
         }
 
+        // `failureCount` only counts failures that happened in THIS pass.
+        //
+        // A row that fails is moved to FAILED by `executeUpload`, so `getNextPending()` will no
+        // longer return it — a later pass therefore reports `failed=0` even though the queue still
+        // holds work that did not upload. Observed on device:
+        //
+        //   22:03:01 finished pass: processed=0, failed=1  -> Result.retry()
+        //   22:03:32 finished pass: processed=0, failed=0  -> Result.success()
+        //
+        // The second pass uploaded nothing, the file was still failed, and WorkManager was told
+        // "done". The outcome is that the notification says the upload completed while the file
+        // sits behind a Retry button. The drain loop's own counter is the wrong evidence; the
+        // queue table is the source of truth.
+        val stillPending = driveRepository.uploadQueue.hasPendingWork()
+        val stillFailed = driveRepository.uploadQueue.hasFailedWork()
+
         if (processedCount > 0) {
             showCompletionNotification(processedCount)
         } else {
             notificationManager.cancel(NOTIFICATION_ID)
         }
 
-        Log.i(TAG, "DriveUploadWorker finished pass: processed=$processedCount, failed=$failureCount")
+        Log.i(
+            TAG,
+            "DriveUploadWorker finished pass: processed=$processedCount, failed=$failureCount, " +
+                "stillPending=$stillPending, stillFailed=$stillFailed"
+        )
 
         // Bounded retry.
         //
-        // WorkManager's default retry backoff keeps re-running the worker forever. With a long
-        // upload that the OS already cancelled, that produced a visible cancel/restart loop on
-        // device (worker cancelled at 22:21:06, restarted at 22:21:20, then re-executed the same
-        // task at 22:21:40). Retrying is still right for a transient network failure, but only a
-        // limited number of times — after that the task is surfaced as FAILED in the UI instead of
-        // silently looping.
+        // WorkManager's default retry backoff re-runs the worker forever. With a long upload that
+        // the OS already cancelled, that produced a visible cancel/restart loop on device (worker
+        // cancelled at 22:21:06, restarted at 22:21:20, then re-executed the same task at
+        // 22:21:40). Retrying is still right for a transient network failure, but only a limited
+        // number of times.
+        //
+        // The decision is driven by what is STILL in the queue, not by this pass's failure count:
+        // a row that failed on an earlier attempt is not re-reported here, so `failed == 0` does
+        // not mean the work is done (see the note above `stillPending`).
         return when {
-            failureCount == 0 -> Result.success()
+            !stillPending && !stillFailed -> Result.success()
             runAttemptCount < MAX_RETRY_ATTEMPTS -> Result.retry()
             else -> {
                 Log.w(TAG, "DriveUploadWorker giving up after ${runAttemptCount + 1} attempts")

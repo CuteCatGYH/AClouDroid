@@ -669,7 +669,19 @@ class DriveRepository(
 
             val id = uploadQueue.enqueue(uploadEntity)
             Log.i(TAG, "Enqueued upload #$id for $filename into $targetFolderPath")
-            triggerUploadProcessor()
+            // Do NOT drain from here.
+            //
+            // `DriveUploadWorker` is the single drain engine (AGENTS §6.7.9 ①). This used to also
+            // call `triggerUploadProcessor()`, and since both loops share `uploadDrainMutex` they
+            // did not race — they took turns. The mutex only prevents CONCURRENT execution, not
+            // REPEATED execution: engine A drained #13, released the lock, and engine B immediately
+            // re-scanned the queue and uploaded the same file again. Observed on device as
+            // `Upload finished (active 4 -> 3)` and `Processor executing upload #13` in the same
+            // millisecond.
+            //
+            // Enqueue only writes the row. WorkManager survives a process kill, which the
+            // in-process coroutine does not, so the worker is also the safer of the two.
+            DriveUploadWorker.enqueue(appContext)
             Result.success(id)
         } catch (e: Exception) {
             Log.e(TAG, "enqueueUpload failed", e)
@@ -677,53 +689,26 @@ class DriveRepository(
         }
     }
 
-    private val isUploadProcessing = java.util.concurrent.atomic.AtomicBoolean(false)
-
     /**
-     * Serialises the whole drain loop across every processor (in-process trigger and WorkManager).
+     * Serialises the whole drain loop.
      *
-     * ## Why a process-wide flag was not enough
+     * ## There is exactly one drain engine now
      *
-     * [isUploadProcessing] only guarded `triggerUploadProcessor` against re-entering itself. It could
-     * not see [DriveUploadWorker], which runs in the same process but reached `executeUpload`
-     * directly. Observed symptom on device: two engines claimed upload #20 simultaneously
-     * (`Processor executing upload #20` and `DriveUploadWorker processing upload #20` in the same
-     * second), both hashed and streamed the same 300 MB file, and the WorkManager copy restarting
-     * from zero after being cancelled.
+     * [DriveUploadWorker] is the only caller of [drainUploadQueue]. This used to be shared with an
+     * in-process `triggerUploadProcessor()` started from `enqueueUpload`, and the mutex below was
+     * installed to stop the two from clashing. It did prevent *concurrent* execution, but not
+     * *repeated* execution: after engine A released the lock, engine B re-scanned the queue and
+     * uploaded the same rows again.
      *
-     * [dataMutationLock] does not help: it guards writes to local tables, and is taken *inside*
-     * `executeUpload`, so by then both callers have already decided to upload.
-     *
-     * A suspend [Mutex] is the right primitive here: a second processor blocks and then finds an
-     * empty queue, instead of duplicating work.
+     * The mutex is kept because WorkManager may still start a second worker instance (a retry
+     * racing a fresh enqueue); it now simply serialises worker passes.
      */
     private val uploadDrainMutex = kotlinx.coroutines.sync.Mutex()
-
-    fun triggerUploadProcessor() {
-        scope.launch(Dispatchers.IO) {
-            if (!isUploadProcessing.compareAndSet(false, true)) return@launch
-            try {
-                uploadDrainMutex.withLock {
-                    uploadQueue.resetUploadingToQueued()
-                    while (isActive) {
-                        val pending = uploadQueue.getNextPending() ?: break
-                        Log.i(TAG, "Processor executing upload #${pending.id}: ${pending.filename}")
-                        executeUpload(pending.id)
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Upload processor encountered error", e)
-            } finally {
-                isUploadProcessing.set(false)
-            }
-        }
-    }
 
     /**
      * Drain entry point for [app.acloudroid.qwq.feature.drive.work.DriveUploadWorker].
      *
-     * Shares [uploadDrainMutex] with [triggerUploadProcessor] so the two engines take turns rather
-     * than race. Returns the number of files uploaded so the worker can report progress.
+     * Returns the number of files uploaded so the worker can report progress.
      */
     suspend fun drainUploadQueue(): Pair<Int, Int> = withContext(Dispatchers.IO) {
         var succeeded = 0
@@ -824,8 +809,25 @@ class DriveRepository(
 
         uploadQueue.markUploading(uploadId)
 
-        var phaseStartMs = System.currentTimeMillis()
+        // Session start, kept only for the completion message.
+        val transferStartMs = System.currentTimeMillis()
+
+        // --- Sliding-window speed tracking ------------------------------------------------
+        //
+        // The previous formula was `bytes / (now - phaseStartMs)` — a *cumulative average* since
+        // the phase began. That is monotonically decreasing by construction, so a healthy transfer
+        // looked like it was slowing down, and it is completely blind to a stall (a frozen counter
+        // still yields a large "average").
+        //
+        // Observed on device: `1.6 MB/s (100%)` followed 30 s later by `652 KB/s (100%)` for the
+        // same file — the same cumulative average, falling.
+        //
+        // The window below reports the rate over the last ~2 s, which is what a user expects from
+        // a speed readout and which drops to `0 B/s` when bytes genuinely stop moving.
         var lastPhase = ""
+        var winStartMs = System.currentTimeMillis()
+        var winStartRead = 0L
+        var lastRead = 0L
 
         val pollJob = scope.launch(Dispatchers.IO) {
             while (isActive) {
@@ -835,24 +837,50 @@ class DriveRepository(
                 }.getOrNull() ?: continue
 
                 val read = pObj.optLong("bytesUploaded", 0L)
-                val total = pObj.optLong("totalBytes", upload.filesize)
+                // Go reports the authoritative total for the phase. Trust it over the `filesize`
+                // captured at enqueue time: that value can be 0 when the picker's cursor had no
+                // SIZE column, in which case the poller divided by a stale fallback and pinned the
+                // bar at 100%.
+                val reportedTotal = pObj.optLong("totalBytes", 0L)
+                val total = if (reportedTotal > 0L) reportedTotal else upload.filesize
                 val phase = pObj.optString("phase", "UPLOAD")
                 val now = System.currentTimeMillis()
 
                 if (phase != lastPhase) {
                     lastPhase = phase
-                    phaseStartMs = now
+                    winStartMs = now
+                    winStartRead = read
+                    lastRead = read
                 }
 
+                if (phase == "HASH" || phase == "COMMIT") {
+                    val pct = if (total > 0) ((read * 100) / total).toInt().coerceIn(0, 100) else 0
+                    val speedText = if (phase == "HASH") "校验中 $pct%" else "正在写入云盘..."
+                    uploadQueue.updateProgressAndSpeed(uploadId, read, speedText)
+                    continue
+                }
+
+                // Restart the window every ~2 s, or immediately if the counter went backwards
+                // (a retried upload restarts from byte 0 — a negative delta must not produce a
+                // negative speed).
+                val winMs = now - winStartMs
+                if (winMs >= SPEED_WINDOW_MS || read < lastRead) {
+                    winStartMs = now
+                    winStartRead = read
+                }
+                lastRead = read
+
+                val windowSec = ((now - winStartMs) / 1000.0).coerceAtLeast(0.25)
+                val bps = ((read - winStartRead) / windowSec).toLong().coerceAtLeast(0L)
                 val pct = if (total > 0) ((read * 100) / total).toInt().coerceIn(0, 100) else 0
-                val speedText = when (phase) {
-                    "HASH" -> "校验中 $pct%"
-                    "COMMIT" -> "正在写入云盘..."
-                    else -> {
-                        val elapsedSec = ((now - phaseStartMs) / 1000.0).coerceAtLeast(0.001)
-                        val bps = (read / elapsedSec).toLong()
-                        "${formatSpeed(bps)} ($pct%)"
-                    }
+
+                // Once every byte is in, stop quoting a rate. A 0-length delta window makes any
+                // computed speed meaningless, and "652 KB/s (100%)" was being read by the user as
+                // "still transferring" while the commit round trip ran.
+                val speedText = if (total > 0 && read >= total) {
+                    "正在写入云盘..."
+                } else {
+                    "${formatSpeed(bps)} ($pct%)"
                 }
 
                 uploadQueue.updateProgressAndSpeed(uploadId, read, speedText)
@@ -882,7 +910,7 @@ class DriveRepository(
                 }
             }
 
-            val uploadElapsedSec = ((System.currentTimeMillis() - phaseStartMs) / 1000.0).coerceAtLeast(0.001)
+            val uploadElapsedSec = ((System.currentTimeMillis() - transferStartMs) / 1000.0).coerceAtLeast(0.001)
             val speedText = formatSpeed((upload.filesize / uploadElapsedSec).toLong())
 
             if (obj.optBoolean("success", false)) {
@@ -982,6 +1010,14 @@ class DriveRepository(
                     throw ce
                 } finally {
                     pollJob.cancel()
+
+                    // Drop the Go-side progress entry. `uploadDriveItemFromFile` clears it from a
+                    // `defer`, but that only runs when the JNI call actually returns: a process kill
+                    // or a coroutine cancelled while the blocking call is in flight leaves the entry
+                    // behind. `GetDriveUploadProgress`'s basename fallback would then hand that
+                    // abandoned counter to the NEXT upload, and the banner showed a stalled
+                    // percentage for a file that had not moved a byte.
+                    runCatching { Icloudcore.clearDriveUploadProgress(upload.localPath) }
                 }
     }
 
@@ -1430,6 +1466,15 @@ class DriveRepository(
 
     companion object {
         private const val TAG = "DriveRepository"
+
+        /**
+         * Sliding window for the transfer-speed readout.
+         *
+         * Long enough that per-chunk jitter does not make the number jump around, short enough
+         * that a genuine stall shows up as `准备中...` within a couple of seconds instead of being
+         * masked by the cumulative average it replaced.
+         */
+        private const val SPEED_WINDOW_MS = 2_000L
 
         /** Apple's two "your session is no longer valid" statuses. */
         private val AUTH_STATUS_CODES = setOf(401, 421)

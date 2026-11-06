@@ -21,6 +21,16 @@ interface DriveUploadDao {
     @Query("SELECT * FROM drive_upload_queue WHERE status IN ('QUEUED', 'UPLOADING') ORDER BY createdAt ASC")
     suspend fun getPendingUploads(): List<DriveUploadEntity>
 
+    /**
+     * Count of rows still in FAILED state.
+     *
+     * Deliberately separate from [getPendingUploads], which excludes FAILED: a drain pass asks
+     * "is there still failed work in the queue?" precisely for the rows that query will never
+     * return.
+     */
+    @Query("SELECT COUNT(*) FROM drive_upload_queue WHERE status = 'FAILED'")
+    suspend fun countFailed(): Int
+
     @Query("SELECT * FROM drive_upload_queue ORDER BY createdAt DESC")
     fun observeAllUploads(): Flow<List<DriveUploadEntity>>
 

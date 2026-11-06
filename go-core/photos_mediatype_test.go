@@ -51,12 +51,10 @@ func servePage(t *testing.T, assetFields, masterFields string) PhotoItem {
 	}))
 	defer ts.Close()
 
-	session, err := NewSession("test=cookie", true)
-	if err != nil {
-		t.Fatalf("NewSession: %v", err)
-	}
+	session := newTestSession(t)
 	session.CKDatabaseURL = ts.URL
 	session.DSID = "12345678"
+	installSessionForTest(t, session)
 
 	var page PhotoPageResult
 	if err := json.Unmarshal([]byte(FetchPhotoPage("", 50)), &page); err != nil {

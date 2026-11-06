@@ -83,6 +83,15 @@ func ClassifyHTTPStatus(status int) string {
 		return ErrCodeNotFound
 	case status == http.StatusTooManyRequests:
 		return ErrCodeRateLimited
+	case status == http.StatusRequestTimeout:
+		// 408 Request Timeout.
+		//
+		// This used to fall through to UNKNOWN, and Drive's upload path then treated it as a
+		// non-retryable failure — so a transfer that the edge simply cut short was reported as a
+		// generic error, the cached file was left in place, and the next user tap re-hashed the
+		// whole file and started from byte 0. It is a transport timeout in every way that matters
+		// to the caller (AGENTS §7.1): back off and retry, never rebuild the session.
+		return ErrCodeTimeout
 	default:
 		return ErrCodeUnknown
 	}

@@ -26,12 +26,10 @@ func TestCheckPrimaryZone(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	session, err := NewSession("test=cookie", true)
-	if err != nil {
-		t.Fatalf("NewSession failed: %v", err)
-	}
+	session := newTestSession(t)
 	session.CKDatabaseURL = ts.URL
 	session.DSID = "12345678"
+	installSessionForTest(t, session)
 
 	resJSON := CheckPrimaryZone()
 	var res ZoneCheckResult
@@ -129,12 +127,10 @@ func TestFetchPhotoPageAndParse(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	session, err := NewSession("test=cookie", true)
-	if err != nil {
-		t.Fatalf("NewSession failed: %v", err)
-	}
+	session := newTestSession(t)
 	session.CKDatabaseURL = ts.URL
 	session.DSID = "12345678"
+	installSessionForTest(t, session)
 
 	pageJSON := FetchPhotoPage("", 50)
 	var page PhotoPageResult
@@ -207,12 +203,10 @@ func TestFetchChanges(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	session, err := NewSession("test=cookie", true)
-	if err != nil {
-		t.Fatalf("NewSession failed: %v", err)
-	}
+	session := newTestSession(t)
 	session.CKDatabaseURL = ts.URL
 	session.DSID = "12345678"
+	installSessionForTest(t, session)
 
 	changesJSON := FetchChanges("old-token", 50)
 	var changes PhotoChangesResult
@@ -256,12 +250,10 @@ func TestRefreshAssetUrls(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	session, err := NewSession("test=cookie", true)
-	if err != nil {
-		t.Fatalf("NewSession failed: %v", err)
-	}
+	session := newTestSession(t)
 	session.CKDatabaseURL = ts.URL
 	session.DSID = "12345678"
+	installSessionForTest(t, session)
 
 	urlsJSON := RefreshAssetUrls(`["master-uuid-1"]`)
 	var refreshRes RefreshUrlsResult
@@ -305,12 +297,10 @@ func TestOrphanMastersNotAdded(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	session, err := NewSession("test=cookie", true)
-	if err != nil {
-		t.Fatalf("NewSession failed: %v", err)
-	}
+	session := newTestSession(t)
 	session.CKDatabaseURL = ts.URL
 	session.DSID = "12345678"
+	installSessionForTest(t, session)
 
 	pageJSON := FetchPhotoPage("", 50)
 	var page PhotoPageResult
@@ -365,12 +355,10 @@ func TestFetchPhotoPageReportsDeletedIds(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	session, err := NewSession("test=cookie", true)
-	if err != nil {
-		t.Fatalf("NewSession failed: %v", err)
-	}
+	session := newTestSession(t)
 	session.CKDatabaseURL = ts.URL
 	session.DSID = "12345678"
+	installSessionForTest(t, session)
 
 	pageJSON := FetchPhotoPage("", 50)
 	var page PhotoPageResult
@@ -425,12 +413,10 @@ func TestFetchRecentlyDeleted(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	session, err := NewSession("test=cookie", true)
-	if err != nil {
-		t.Fatalf("NewSession failed: %v", err)
-	}
+	session := newTestSession(t)
 	session.CKDatabaseURL = ts.URL
 	session.DSID = "12345678"
+	installSessionForTest(t, session)
 
 	delJSON := FetchRecentlyDeleted()
 	var delRes RecentlyDeletedResult

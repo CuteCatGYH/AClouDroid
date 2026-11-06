@@ -34,6 +34,9 @@ class DriveUploadQueueTest {
             uploads.values.filter { it.status in listOf(DriveUploadStatus.QUEUED, DriveUploadStatus.UPLOADING) }
                 .sortedBy { it.createdAt }
 
+        override suspend fun countFailed(): Int =
+            uploads.values.count { it.status == DriveUploadStatus.FAILED }
+
         override fun observeAllUploads() = flowOf(uploads.values.sortedByDescending { it.createdAt })
 
         override fun observeActiveUploads() = flowOf(
@@ -215,6 +218,48 @@ class DriveUploadQueueTest {
         queue.markFailed(id, "network")
 
         assertNull(queue.getNextPending())
+    }
+
+    /**
+     * A failed row must remain visible to the worker's "is there work left?" probe.
+     *
+     * `getNextPending()` deliberately skips FAILED rows, so it cannot be used to answer this
+     * question. When the worker inferred completion from `failureCount == 0` (failures from
+     * *earlier* passes are not re-counted), a retry pass that uploaded nothing reported success
+     * while the file was still failed. Observed on device:
+     *
+     *   22:03:01 finished pass: processed=0, failed=1  -> retry
+     *   22:03:32 finished pass: processed=0, failed=0  -> success   <- WRONG
+     */
+    @Test
+    fun failedUploadIsStillReportedAsOutstandingWork() = runBlocking {
+        val dao = FakeDriveUploadDao()
+        val queue = DriveUploadQueue(dao)
+
+        val id = queue.enqueue(
+            DriveUploadEntity(
+                localPath = "/cache/needs-retry.bin",
+                targetFolderDrivewsId = "FOLDER::root",
+                targetFolderPath = "/",
+                filename = "needs-retry.bin",
+                filesize = 42L,
+                mimeType = "application/octet-stream"
+            )
+        )
+
+        assertTrue("a freshly queued row is pending work", queue.hasPendingWork())
+        assertTrue("nothing has failed yet", !queue.hasFailedWork())
+
+        queue.markUploading(id)
+        queue.markFailed(id, "network")
+
+        // The row left QUEUED, so the pending probe is now false — the failed probe must carry it.
+        assertTrue("a failed row is no longer pending", !queue.hasPendingWork())
+        assertTrue("a failed row must still count as outstanding", queue.hasFailedWork())
+
+        // After a successful retry it must clear again, otherwise the worker retries forever.
+        queue.markSuccess(id, "doc-1")
+        assertTrue("a completed row is not outstanding", !queue.hasFailedWork())
     }
 
     /** The notification poller reads a snapshot; it must reflect live byte counts. */    @Test

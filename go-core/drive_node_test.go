@@ -22,11 +22,9 @@ func TestRetrieveItemDetailsSendsWrappedBody(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	session, err := NewSession("test=cookie", true)
-	if err != nil {
-		t.Fatalf("NewSession failed: %v", err)
-	}
+	session := newTestSession(t)
 	session.DrivewsURL = ts.URL
+	installSessionForTest(t, session)
 
 	RetrieveItemDetails("FOLDER::com.apple.CloudDocs::root")
 
@@ -52,11 +50,9 @@ func TestRetrieveItemDetailsSuccess(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	session, err := NewSession("test=cookie", true)
-	if err != nil {
-		t.Fatalf("NewSession failed: %v", err)
-	}
+	session := newTestSession(t)
 	session.DrivewsURL = ts.URL
+	installSessionForTest(t, session)
 
 	var res DriveNodeResult
 	if err := json.Unmarshal([]byte(RetrieveItemDetails("FOLDER::com.apple.CloudDocs::D2D2")), &res); err != nil {
@@ -85,11 +81,9 @@ func TestRetrieveItemDetailsEmptyItemsIsNotFound(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	session, err := NewSession("test=cookie", true)
-	if err != nil {
-		t.Fatalf("NewSession failed: %v", err)
-	}
+	session := newTestSession(t)
 	session.DrivewsURL = ts.URL
+	installSessionForTest(t, session)
 
 	var res DriveNodeResult
 	if err := json.Unmarshal([]byte(RetrieveItemDetails("FOLDER::com.apple.CloudDocs::gone")), &res); err != nil {
@@ -110,11 +104,9 @@ func TestRetrieveItemDetailsHTTP401(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	session, err := NewSession("test=cookie", true)
-	if err != nil {
-		t.Fatalf("NewSession failed: %v", err)
-	}
+	session := newTestSession(t)
 	session.DrivewsURL = ts.URL
+	installSessionForTest(t, session)
 
 	var res DriveNodeResult
 	if err := json.Unmarshal([]byte(RetrieveItemDetails("root")), &res); err != nil {

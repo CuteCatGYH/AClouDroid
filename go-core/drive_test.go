@@ -75,12 +75,10 @@ func TestRetrieveItemDetailsInFoldersSuccess(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	session, err := NewSession("test=cookie", true)
-	if err != nil {
-		t.Fatalf("NewSession failed: %v", err)
-	}
+	session := newTestSession(t)
 	session.DrivewsURL = ts.URL
 	session.DSID = "12345678"
+	installSessionForTest(t, session)
 
 	resJSON := RetrieveItemDetailsInFolders("root")
 	var res DriveFolderListResult
@@ -124,11 +122,9 @@ func TestRetrieveItemDetailsInFoldersHTTP401(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	session, err := NewSession("test=cookie", true)
-	if err != nil {
-		t.Fatalf("NewSession failed: %v", err)
-	}
+	session := newTestSession(t)
 	session.DrivewsURL = ts.URL
+	installSessionForTest(t, session)
 
 	resJSON := RetrieveItemDetailsInFolders("FOLDER::com.apple.CloudDocs::root")
 	var res DriveFolderListResult
@@ -154,11 +150,9 @@ func TestRetrieveItemDetailsInFoldersHTTP404(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	session, err := NewSession("test=cookie", true)
-	if err != nil {
-		t.Fatalf("NewSession failed: %v", err)
-	}
+	session := newTestSession(t)
 	session.DrivewsURL = ts.URL
+	installSessionForTest(t, session)
 
 	resJSON := RetrieveItemDetailsInFolders("FOLDER::com.apple.CloudDocs::nonexistent")
 	var res DriveFolderListResult
@@ -186,10 +180,7 @@ func TestSessionDrivewsURLPopulation(t *testing.T) {
 		}
 	}`)
 
-	session, err := NewSession("test=cookie", true)
-	if err != nil {
-		t.Fatalf("NewSession failed: %v", err)
-	}
+	session := newTestSession(t)
 
 	initRes, err := session.handleValidateResponse(validateJSON, true)
 	if err != nil {

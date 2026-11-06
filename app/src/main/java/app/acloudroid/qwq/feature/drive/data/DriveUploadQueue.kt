@@ -74,6 +74,19 @@ class DriveUploadQueue(
         dao.getPendingUploads().any { it.status == DriveUploadStatus.QUEUED }
     }
 
+    /**
+     * True when at least one row is in FAILED state and still sitting in the queue.
+     *
+     * Needed because a failed row is NOT returned by [getNextPending] — it is no longer QUEUED —
+     * so a drain pass that only reports "how many failed this time" reports zero for failures that
+     * happened in an earlier pass. `DriveUploadWorker` uses this to decide between `success()`
+     * and `retry()`, and getting it wrong means WorkManager is told the upload finished while the
+     * file is still waiting for the user to press Retry.
+     */
+    suspend fun hasFailedWork(): Boolean = queueMutex.withLock {
+        dao.countFailed() > 0
+    }
+
     suspend fun resetUploadingToQueued() = queueMutex.withLock {
         dao.resetUploadingToQueued()
     }

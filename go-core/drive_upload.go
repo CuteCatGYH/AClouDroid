@@ -46,12 +46,56 @@ const (
 	// above any plausible TCP retransmit window so a momentarily congested link is not
 	// mistaken for a dead one.
 	cwsIdleTimeout = 120 * time.Second
+
+	// cwsTotalTimeout bounds the WHOLE CWS body write.
+	//
+	// cwsIdleTimeout alone is not enough: the watchdog only fires when the byte counter stops
+	// moving, so an upload that drip-feeds a few hundred bytes per tick can run unbounded. Observed
+	// on device: several consecutive uploads each failed with HTTP 408 after almost exactly two
+	// minutes — the CWS edge was enforcing its own deadline while we happily waited. This ceiling
+	// sits below that edge deadline so WE decide first and can name the reason.
+	cwsTotalTimeout = 100 * time.Second
+
+	// commitTimeout bounds /update/documents (the CloudDocs commit round trip).
+	//
+	// This used to inherit Session.Client's blanket `Timeout: 30s`, which is shared with every
+	// CloudKit query and therefore cannot simply be raised. The commit is a small JSON POST that
+	// normally returns in well under a second, but it runs AFTER the body has been fully streamed —
+	// so on device a stalled commit meant the progress bar sat at 100% while the file appeared to
+	// upload forever, and the eventual failure discarded the whole transfer.
+	commitTimeout = 120 * time.Second
+
+	// progressEntryTTL is how long a finished/failed upload's progress entry is kept after its
+	// last update before being swept.
+	//
+	// Entries are otherwise only removed by uploadDriveItemFromFile's `defer`. A JNI call that never
+	// returns (process killed mid-stream), an empty key, or a bare-filename lookup all leave a stale
+	// entry behind, and GetDriveUploadProgress's fuzzy `filepath.Base` fallback then hands the NEXT
+	// upload that abandoned counter. The UI read that as "still uploading" on a file that had not
+	// started yet.
+	progressEntryTTL = 5 * time.Minute
 )
 
 var (
-	uploadProgressMap   = make(map[string]DriveUploadProgress)
-	uploadProgressMutex sync.RWMutex
+	uploadProgressMap = make(map[string]DriveUploadProgress)
+	// uploadProgressUpdatedAt mirrors uploadProgressMap's keys and records the last write, so
+	// stale entries can be swept (see progressEntryTTL).
+	uploadProgressUpdatedAt = make(map[string]time.Time)
+	uploadProgressMutex     sync.RWMutex
 )
+
+// sweepLocked drops progress entries that have not been touched for progressEntryTTL.
+//
+// Caller must hold uploadProgressMutex for writing. This exists because the map had no expiry at
+// all: an entry survived forever unless the owning upload reached its `defer`.
+func sweepStaleProgressLocked(now time.Time) {
+	for k, at := range uploadProgressUpdatedAt {
+		if now.Sub(at) > progressEntryTTL {
+			delete(uploadProgressUpdatedAt, k)
+			delete(uploadProgressMap, k)
+		}
+	}
+}
 
 type progressReader struct {
 	reader     io.Reader
@@ -69,14 +113,22 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 	if n > 0 {
 		pr.mu.Lock()
 		pr.read += int64(n)
+		cur := pr.read
 		pr.mu.Unlock()
 		now := time.Now()
-		if now.Sub(pr.lastUpdate) >= 150*time.Millisecond || pr.read == pr.total || err != nil {
+		if now.Sub(pr.lastUpdate) >= 150*time.Millisecond || cur == pr.total || err != nil {
 			pr.lastUpdate = now
-			updateDriveUploadProgress(pr.key, pr.read, pr.total)
+			updateDriveUploadProgress(pr.key, cur, pr.total)
 		}
 	}
 	return n, err
+}
+
+// currentRead returns the byte count transferred so far, safe for concurrent sampling.
+func (pr *progressReader) currentRead() int64 {
+	pr.mu.Lock()
+	defer pr.mu.Unlock()
+	return pr.read
 }
 
 func updateDriveUploadProgress(key string, read int64, total int64) {
@@ -94,13 +146,16 @@ func updateDriveUploadProgressPhase(key string, read int64, total int64, phase s
 			pct = 100.0
 		}
 	}
+	now := time.Now()
 	uploadProgressMutex.Lock()
+	sweepStaleProgressLocked(now)
 	uploadProgressMap[key] = DriveUploadProgress{
 		BytesUploaded: read,
 		TotalBytes:    total,
 		Progress:      pct,
 		Phase:         phase,
 	}
+	uploadProgressUpdatedAt[key] = now
 	uploadProgressMutex.Unlock()
 }
 
@@ -112,26 +167,51 @@ func updateDriveUploadProgressPhase(key string, read int64, total int64, phase s
 // `/c/d/report.pdf` collide — two concurrent uploads would then report each other's byte counts.
 func GetDriveUploadProgress(key string) string {
 	key = strings.TrimSpace(key)
+	now := time.Now()
 	uploadProgressMutex.RLock()
 	prog, ok := uploadProgressMap[key]
+	stale := ok && now.Sub(uploadProgressUpdatedAt[key]) > progressEntryTTL
 	if !ok && key != "" {
+		// Report the MOST RECENT basename match, not the first one the map happens to yield.
+		// Two uploads of the same filename in different folders used to race on this loop and the
+		// UI could sample either counter.
 		base := filepath.Base(key)
+		var newest time.Time
 		for k, p := range uploadProgressMap {
-			if filepath.Base(k) == base {
+			if filepath.Base(k) != base {
+				continue
+			}
+			at := uploadProgressUpdatedAt[k]
+			if at.After(newest) {
+				newest = at
 				prog = p
 				ok = true
-				break
 			}
+		}
+		if ok && now.Sub(newest) > progressEntryTTL {
+			stale = true
 		}
 	}
 	uploadProgressMutex.RUnlock()
 
-	if !ok {
+	// A stale entry must read as "idle at 0%", never as a live counter that a later upload then
+	// inherits (see progressEntryTTL).
+	if !ok || stale {
 		b, _ := json.Marshal(DriveUploadProgress{BytesUploaded: 0, TotalBytes: 0, Progress: 0, Phase: PhaseHash})
 		return string(b)
 	}
 	b, _ := json.Marshal(prog)
 	return string(b)
+}
+
+// ClearDriveUploadProgress drops the live progress entry for a key.
+//
+// Exported for the Kotlin layer: the poll loop runs in a different coroutine than the blocking
+// JNI upload call, so on the failure paths where the Go function returns early (or the coroutine
+// is cancelled) nothing inside Go ever reaches the `defer` that clears the entry. Without this the
+// banner kept showing the previous file's byte count for the next one.
+func ClearDriveUploadProgress(key string) {
+	clearDriveUploadProgress(strings.TrimSpace(key))
 }
 
 func clearDriveUploadProgress(key string) {
@@ -140,6 +220,7 @@ func clearDriveUploadProgress(key string) {
 	}
 	uploadProgressMutex.Lock()
 	delete(uploadProgressMap, key)
+	delete(uploadProgressUpdatedAt, key)
 	uploadProgressMutex.Unlock()
 }
 
@@ -186,6 +267,7 @@ func computeFileSha256Base64WithProgress(f *os.File, size int64, key string) (st
 	updateDriveUploadProgressPhase(key, size, size, PhaseHash)
 	return base64.StdEncoding.EncodeToString(h.Sum(nil)), nil
 }
+
 type DriveUploadResult struct {
 	ResultBase
 	DocumentID   string `json:"documentId,omitempty"`
@@ -378,21 +460,21 @@ func uploadDriveItemFromFile(f *os.File, filename string, mimeType string, targe
 
 	cwsClient := &http.Client{
 		Transport: cwsTransport,
-		// No blanket Timeout: it is a *total* deadline covering the whole body write, so a
-		// 1 GB file at 2 MB/s (≈8.5 min) would always be killed mid-stream no matter how
-		// healthy the connection is. Idle-stall detection is what we actually want, and it
-		// is enforced by the watchdog goroutine below.
-		Timeout: 0,
+		// A total deadline, sized above what a healthy transfer needs (100 s at 1 MB/s is 100 MB)
+		// and below the CWS edge's own ~120 s cutoff, so a stall is reported by us instead of
+		// surfacing as an opaque HTTP 408 after two minutes of apparent progress.
+		Timeout: cwsTotalTimeout,
 	}
 
 	// Watchdog: abort the upload only when no bytes have moved for cwsIdleTimeout.
 	// This distinguishes "slow but alive" (keep going) from "connection died silently"
 	// (fail fast and let the caller retry).
-	swapCtx, cancelCtx := context.WithCancel(context.Background())
+	uploadCtx, cancelCtx := context.WithTimeout(context.Background(), cwsTotalTimeout)
 	defer cancelCtx()
-	cwsReq = cwsReq.WithContext(swapCtx)
+	cwsReq = cwsReq.WithContext(uploadCtx)
 
 	var lastBytes int64
+	var stalledFor time.Duration
 	watchdogDone := make(chan struct{})
 	go func() {
 		defer close(watchdogDone)
@@ -401,7 +483,7 @@ func uploadDriveItemFromFile(f *os.File, filename string, mimeType string, targe
 		stalled := time.Duration(0)
 		for {
 			select {
-			case <-swapCtx.Done():
+			case <-uploadCtx.Done():
 				return
 			case <-ticker.C:
 				pr.mu.Lock()
@@ -409,6 +491,7 @@ func uploadDriveItemFromFile(f *os.File, filename string, mimeType string, targe
 				pr.mu.Unlock()
 				if cur == lastBytes {
 					stalled += cwsWatchdogInterval
+					stalledFor = stalled
 					if stalled >= cwsIdleTimeout {
 						cancelCtx()
 						return
@@ -425,6 +508,24 @@ func uploadDriveItemFromFile(f *os.File, filename string, mimeType string, targe
 	cancelCtx()
 	<-watchdogDone
 	if err != nil {
+		// Name the deadline explicitly.
+		//
+		// Previously a stalled body was reported as "CWS streaming upload failed with HTTP 408",
+		// which reads like the server refused the file. It was almost always a client-side stall,
+		// and the UI paid for it by re-hashing and re-uploading instead of backing off.
+		if uploadCtx.Err() == context.DeadlineExceeded {
+			pr.mu.Lock()
+			moved := pr.read
+			pr.mu.Unlock()
+			if stalledFor >= cwsIdleTimeout {
+				return makeDriveUploadError(ErrCodeTimeout, 0,
+					fmt.Sprintf("传输停滞：%s 内无任何字节变动（已传 %d/%d 字节）",
+						cwsIdleTimeout, moved, fileSize))
+			}
+			return makeDriveUploadError(ErrCodeTimeout, 0,
+				fmt.Sprintf("传输超时：超过 %s 仍未完成（已传 %d/%d 字节）",
+					cwsTotalTimeout, moved, fileSize))
+		}
 		return makeDriveUploadError(ClassifyNetErr(err), 0, "CWS streaming upload failed: "+err.Error())
 	}
 	defer cwsResp.Body.Close()
@@ -435,9 +536,21 @@ func uploadDriveItemFromFile(f *os.File, filename string, mimeType string, targe
 	}
 
 	if cwsResp.StatusCode != http.StatusOK && cwsResp.StatusCode != http.StatusCreated {
+		// A 408 from the edge means our body write did not finish in time. Report it as a timeout
+		// so Kotlin backs off and retries instead of treating it like an auth or data failure.
+		if cwsResp.StatusCode == http.StatusRequestTimeout {
+			return makeDriveUploadError(ErrCodeTimeout, cwsResp.StatusCode,
+				fmt.Sprintf("CWS 服务器报告传输超时（HTTP 408）：已传 %d/%d 字节，%s",
+					pr.currentRead(), fileSize, string(cwsBody)))
+		}
 		return makeDriveUploadError(ClassifyHTTPStatus(cwsResp.StatusCode), cwsResp.StatusCode,
 			fmt.Sprintf("CWS streaming upload failed with HTTP %d: %s", cwsResp.StatusCode, string(cwsBody)))
 	}
+
+	// Pin the bar at 100% for the upload phase before the commit starts. The reader stops one
+	// update short whenever the last timed sample landed just before EOF, which left the UI at
+	// 99% for the entire commit round trip.
+	updateDriveUploadProgressPhase(filePathKey, fileSize, fileSize, PhaseUpload)
 
 	var cwsParsed struct {
 		SingleFile struct {
@@ -481,9 +594,27 @@ func uploadDriveItemFromFile(f *os.File, filename string, mimeType string, targe
 		return makeDriveUploadError(ClassifyNetErr(err), 0, "Failed to build document commit request: "+err.Error())
 	}
 
-	upResp, err := s.Client.Do(upReq)
+	// Run the commit through a client with its own deadline instead of Session.Client.
+	//
+	// Session.Client carries a blanket 30 s timeout shared with every CloudKit query, so it cannot
+	// simply be raised. Inheriting it here was the worst of both worlds: a commit that needed longer
+	// than 30 s failed, and the failure arrived only AFTER the entire body had already been uploaded
+	// — which is why a 7 MB file could take minutes and still end in "upload failed".
+	//
+	// The transport is cloned so connection reuse and TLS settings stay identical.
+	commitClient := &http.Client{Timeout: commitTimeout}
+	if base, ok := s.Client.Transport.(*http.Transport); ok && base != nil {
+		commitClient.Transport = base.Clone()
+	}
+
+	upResp, err := commitClient.Do(upReq)
 	if err != nil {
-		return makeDriveUploadError(ClassifyNetErr(err), 0, "Document commit request failed: "+err.Error())
+		code := ClassifyNetErr(err)
+		if code == ErrCodeTimeout {
+			return makeDriveUploadError(code, 0,
+				fmt.Sprintf("提交记录超时：文件已传完但 /update/documents 在 %s 内未返回", commitTimeout))
+		}
+		return makeDriveUploadError(code, 0, "Document commit request failed: "+err.Error())
 	}
 	defer upResp.Body.Close()
 
