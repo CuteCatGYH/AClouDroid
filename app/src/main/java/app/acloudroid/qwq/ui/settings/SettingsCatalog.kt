@@ -60,7 +60,10 @@ enum class SettingsItem {
     BATTERY_OPTIMIZATION,
 
     /** Periodic backup interval in minutes. */
-    PERIODIC_BACKUP_INTERVAL
+    PERIODIC_BACKUP_INTERVAL,
+
+    /** About sub-screen containing app icon, name, version, and repository link. */
+    ABOUT
 }
 
 /** One titled block of rows. */
@@ -121,6 +124,11 @@ object SettingsCatalog {
             title = "自动扫描",
             description = "按设定周期在后台（凌晨 3 点）自动执行全盘扫描与增量同步。",
             items = listOf(SettingsItem.SCAN_FREQUENCY, SettingsItem.CUSTOM_INTERVAL)
+        ),
+        SettingsGroup(
+            title = "关于",
+            description = "查看应用版本信息与开源仓库",
+            items = listOf(SettingsItem.ABOUT)
         )
     )
 }

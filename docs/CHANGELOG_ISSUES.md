@@ -71,6 +71,9 @@
 | [ISS-057](#iss-057-drive-上传上限是云上贵州区特有国际区无此限制) | **Drive 上传上限是云上贵州区特有**，国际区可传 2.1 GB（三账号对照抓包）| 🔴 P0 | 全局 / 协议 | ✅ 已定案 |
 | [ISS-058](#iss-058-drive-上传任务在排队中长期卡住append_or_replace-链式死锁僵尸-work-占位与-markuploading-时序混淆) | **Drive 上传在「排队中」长期卡住**：`APPEND_OR_REPLACE` 链式死锁与时序修正 | 🔴 P0 | Android / WorkManager + Repository | ✅ 已修复 |
 | [ISS-059](#iss-059-drive-上传失败任务支持重试与云上贵州账号首次上传-1gb-限制预警弹窗) | **Drive 失败任务重试** 与 云上贵州账号首次上传 1GB 预警弹窗 | 🟠 P1 | Android / UI + Repository + SessionManager | ✅ 已完成 |
+| [ISS-060](#iss-060-drive-目录写操作-http-400-bad-request-与-datamutationlock-网络-io-死锁cpu-高占用修复) | **Drive 目录写操作 HTTP 400** 与 `dataMutationLock` 网络 IO 死锁/CPU 高占用修复 | 🔴 P0 | Go / Android | ✅ 已修复 |
+| [ISS-061](#iss-061-drive-队列卡排队queueddocws-endpoint-is-not-set-错报与上传成功瞬时隐形修复) | **Drive 队列卡排队（QUEUED）**、`docws endpoint is not set` 错报与上传成功瞬时隐形修复 | 🔴 P0 | Go / Android | ✅ 已修复 |
+| [ISS-062](#iss-062-drive-列表层级跳转滚动条位置恢复scrollpositions网页版最近删除免登录-webview-弹窗与-topappbar-状态栏自适应-padding-优化) | **Drive 列表层级跳转滚动条位置恢复**、网页版最近删除免登录 WebView 弹窗与 TopAppBar 状态栏自适应 Padding 优化 | 🟠 P1 | Android / UI + ViewModel | ✅ 已完成 |
 
 ---
 
@@ -4895,6 +4898,98 @@ POST singleFileUpload       -> 413 (Content-Length: 1478709456)
 - **真机验证**：
   - 首次点击上传 FAB 成功弹出提示对话框；点击「我知道了」后成功唤起文件选择器，再次点击直接打开选择器。
   - 失败任务（如 1.2GB 大文件拒绝）条目右侧正常显示 `↻` (重试) 与 `✕` (移除) 按钮；点击 `↻` 成功将任务重置为 `QUEUED` 并重新触发预检与上传。
+
+---
+
+## ISS-060 Drive 目录写操作 HTTP 400 Bad Request 与 dataMutationLock 网络 IO 死锁/CPU 高占用修复
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🔴 P0 |
+| **归属** | Go / Android 跨语言 |
+| **状态** | ✅ 已修复 |
+
+### 现象与日志
+
+在 D6（新建文件夹、移动文件）调试过程中：
+1. 调用 `createFolders` 和 `moveItems` 请求时，服务端返回 `400 Bad Request`，新建/移动目录动作报错失败。
+2. 界面经常进入无休止的“转圈”刷新或卡顿状态，CPU 占用偏高。
+
+### 根因
+
+1. **写操作 Payload 字段缺失**：
+   - Apple CloudDocs 在 `createFolders` Endpoint 要求 `folders` 数组项中必须包含 `clientId`（幂等唯一标识）与 `type: "FOLDER"`；
+   - `moveItems` Endpoint 要求 `items` 数组中每个节点包含 `clientId` 属性。
+   - 原先 Go 代码未填充上述字段，被 Apple 接口判定格式非法拒绝。
+2. **锁作用域滥用导致死锁与挂起**：
+   - Kotlin 数据层在执行 `createFolder` / `moveItems` / `executeUpload` 时，将耗时的 Go 阻塞式网络 IO 请求包裹在 `dataMutationLock.withLock { ... }` 内部；
+   - 由于网络请求耗时数秒甚至更久，独占了写互斥锁，导致进度轮询协程和主 UI 界面卡死等待。
+
+### 修复方案
+
+1. **Go 端 Payload 结构修补**：
+   - `CreateDriveFolder` 中生成时间戳 UUID 赋给 `clientId`，并补齐 `type: "FOLDER"`；
+   - `MoveDriveItems` 中自动以 `drivewsid` 填充 `clientId`。
+2. **`dataMutationLock` 精细化收窄**：
+   - 将所有网络 IO 调用（`Icloudcore.*`）彻底移出 `dataMutationLock` 锁作用域；
+   - 锁仅用于包装极短的 Room 数据库表事务写入（`dao.upsert` / `dao.replaceChildren` 等），彻底杜绝网络卡顿引发的 UI 死锁与高占用。
+
+---
+
+## ISS-061 Drive 队列卡排队（QUEUED）、docws endpoint is not set 错报与上传成功瞬时隐形修复
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🔴 P0 |
+| **归属** | Go / Android 全链路 |
+| **状态** | ✅ 已修复 |
+
+### 现象
+
+1. 新添加的上传任务长时间停留在 `排队中 (QUEUED)`，没有后台 Worker 启动消费处理。
+2. 任务栏弹出 `docws endpoint is not set` 报错。
+3. 文件上传成功后，刷新列表时新上传的文件不会第一时间在列表中展现。
+
+### 根因
+
+1. **队列启动器遗漏**：此前因担心并发，在 `enqueueUpload` 内部注释掉了 `triggerUploadProcessor()`；而 WorkManager 的 `KEEP` 策略在旧进程留有残留 Work 记录时会静默忽略新的入队请求，导致任务挂在 DB 队列中无人拉起。
+2. **Session 属性丢失与判空逻辑不齐**：`InitSession` / `ValidateSession` 响应体未持久化存入 `s.AccountInfoJSON`，导致 Go 侧 `docsEndpointFromAccountInfo` 查不到 `docws` 的真实 URL，抛出 `docws endpoint is not set`。
+3. **本地 DB 状态落地延后**：上传成功后仅发起了 `refreshFolder` 远端网络同步，由于 CloudDocs 索引刷新有 1~2 秒服务端延迟，直接拿远端数据覆盖本地抹除了新上传的记录。
+
+### 修复方案
+
+1. **恢复前后台双保险启动**：`enqueueUpload` 入队后恢复调用 `triggerUploadProcessor()`，并与 `DriveUploadWorker` 共享 `uploadDrainMutex` 互斥锁，保证零延迟响应且互不竞争。
+2. **会话属性补齐与优雅回退**：`ValidateSession` 拿到响应后完整持久化 `AccountInfoJSON`；同时 `docsEndpointFromAccountInfo` 在 `docws` 缺失时回退使用 `DrivewsURL`。
+3. **本地状态秒级落地**：`executeUpload` 拿到成功响应的 `documentId` 时，第一时间通过 `dao.upsert` 将新文件插入本地 Room 数据库，保证即使云端索引延迟，界面也能即刻渲染新文件。
+
+---
+
+## ISS-062 Drive 列表层级跳转滚动条位置恢复（scrollPositions）、网页版最近删除免登录 WebView 弹窗与 TopAppBar 状态栏自适应 Padding 优化
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🟠 P1 |
+| **归属** | Android / UI + ViewModel |
+| **状态** | ✅ 已完成 |
+
+### 需求与场景
+
+1. **滚动条记忆功能**：用户在列表滚动到中间位置进入某个子文件夹后，返回上一级会直接掉到最底部或顶部，体验不顺畅。
+2. **最近删除应用内打开**：网页版最近删除点击后发起了外部浏览器 Activity 跳转，用户需要重新输入密码登录。
+3. **顶部布局冲突**：TopAppBar 的标题与新建/刷新按钮与设备状态栏发生重叠。
+
+### 实现细节
+
+1. **层级滚动位置记忆 (`scrollPositions`)**：
+   - `DriveViewModel` 维护 `scrollPositions: Map<String, Pair<Int, Int>>` 记录每个 `drivewsid` 离开时的 `(index, offset)`；
+   - 在 `open` / `goUp` / `navigateTo` 触发时保存当前 `LazyListState` 偏移；
+   - 在 `DriveScreen` 监听 `currentDrivewsid` 变化（`LaunchedEffect`），返回上一级时毫秒级恢复到历史滚动位置。
+2. **免登录 WebView 最近删除弹窗**：
+   - 新增 `ICloudDriveTrashWebDialog` 全屏 Dialog，包含顶栏关闭 Icon 与 `FeatureWebViewScreen`；
+   - 共享 App 进程的 `CookieManager` 凭证与 Webauth Token，无需重新登录即可在 App 内无缝管理最近删除项目。
+3. **状态栏自适应 Padding**：
+   - `DriveHeader` 加上 `Modifier.statusBarsPadding()`，顶部标题与图标自适应避让手机/平板设备的状态栏。
+
 
 
 

@@ -3,6 +3,9 @@ package app.acloudroid.qwq.ui.settings
 import android.content.Intent
 import android.os.Build
 import android.provider.MediaStore
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,13 +19,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import app.acloudroid.qwq.IClouDroidApp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -90,127 +99,135 @@ fun SettingsScreen(
     val periodicBackupInterval by settings.periodicBackupInterval.collectAsStateWithLifecycle()
 
     var showScanWarning by remember { mutableStateOf(false) }
+    var showAboutScreen by remember { mutableStateOf(false) }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = "设置",
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleLarge
+    Box(modifier = modifier.fillMaxSize()) {
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = "设置",
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleLarge
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        titleContentColor = MaterialTheme.colorScheme.onSurface,
+                        navigationIconContentColor = MaterialTheme.colorScheme.onSurface
                     )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                )
+            }
+        ) { innerPadding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(contentPadding)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp)
+            ) {
+                Spacer(Modifier.height(8.dp))
+
+                SettingsCatalog.groups.forEach { group ->
+                    Text(
+                        text = group.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 4.dp)
+                    )
+
+                    if (group.description != null) {
+                        Text(
+                            text = group.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+                        )
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    titleContentColor = MaterialTheme.colorScheme.onSurface,
-                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface
-                )
-            )
-        }
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(contentPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
-        ) {
-            Spacer(Modifier.height(8.dp))
 
-            SettingsCatalog.groups.forEach { group ->
-                Text(
-                    text = group.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 4.dp)
-                )
-
-                if (group.description != null) {
-                    Text(
-                        text = group.description,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
-                    )
-                }
-
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                ) {
-                    Column {
-                        group.items.forEachIndexed { index, item ->
-                            if (index > 0) {
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(horizontal = 16.dp),
-                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                    ) {
+                        Column {
+                            group.items.forEachIndexed { index, item ->
+                                if (index > 0) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(horizontal = 16.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                    )
+                                }
+                                SettingsRow(
+                                    item = item,
+                                    settings = settings,
+                                    themeMode = themeMode,
+                                    useDynamicColor = useDynamicColor,
+                                    monthCoverEnabled = monthCoverEnabled,
+                                    navBarDestinations = navBarDestinations,
+                                    allowCellularUpload = allowCellularUpload,
+                                    requireCharging = requireCharging,
+                                    requireBatteryNotLow = requireBatteryNotLow,
+                                    maxConcurrentUploads = maxConcurrentUploads,
+                                    showBackupNotification = showBackupNotification,
+                                    periodicBackupInterval = periodicBackupInterval,
+                                    frequency = frequency,
+                                    customDays = customDays,
+                                    isFullScanRunning = isFullScanRunning,
+                                    onRequestFullScan = { showScanWarning = true },
+                                    onFrequencyChanged = onFrequencyChanged,
+                                    onCustomIntervalChanged = onCustomIntervalChanged,
+                                    onOpenAbout = { showAboutScreen = true }
                                 )
                             }
-                            SettingsRow(
-                                item = item,
-                                settings = settings,
-                                themeMode = themeMode,
-                                useDynamicColor = useDynamicColor,
-                                monthCoverEnabled = monthCoverEnabled,
-                                navBarDestinations = navBarDestinations,
-                                allowCellularUpload = allowCellularUpload,
-                                requireCharging = requireCharging,
-                                requireBatteryNotLow = requireBatteryNotLow,
-                                maxConcurrentUploads = maxConcurrentUploads,
-                                showBackupNotification = showBackupNotification,
-                                periodicBackupInterval = periodicBackupInterval,
-                                frequency = frequency,
-                                customDays = customDays,
-                                isFullScanRunning = isFullScanRunning,
-                                onRequestFullScan = { showScanWarning = true },
-                                onFrequencyChanged = onFrequencyChanged,
-                                onCustomIntervalChanged = onCustomIntervalChanged
-                            )
                         }
                     }
                 }
-            }
 
-            if (fullScanMessage != null) {
-                Spacer(Modifier.height(16.dp))
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
-                ) {
-                    Text(
-                        text = fullScanMessage,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.padding(14.dp)
-                    )
+                if (fullScanMessage != null) {
+                    Spacer(Modifier.height(16.dp))
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                    ) {
+                        Text(
+                            text = fullScanMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            modifier = Modifier.padding(14.dp)
+                        )
+                    }
                 }
+
+                Spacer(Modifier.height(32.dp))
             }
 
-            Spacer(Modifier.height(32.dp))
+            if (showScanWarning) {
+                FullScanWarningDialog(
+                    frequency = frequency,
+                    customDays = customDays,
+                    onConfirm = {
+                        showScanWarning = false
+                        onStartFullScan()
+                    },
+                    onDismiss = { showScanWarning = false }
+                )
+            }
         }
 
-        if (showScanWarning) {
-            FullScanWarningDialog(
-                frequency = frequency,
-                customDays = customDays,
-                onConfirm = {
-                    showScanWarning = false
-                    onStartFullScan()
-                },
-                onDismiss = { showScanWarning = false }
-            )
+        if (showAboutScreen) {
+            AboutSubScreen(onBack = { showAboutScreen = false })
         }
     }
 }
@@ -277,7 +294,8 @@ private fun SettingsRow(
     isFullScanRunning: Boolean,
     onRequestFullScan: () -> Unit,
     onFrequencyChanged: (ScanFrequency) -> Unit,
-    onCustomIntervalChanged: (Int) -> Unit
+    onCustomIntervalChanged: (Int) -> Unit,
+    onOpenAbout: () -> Unit
 ) {
     val context = LocalContext.current
 
@@ -751,6 +769,19 @@ private fun SettingsRow(
             options = CUSTOM_DAY_OPTIONS.map { it to "$it 天" },
             onSelect = { onCustomIntervalChanged(it) }
         )
+
+        SettingsItem.ABOUT -> ActionRow(
+            title = "关于",
+            subtitle = "关于 AClouDroid",
+            trailing = {
+                Icon(
+                    Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            onClick = onOpenAbout
+        )
     }
 }
 
@@ -1009,6 +1040,247 @@ private fun ICloudWebDialog(
             ) {
                 app.acloudroid.qwq.ui.FeatureWebViewScreen(url = url)
             }
+        }
+    }
+}
+
+private const val REPOSITORY_URL = "https://github.com/CuteCatGYH/AClouDroid"
+
+private fun getAppIconBitmap(context: android.content.Context): androidx.compose.ui.graphics.ImageBitmap? {
+    return try {
+        val drawable = context.packageManager.getApplicationIcon(context.packageName)
+        val bitmap = if (drawable is android.graphics.drawable.BitmapDrawable && drawable.bitmap != null) {
+            drawable.bitmap
+        } else {
+            val width = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth else 192
+            val height = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight else 192
+            val bmp = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(bmp)
+            drawable.setBounds(0, 0, canvas.width, canvas.height)
+            drawable.draw(canvas)
+            bmp
+        }
+        bitmap.asImageBitmap()
+    } catch (e: Exception) {
+        null
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AboutSubScreen(
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+
+    val versionName = remember(context) {
+        try {
+            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            packageInfo.versionName ?: "1.0"
+        } catch (e: Exception) {
+            "1.0"
+        }
+    }
+
+    val versionCode = remember(context) {
+        try {
+            val packageInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                packageInfo.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                packageInfo.versionCode.toLong()
+            }
+        } catch (e: Exception) {
+            1L
+        }
+    }
+
+    BackHandler(enabled = true) {
+        onBack()
+    }
+
+    Scaffold(
+        modifier = modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+        contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = "关于",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface,
+                    navigationIconContentColor = MaterialTheme.colorScheme.onSurface
+                )
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
+        ) {
+            Spacer(Modifier.height(32.dp))
+
+            val appIconBitmap = remember(context) {
+                getAppIconBitmap(context)
+            }
+
+            // App Icon & Name magnified and centered at top
+            if (appIconBitmap != null) {
+                Image(
+                    bitmap = appIconBitmap,
+                    contentDescription = "App Icon",
+                    modifier = Modifier
+                        .size(96.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                )
+            } else {
+                Image(
+                    painter = painterResource(id = app.acloudroid.qwq.R.drawable.ic_launcher_foreground),
+                    contentDescription = "App Icon",
+                    modifier = Modifier
+                        .size(96.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            Text(
+                text = stringResource(id = app.acloudroid.qwq.R.string.app_name),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Spacer(Modifier.height(6.dp))
+
+            Text(
+                text = "在 Android 手机上直接浏览与同步你的 iCloud！",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(Modifier.height(36.dp))
+
+            // Information list card
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                )
+            ) {
+                Column {
+                    // Version Item
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "iClouDroid v$versionName (Build $versionCode)",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                            .padding(horizontal = 16.dp, vertical = 16.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "版本号",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "v$versionName (Build $versionCode)",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text(
+                            text = "v$versionName",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    )
+
+                    // Repository Item
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                try {
+                                    uriHandler.openUri(REPOSITORY_URL)
+                                } catch (e: Exception) {
+                                    try {
+                                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                        val clip = android.content.ClipData.newPlainText("Repository URL", REPOSITORY_URL)
+                                        clipboard.setPrimaryClip(clip)
+                                        android.widget.Toast.makeText(context, "已复制仓库地址到剪贴板", android.widget.Toast.LENGTH_SHORT).show()
+                                    } catch (ex: Exception) {
+                                        android.widget.Toast.makeText(context, "无法打开网址: $REPOSITORY_URL", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                            .padding(horizontal = 16.dp, vertical = 16.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "在 GitHub 上查看源代码",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = REPOSITORY_URL,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                            contentDescription = "打开仓库",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(32.dp))
+
+            Text(
+                text = "iClouDroid • Open Source Project",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.outline
+            )
+
+            Spacer(Modifier.height(32.dp))
         }
     }
 }
