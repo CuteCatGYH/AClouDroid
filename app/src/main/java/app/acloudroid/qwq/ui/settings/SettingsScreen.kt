@@ -974,7 +974,7 @@ private fun CloudMediaActivationDialog(
                 TextButton(
                     onClick = {
                         val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                        val clip = android.content.ClipData.newPlainText("ADB Command", app.acloudroid.qwq.provider.ShizukuMediaHelper.ADB_COMMAND)
+                        val clip = android.content.ClipData.newPlainText("ADB Command", app.acloudroid.qwq.provider.ShizukuMediaHelper.adbCommand)
                         clipboard.setPrimaryClip(clip)
                         android.widget.Toast.makeText(context, "已复制 ADB 命令到剪贴板", android.widget.Toast.LENGTH_SHORT).show()
                     },

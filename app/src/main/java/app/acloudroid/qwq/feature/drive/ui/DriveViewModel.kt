@@ -462,7 +462,7 @@ class DriveViewModel(
                             _uiState.value = _uiState.value.copy(downloadMessage = null)
                             val uri = androidx.core.content.FileProvider.getUriForFile(
                                 context,
-                                "app.acloudroid.qwq.fileprovider",
+                                "${app.acloudroid.qwq.BuildConfig.APPLICATION_ID}.fileprovider",
                                 file
                             )
                             launchIntentView(context, uri, item.extension)

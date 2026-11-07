@@ -69,7 +69,7 @@
         <!-- CloudMediaProvider for Android 13+ (API 33) -->
         <provider
             android:name=".provider.ICloudMediaProvider"
-            android:authorities="app.acloudroid.qwq.cloudmedia"
+            android:authorities="${applicationId}.cloudmedia"
             android:enabled="@bool/is_cloud_media_provider_enabled"
             android:exported="true"
             android:permission="com.android.providers.media.permission.MANAGE_CLOUD_MEDIA_PROVIDERS">
@@ -90,7 +90,7 @@
         <!-- FileProvider for file sharing and external previewing -->
         <provider
             android:name="androidx.core.content.FileProvider"
-            android:authorities="app.acloudroid.qwq.fileprovider"
+            android:authorities="${applicationId}.fileprovider"
             android:exported="false"
             android:grantUriPermissions="true">
             <meta-data
