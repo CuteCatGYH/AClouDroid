@@ -50,7 +50,11 @@ class LocalAlbumsViewModel(application: Application) : AndroidViewModel(applicat
         viewModelScope.launch {
             settings.toggleBackupBucketId(bucketId, enabled)
             if (enabled) {
-                val newlyEnqueued = repository.scanAndEnqueueBucket(bucketId, db.uploadQueueDao())
+                val newlyEnqueued = repository.scanAndEnqueueBucket(
+                    bucketId,
+                    db.uploadQueueDao(),
+                    db.uploadedFingerprintDao()
+                )
                 if (newlyEnqueued > 0) {
                     PhotoBackupWorker.scheduleBackup(getApplication())
                 }

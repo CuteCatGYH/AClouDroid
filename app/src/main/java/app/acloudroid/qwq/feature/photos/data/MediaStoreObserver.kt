@@ -62,7 +62,11 @@ class MediaStoreObserver private constructor(
         try {
             var totalNewlyEnqueued = 0
             for (bucketId in enabledBucketIds) {
-                val newlyEnqueued = repo.scanAndEnqueueBucket(bucketId, db.uploadQueueDao())
+                val newlyEnqueued = repo.scanAndEnqueueBucket(
+                    bucketId,
+                    db.uploadQueueDao(),
+                    db.uploadedFingerprintDao()
+                )
                 totalNewlyEnqueued += newlyEnqueued
             }
 

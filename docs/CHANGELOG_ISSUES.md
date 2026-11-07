@@ -80,6 +80,7 @@
 | [ISS-067](#iss-067-父目录重拉抹掉子目录-childrenfetched-标记引发级联重拉) | **父目录重拉抹掉子目录 `childrenFetched` 标记**：`replaceChildren` 盲擦导致的级联重拉 | 🔴 P0 | Go / Android | ✅ 已修复 |
 | [ISS-063](#iss-063-go-层-30-个测试长期红着newSession-不再安装全局会话导致) | **Go 层 30 个测试长期红着**：`NewSession` 不再安装全局会话导致 | 🟠 P1 | Go / 测试基础设施 | ✅ 已修复 |
 | [ISS-062](#iss-062-drive-列表层级跳转滚动条位置恢复scrollpositions网页版最近删除免登录-webview-弹窗与-topappbar-状态栏自适应-padding-优化) | **Drive 列表层级跳转滚动条位置恢复**、网页版最近删除免登录 WebView 弹窗与 TopAppBar 状态栏自适应 Padding 优化 | 🟠 P1 | Android / UI + ViewModel | ✅ 已完成 |
+| [ISS-068](#iss-068-照片备份清空队列后已上传文件被重复流式上传流量浪费) | **照片备份「清空队列」后已上传文件被重复上传**：去重事实存在可删的队列行上 | 🔴 P0 | Android / Room + Repository + Worker | ✅ 已修复 |
 
 ---
 
@@ -5661,6 +5662,104 @@ val merged = items.map { item ->
 | **ISS-067 修复后（稳态）** | **165** | **1** | **164** | **< 10s** |
 
 性能从原来的 2.5 分钟降至 **不到 10 秒**，达到完美的 D3 增量比对状态。
+
+---
+
+## ISS-068 照片备份「清空队列」后已上传文件被重复流式上传（流量浪费）
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🔴 P0（产生真实计费流量，用户可感知）|
+| **归属** | Android / Room + `PhotoRepository` + `PhotoBackupWorker` + `LocalAlbumRepository` |
+| **状态** | ✅ 已修复 |
+
+### 现象
+
+用户报告（实机 SM-F9760）：备份完成后，在「备份队列管理」里点 **清空完成** 或 **全部清空**。
+之后只要检测到新的待上传图片/视频，**新项目正常上传，但已上传过的文件会被再传一遍**。
+
+关键细节：**云端不会出现重复记录** —— 但上传流量实打实在跑。
+
+### 根因：代价后置（幂等检查放在了最贵的一步之后）
+
+去重当时有三道闸门，前两道全部挂在 `upload_queue` 行上，而这两行是可以被 UI 删除的：
+
+| # | 闸门 | 位置 | 清空队列后 |
+| --- | --- | --- | --- |
+| ① | `findByUri(mediaStoreUri)` | `LocalAlbumRepository.scanAndEnqueueBucket` | ❌ 返回 null → 重新入队 PENDING |
+| ② | `findBySha256()` | `PhotoRepository.enqueuePhotoForUpload` | ❌ 同上（且只有分享入口走这里）|
+| ③ | `masterRecordExists()` | Go `upload.go` 第 5 步 | ✅ **但已经太晚了** |
+
+第 ③ 道闸门在 `uploadPhotoAssetFromFile` 里排在以下步骤**之后**：
+
+1. `computeFileSha256Base64(f)` —— 整文件读一遍
+2. `/assets/upload` —— 换 original + thumb + med + motion-video 四份令牌
+3. `uploadFileToUrl()` × N —— **原文件完整字节流式上传到 CVWS**
+4. 拿到 `mmcsChecksum`
+5. ← 这里才 `masterRecordExists()`，命中则跳过 `/records/modify`
+
+所以「云端没重复、流量照跑」完全自洽：每次都完成了一次完整的上传，只是最后没写记录。
+
+> [!IMPORTANT]
+> **这是典型的「代价后置」缺陷。** 幂等判断放在最贵的一步之后，等于没有。
+> 排查时不要只看“有没有产生重复数据”——用户付的是流量，不是记录数。
+
+### 修复：把“已上传”从可删的视图层挪到不可删的真相层
+
+新增 `uploaded_fingerprints` 表（DB v10 → v11），**没有任何 UI 路径能删单行**，只有 `wipeAllData()` 能清。
+
+| 位置 | 改动 |
+| --- | --- |
+| `UploadedFingerprintEntity` / `Dao` | 新建。主键 `contentKey = "<displayName>\|<size>\|<dateModified>"`。DAO **刻意不提供** `deleteById` / `clearCompleted` |
+| `PhotoDatabase` | v11 + `MIGRATION_10_11`（纯 DDL）+ `upload_queue.dateModified` 新列 |
+| `LocalAlbumRepository.scanAndEnqueueBucket` | 入队前先查指纹表，命中则直接 `continue`（**连队列行都不创建**）|
+| `PhotoRepository.uploadPhotoFromQueue` | 调 Go **之前**先写占位行（`masterId = ""`），成功后台 `markConfirmed()` 回填 |
+| `PhotoRepository.wipeAllData` | 退出登录时 `clearAll()`（`masterId` 属于特定 Apple ID，见 §5.5）|
+| `UploadQueueEntity` | 新增 `dateModified` 列，供上传路径重建同一个 key |
+
+**为什么是 `name+size+mtime` 而不是文件哈希**：这三个值 `queryBucketMedia` 本来就在查，判定**零额外 IO、零网络**。
+哈希方案等于每次扫描把所有照片视频读一遍盘——正是这张表要避免的成本。
+
+### 三条必须遵守的约束
+
+1. **key 只能由 `LocalAlbumRepository.buildFingerprintKey()` 生成。**
+   扫描路径和上传路径必须调同一个函数。两边各自拼 `"$a|$b|$c"` 一旦漂移，lookup 永远不命中，
+   表退化成死重且表面看不出异常 —— 与 AGENTS §6.3 的 Coil cache key 是同一类坑。
+
+2. **占位行在调 Go 之前写，失败不回滚。**
+   这是为了堵住「上传进行中，扫描又把它入队一次」的窗口。失败留下的行 `masterId` 为空，
+   语义是「尝试过但未确认」，重试来自队列行而非重新扫描，所以不会因此丢上传。
+
+3. **退出登录必须清表。**
+   `masterId` 是某个 Apple ID 名下的 CloudKit 记录名。不清会让新账号把自己的照片误判成已备份——
+   而「相机胶卷整机拷贝」场景下 name/size/mtime 碰撞并不罕见。
+
+### 升级后的行为
+
+`uploaded_fingerprints` 在迁移后是**空的**（`upload_queue` 从未存过 `masterId`，无可播种）。
+所以升级用户第一轮扫描会对已启用相册重新判定一次。这是**有意设计的取舍**：
+
+- 宁可白跑一轮，也不要错误地认为“已备份”而**漏传**新照片。
+- `upload_queue` 旧行的 `dateModified` 被置为 `0`，永远匹配不上扫描时算出的 key —— 若给错值，
+  一条 `SUCCESS` 行会静默压掉一个真正的新上传，那是数据丢失级别的错误。
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| `:app:compileDebugKotlin` | ✅ |
+| `:app:testDebugUnitTest` | ✅ 350 passed / 0 failed |
+| `:app:assembleDebug` | ✅ |
+| 实机迁移（SM-F9760） | ✅ logcat `DB version upgrading from 10 to 11`，`PRAGMA user_version = 11` |
+| 表结构 | ✅ `uploaded_fingerprints` 主键 + 两个索引均存在；`upload_queue.dateModified INTEGER NOT NULL DEFAULT 0` |
+| 端到端流程（清空队列 → 新增文件 → 确认不重传） | ⏳ 待用户登录后实测 |
+
+### 遗留
+
+- **跨设备 / 重装**：本地指纹表为空，此时仍需靠 Go 的 `masterRecordExists()` 兜底（一次完整上传）。
+  彻底解决需要实现 MMCS 21 字节指纹算法，让本地哈希可直接 `/records/lookup`（见 AGENTS §4.6）。
+  当前未做 —— 该场景每文件只需付一次。
+- `photo_assets.localSha256` 兜底列（原方案 C）未实施。
 
 
 

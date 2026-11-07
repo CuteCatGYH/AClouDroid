@@ -55,7 +55,11 @@ class PhotoBackupWorker(
                 var preScanNewlyEnqueued = 0
                 for (bucketId in enabledBucketIds) {
                     if (repo.isWipeInProgress()) break
-                    preScanNewlyEnqueued += localRepo.scanAndEnqueueBucket(bucketId, db.uploadQueueDao())
+                    preScanNewlyEnqueued += localRepo.scanAndEnqueueBucket(
+                        bucketId,
+                        db.uploadQueueDao(),
+                        db.uploadedFingerprintDao()
+                    )
                 }
                 Log.d(TAG, "Pre-scan enqueued $preScanNewlyEnqueued new items")
             }

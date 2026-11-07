@@ -19,6 +19,15 @@ data class UploadQueueEntity(
     val filename: String,
     val mimeType: String,
     val fileSize: Long,
+    /**
+     * MediaStore `DATE_MODIFIED` (seconds), carried purely so the upload path can rebuild the same
+     * [UploadedFingerprintEntity.contentKey] the scan path computed.
+     *
+     * Re-querying MediaStore at upload time would work too, but a row inserted by an older version
+     * has no guarantee the file still exists by the time it uploads -- and the fingerprint would
+     * then be keyed on something the scan never saw.
+     */
+    val dateModified: Long = 0L,
     val localSha256: String,
     val status: String, // "PENDING", "UPLOADING", "SUCCESS", "FAILED"
     val retryCount: Int = 0,

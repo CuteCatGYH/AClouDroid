@@ -20,6 +20,8 @@ import app.acloudroid.qwq.feature.photos.data.db.SyncStateDao
 import app.acloudroid.qwq.feature.photos.data.db.SyncStateEntity
 import app.acloudroid.qwq.feature.photos.data.db.UploadQueueDao
 import app.acloudroid.qwq.feature.photos.data.db.UploadQueueEntity
+import app.acloudroid.qwq.feature.photos.data.db.UploadedFingerprintDao
+import app.acloudroid.qwq.feature.photos.data.db.UploadedFingerprintEntity
 
 /**
  * Photos-only database.
@@ -36,9 +38,10 @@ import app.acloudroid.qwq.feature.photos.data.db.UploadQueueEntity
         ScanStateEntity::class,
         ScanSeenIdEntity::class,
         PurgedIdEntity::class,
-        UploadQueueEntity::class
+        UploadQueueEntity::class,
+        UploadedFingerprintEntity::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 abstract class PhotoDatabase : RoomDatabase() {
@@ -50,6 +53,7 @@ abstract class PhotoDatabase : RoomDatabase() {
     abstract fun scanSeenIdDao(): ScanSeenIdDao
     abstract fun purgedIdDao(): PurgedIdDao
     abstract fun uploadQueueDao(): UploadQueueDao
+    abstract fun uploadedFingerprintDao(): UploadedFingerprintDao
 
     companion object {
         /**
@@ -232,6 +236,51 @@ abstract class PhotoDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v10 → v11: durable "already uploaded" fingerprints (Phase 3.2).
+         *
+         * Two additive changes:
+         *
+         * 1. `uploaded_fingerprints` -- the new source of truth for de-duplication. Until now the
+         *    only memory of an upload lived on the `upload_queue` row, so the queue sheet's
+         *    "clear completed" / "clear all" buttons erased it and every already-backed-up file
+         *    was re-enqueued and re-streamed on the next scan. CloudKit caught the duplicate at
+         *    `masterRecordExists()`, but only *after* the bytes had been uploaded, so the traffic
+         *    was wasted (see the entity's KDoc).
+         * 2. `upload_queue.dateModified` -- needed to build the fingerprint key, which is
+         *    `"<displayName>|<size>|<dateModified>"`. The scan already reads this column from
+         *    MediaStore, so it is free to carry; the upload path would otherwise have to re-query
+         *    MediaStore just to reconstruct the key the scan used.
+         *
+         * Both DDL-only and nothing is backfilled. Existing `upload_queue` rows get
+         * `dateModified = 0`, which means their keys cannot match a scan-time key -- correct, since
+         * a wrong key on a `SUCCESS` row would silently suppress a legitimately new upload. The
+         * consequence is that the first scan after upgrading re-checks every enabled album once;
+         * Go's `masterRecordExists()` still prevents any duplicate record, so the cost is one
+         * wasted upload per file, paid exactly once. `uploaded_fingerprints` starts empty for the
+         * same reason: `upload_queue` never stored `masterId`, so there is nothing to seed from.
+         */
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `uploaded_fingerprints` (
+                        `contentKey` TEXT NOT NULL,
+                        `masterId` TEXT NOT NULL,
+                        `localSha256` TEXT,
+                        `sizeBytes` INTEGER NOT NULL,
+                        `uploadedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`contentKey`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_uploaded_fingerprints_masterId` ON `uploaded_fingerprints` (`masterId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_uploaded_fingerprints_localSha256` ON `uploaded_fingerprints` (`localSha256`)")
+
+                db.execSQL("ALTER TABLE upload_queue ADD COLUMN dateModified INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile
         private var INSTANCE: PhotoDatabase? = null
 
@@ -258,7 +307,8 @@ abstract class PhotoDatabase : RoomDatabase() {
                         MIGRATION_6_7,
                         MIGRATION_7_8,
                         MIGRATION_8_9,
-                        MIGRATION_9_10
+                        MIGRATION_9_10,
+                        MIGRATION_10_11
                     )
                     .build()
                 INSTANCE = instance

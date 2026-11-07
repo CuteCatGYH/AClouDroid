@@ -5,6 +5,9 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
+import app.acloudroid.qwq.feature.photos.data.db.UploadQueueDao
+import app.acloudroid.qwq.feature.photos.data.db.UploadQueueEntity
+import app.acloudroid.qwq.feature.photos.data.db.UploadedFingerprintDao
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -45,11 +48,22 @@ class LocalAlbumRepository(private val context: Context) {
     /**
      * Scans local media for a given bucketId and enqueues missing items into [UploadQueueDao].
      *
+     * An item is skipped when either the queue already holds a row for its MediaStore URI, or
+     * [UploadedFingerprintDao] remembers it was uploaded before. The second check is what makes
+     * clearing the backup queue safe: the queue is a disposable *view* of pending work, while
+     * "these bytes are already in the cloud" lives in `uploaded_fingerprints`, which no UI can
+     * delete from (see [app.acloudroid.qwq.feature.photos.data.db.UploadedFingerprintEntity]).
+     *
+     * Checking here rather than inside the worker matters: a skipped item is never enqueued, so it
+     * never shows up in the queue sheet as a phantom "pending" row and never costs a session warm
+     * up. The check is free -- `queryBucketMedia` already selects every column the key needs.
+     *
      * @return Number of newly enqueued items.
      */
     suspend fun scanAndEnqueueBucket(
         bucketId: String,
-        uploadQueueDao: app.acloudroid.qwq.feature.photos.data.db.UploadQueueDao
+        uploadQueueDao: UploadQueueDao,
+        uploadedFingerprintDao: UploadedFingerprintDao
     ): Int = withContext(Dispatchers.IO) {
         val mediaItems = mutableListOf<LocalMediaItem>()
 
@@ -57,13 +71,26 @@ class LocalAlbumRepository(private val context: Context) {
         queryBucketMedia(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, bucketId, mediaItems)
 
         var newlyEnqueued = 0
+        var skippedAlreadyUploaded = 0
         val now = System.currentTimeMillis()
-        val entitiesToInsert = mutableListOf<app.acloudroid.qwq.feature.photos.data.db.UploadQueueEntity>()
+        val entitiesToInsert = mutableListOf<UploadQueueEntity>()
 
         for (item in mediaItems) {
             val uriStr = item.uri.toString()
             val existing = uploadQueueDao.findByUri(uriStr)
             if (existing == null) {
+                // `item.dateTaken` is MediaStore DATE_MODIFIED * 1000 (see queryBucketMedia), which
+                // is exactly the value the fingerprint key is built from.
+                val fingerprintKey = buildFingerprintKey(
+                    displayName = item.displayName,
+                    size = item.size,
+                    dateModifiedSeconds = item.dateTaken / 1000L
+                )
+                if (uploadedFingerprintDao.exists(fingerprintKey)) {
+                    skippedAlreadyUploaded++
+                    continue
+                }
+
                 val motionInfo = if (item.mimeType.startsWith("image/")) {
                     app.acloudroid.qwq.feature.photos.data.MotionPhotoDetector.detect(context, item.uri, item.size)
                 } else {
@@ -71,11 +98,12 @@ class LocalAlbumRepository(private val context: Context) {
                 }
 
                 entitiesToInsert.add(
-                    app.acloudroid.qwq.feature.photos.data.db.UploadQueueEntity(
+                    UploadQueueEntity(
                         mediaStoreUri = uriStr,
                         filename = item.displayName,
                         mimeType = item.mimeType,
                         fileSize = item.size,
+                        dateModified = item.dateTaken / 1000L,
                         localSha256 = "", // Calculated during streaming upload
                         status = "PENDING",
                         isMotionPhoto = motionInfo.isMotionPhoto,
@@ -105,7 +133,44 @@ class LocalAlbumRepository(private val context: Context) {
             uploadQueueDao.insertAll(entitiesToInsert)
         }
 
+        if (skippedAlreadyUploaded > 0) {
+            android.util.Log.d(
+                "LocalAlbumRepository",
+                "scanAndEnqueueBucket($bucketId): enqueued=$newlyEnqueued, alreadyUploaded=$skippedAlreadyUploaded"
+            )
+        }
+
         newlyEnqueued
+    }
+
+    companion object {
+        /**
+         * Builds the [UploadedFingerprintEntity.contentKey] for a local file.
+         *
+         * **Every** producer and consumer of a fingerprint must call this function -- the scan
+         * path here and the upload path in
+         * [app.acloudroid.qwq.feature.photos.data.PhotoRepository.uploadPhotoFromQueue]. If the two
+         * sides ever format the key differently, lookups never match and the table silently
+         * degrades into dead weight that still looks like it is working. This is the same class of
+         * bug as binding a Coil cache key to a signed URL (AGENTS.md §6.3), so it gets a single
+         * definition rather than two `"$a|$b|$c"` literals.
+         *
+         * Why these three fields: `displayName` + `size` is already close to unique, and
+         * `dateModified` disambiguates the realistic collision (burst shots that MediaStore
+         * renames to `IMG_0001 (1).jpg`, `(2)`, ... all share a size). All three are returned by
+         * the existing `queryBucketMedia` projection, so the check costs no extra disk or binder
+         * IO -- hashing the file instead would mean reading every photo and video on every scan,
+         * which is precisely the cost this table exists to avoid.
+         *
+         * @param dateModifiedSeconds MediaStore `DATE_MODIFIED`, **in seconds**. Milliseconds here
+         *   would still be self-consistent, but a future caller reading the raw column would then
+         *   mismatch silently, so the unit is fixed by the parameter name.
+         */
+        fun buildFingerprintKey(
+            displayName: String,
+            size: Long,
+            dateModifiedSeconds: Long
+        ): String = "$displayName|$size|$dateModifiedSeconds"
     }
 
     private fun queryBucketMedia(

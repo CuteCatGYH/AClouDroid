@@ -1172,6 +1172,22 @@ totalDragX > 0  →  右滑  →  上一张
    客户端先算本地 **SHA-256** 去 `/assets/upload` 换 `uploadUrl`，流式上传后由 MMCS 返回
    21 字节 **`fileChecksum`（= `resOriginalFingerprint` = `masterId`）**。因此查重不能“直接用云端现成字段”，
    必须先在本地建指纹索引，云端 `/records/lookup` 只做兜底（详见 §4.6）
+
+   > [!CAUTION]
+   > **查重必须发生在任何流量之前，且“已上传”的事实不能存在可被 UI 删除的行上。**
+   > （[ISS-068](CHANGELOG_ISSUES.md#iss-068-照片备份清空队列后已上传文件被重复流式上传流量浪费)）
+   >
+   > 曾经的实现把去重依据记在 `upload_queue` 行上。用户在「备份队列管理」里点**清空完成 / 全部清空**
+   > 就把这个事实删了，下一轮扫描视为全新文件重传一遍。云端没有重复（Go 的 `masterRecordExists()`
+   > 最后拦住了），**但原始字节已经完整传到 CVWS，流量是实打实的**。
+   >
+   > 三条硬规则：
+   > 1. **代价后置的幂等等于没有幂等。** 判断“要不要传”必须排在 `/assets/upload` 与
+   >    `uploadFileToUrl()` **之前**；放到 `masterRecordExists()` 那一步已经太晚。
+   > 2. **队列是视图，不是真相。** 真相在 `uploaded_fingerprints`（只有 `wipeAllData()` 能清），
+   >    且 key 只能由 `LocalAlbumRepository.buildFingerprintKey()` 生成 —— 扫描与上传两侧格式漂移
+   >    会让 lookup 永远不命中，且表面看不出任何异常（同 §6.3 的 Coil cache key）。
+   > 3. 退出登录必须清该表：`masterId` 属于特定 Apple ID，见 §5.5。
 3. **上传前校验 `X-APPLE-WEBAUTH-PCS-Photos` Cookie** —— 无此凭证无法写入照片库
    （当前只校验了 `PCS-CloudKit`，需补上）
 4. **EXIF 时间戳必须准确** —— iCloud 依赖 `assetDate` 排序，写错导致照片乱序

@@ -2194,6 +2194,39 @@ class PhotoRepository(
             val rawFd = uploadPfd.detachFd()
             database.uploadQueueDao().update(queueItem.copy(status = "UPLOADING", updatedAt = System.currentTimeMillis()))
 
+            // Claim the file *before* the bytes go out.
+            //
+            // The scan path skips anything with a fingerprint row, and this insert is what makes
+            // that true. Writing it here rather than on success closes the window where a scan
+            // running while this upload is in flight would enqueue the same file again. If the
+            // upload then fails, the row stays with an empty `masterId`, meaning "attempted, never
+            // confirmed" -- still invisible to the scan, and still retried, because the retry comes
+            // from this queue row and not from a fresh scan.
+            //
+            // Must use the shared key builder: a locally-formatted key here would not match the one
+            // the scan computed and the whole table would go unused.
+            val fingerprintKey = app.acloudroid.qwq.feature.local.data.LocalAlbumRepository
+                .buildFingerprintKey(
+                    displayName = queueItem.filename,
+                    size = queueItem.fileSize,
+                    dateModifiedSeconds = queueItem.dateModified
+                )
+            try {
+                database.uploadedFingerprintDao().insert(
+                    app.acloudroid.qwq.feature.photos.data.db.UploadedFingerprintEntity(
+                        contentKey = fingerprintKey,
+                        masterId = "",
+                        localSha256 = null,
+                        sizeBytes = queueItem.fileSize,
+                        uploadedAt = System.currentTimeMillis()
+                    )
+                )
+            } catch (e: Exception) {
+                // A bookkeeping failure must never abort an otherwise good upload; the only cost is
+                // that this one file may be re-checked by the next scan.
+                Log.w(TAG, "Failed to record upload fingerprint for ${queueItem.filename}: ${e.message}")
+            }
+
             val jsonResultStr = try {
                 Icloudcore.uploadPhotoAsset(
                     rawFd.toLong(),
@@ -2228,6 +2261,21 @@ class PhotoRepository(
                         updatedAt = System.currentTimeMillis()
                     )
                 )
+
+                // Backfill the identifiers that only exist after a successful upload. `masterId`
+                // is the record that makes this row useful beyond "don't upload again": it lets a
+                // future reconcile pass tie local bytes back to the CloudKit record.
+                //
+                // DELIBERATELY NOT rolled back on failure above -- see the placeholder insert.
+                try {
+                    database.uploadedFingerprintDao().markConfirmed(
+                        key = fingerprintKey,
+                        masterId = masterId,
+                        sha256 = localSha256.ifBlank { null }
+                    )
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to confirm upload fingerprint for ${queueItem.filename}: ${e.message}")
+                }
 
                 if (queueItem.mediaStoreUri.contains("/cache/share_uploads/")) {
                     try {
@@ -2352,6 +2400,13 @@ class PhotoRepository(
             photoMonthIndexDao.clearAll()
             photoDao.clearAll()
             database.uploadQueueDao().clearAll()
+
+            // Upload fingerprints are account-scoped: each `masterId` is a CloudKit record name
+            // owned by the Apple ID that uploaded it. Leaving them behind would make the next
+            // account treat its own (different) photos as already backed up whenever a name/size
+            // /mtime happens to collide -- and those collisions are not hypothetical for camera
+            // roll files copied wholesale from one phone to another (AGENTS.md §5.5).
+            database.uploadedFingerprintDao().clearAll()
 
             // In-memory refresh bookkeeping refers to masters that no longer exist.
             refreshMutex.withLock {
