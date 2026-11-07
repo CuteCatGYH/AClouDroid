@@ -275,6 +275,15 @@ class DriveUploadWorker(
         private const val MAX_RETRY_ATTEMPTS = 3
 
         /**
+         * How far in the future an `ENQUEUED` work may be scheduled before it counts as stalled.
+         *
+         * 30 s leaves room for the ordinary dispatch delay (normally well under a second) so a
+         * healthy work is never re-scheduled behind the user's back, while still catching the
+         * minutes-to-hours deferrals seen on device. See [isOutOfWindow].
+         */
+        private const val STUCK_GRACE_MS = 30_000L
+
+        /**
          * Must be distinct from [NOTIFICATION_ID]; the foreground notification is owned by the
          * system while the worker runs, and reusing the id fights with our own progress updates.
          */
@@ -374,6 +383,17 @@ class DriveUploadWorker(
                 ExistingWorkPolicy.KEEP,
                 request
             )
+
+            // KEEP silently declines when the unique name is owned by a work that cannot make
+            // progress — either one the system dropped (WorkSpec stuck RUNNING) or one JobScheduler
+            // deferred far into the future. Neither is visible as an error, so check right after
+            // and replace it if we got nothing usable.
+            if (!isWorkActive(context.applicationContext) ||
+                isOutOfWindow(context.applicationContext)
+            ) {
+                Log.w(TAG, "KEEP did not schedule a usable drain pass; replacing it")
+                forceEnqueue(context.applicationContext)
+            }
         }
 
         /**
@@ -388,6 +408,38 @@ class DriveUploadWorker(
                 .getWorkInfosForUniqueWork(UNIQUE_WORK_NAME)
                 .get()
                 .any { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
+        }.getOrDefault(false)
+
+        /**
+         * True when the only work for [UNIQUE_WORK_NAME] is scheduled so far out that waiting for
+         * it is worse than re-scheduling it ourselves.
+         *
+         * ## Why [isWorkActive] alone is not enough
+         *
+         * `isWorkActive` counts `ENQUEUED` as alive, which is correct for a job about to run and
+         * wrong for one JobScheduler has deferred. Measured on device while an upload sat at
+         * "排队中" indefinitely:
+         *
+         * ```
+         * JOB #u0a549/222 ... TIME=+39m21s419ms:none NET BATNOTLOW
+         * JOB #u0a549/223 ... TIME=+2s991ms:none  NET  system stops=5
+         * ```
+         *
+         * Under `ExistingWorkPolicy.KEEP` that record owns the unique name for the whole 39
+         * minutes, so every enqueue is silently discarded. `pruneStaleWork()` does fix it, but only
+         * runs at process start — a long-lived process never gets a second chance, which is why
+         * killing the app "fixed" the symptom.
+         *
+         * Returns false when there is no work at all; callers pair this with
+         * `hasPendingWork()`.
+         */
+        fun isOutOfWindow(context: Context, graceMs: Long = STUCK_GRACE_MS): Boolean = runCatching {
+            val now = System.currentTimeMillis()
+            val infos = WorkManager.getInstance(context.applicationContext)
+                .getWorkInfosForUniqueWork(UNIQUE_WORK_NAME)
+                .get()
+            infos.isNotEmpty() && infos.none { it.state == WorkInfo.State.RUNNING } &&
+                infos.all { it.state != WorkInfo.State.ENQUEUED || it.nextScheduleTimeMillis - now > graceMs }
         }.getOrDefault(false)
 
         /**

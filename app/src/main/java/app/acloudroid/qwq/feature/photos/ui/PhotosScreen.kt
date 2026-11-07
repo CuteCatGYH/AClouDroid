@@ -132,7 +132,7 @@ fun PhotosScreen(
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                text = "iCloud",
+                                text = "Photo",
                                 fontWeight = FontWeight.Bold,
                                 style = MaterialTheme.typography.headlineMedium
                             )

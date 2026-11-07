@@ -34,6 +34,17 @@ class DriveUploadQueueTest {
             uploads.values.filter { it.status in listOf(DriveUploadStatus.QUEUED, DriveUploadStatus.UPLOADING) }
                 .sortedBy { it.createdAt }
 
+        override suspend fun findDuplicate(filename: String, filesize: Long): DriveUploadEntity? =
+            // "Newest" is the one inserted last, not the one with the largest createdAt: rows
+            // created in the same millisecond tie on the timestamp, which is exactly what a
+            // repeated selection of one file produces.
+            uploads.values
+                .filter { it.filename == filename && it.filesize == filesize }
+                .maxByOrNull { it.id }
+
+        override suspend fun namesInFolder(folder: String): List<String> =
+            uploads.values.filter { it.targetFolderDrivewsId == folder }.map { it.filename }
+
         override suspend fun countFailed(): Int =
             uploads.values.count { it.status == DriveUploadStatus.FAILED }
 
@@ -77,6 +88,8 @@ class DriveUploadQueueTest {
                     status = DriveUploadStatus.SUCCESS,
                     documentId = documentId,
                     bytesUploaded = it.filesize,
+                    // Mirrors the real `@Query`: completing must drop the progress string.
+                    speedText = null,
                     updatedAt = updatedAt
                 )
             }
@@ -378,4 +391,88 @@ class DriveUploadQueueTest {
         val future = System.currentTimeMillis() + 60_000
         assertTrue(dao.observeVisibleUploads(future).first().isEmpty())
     }
+
+    /**
+     * The newest row decides what `enqueueUpload` does with a repeated selection, so
+     * `findDuplicate` must return it whatever the status — not only the active states.
+     */
+    @Test
+    fun findDuplicateReturnsNewestRowRegardlessOfStatus() = runBlocking {
+        val dao = FakeDriveUploadDao()
+        val queue = DriveUploadQueue(dao)
+
+        val old = queue.enqueue(sample("same.png", 100L))
+        queue.markUploading(old)
+        queue.markSuccess(old, "doc-old")
+
+        val latest = queue.enqueue(sample("same.png", 100L))
+
+        val found = queue.findDuplicate("same.png", 100L)
+        assertNotNull("a SUCCESS row must still be discoverable", found)
+        assertEquals(latest, found!!.id)
+        assertEquals(DriveUploadStatus.QUEUED, found.status)
+    }
+
+    /**
+     * A different size is a different file: the fingerprint is (filename, filesize).
+     */
+    @Test
+    fun findDuplicateIgnoresDifferentSizes() = runBlocking {
+        val dao = FakeDriveUploadDao()
+        val queue = DriveUploadQueue(dao)
+
+        queue.enqueue(sample("same.png", 100L))
+
+        assertNull(queue.findDuplicate("same.png", 999L))
+    }
+
+    /** Renaming needs every pending name in the folder, so a second copy does not collide. */
+    @Test
+    fun namesInFolderIsScopedToTheFolder() = runBlocking {
+        val dao = FakeDriveUploadDao()
+        val queue = DriveUploadQueue(dao)
+
+        queue.enqueue(sample("a.png", 1L, folder = "FOLDER::one"))
+        queue.enqueue(sample("b.png", 1L, folder = "FOLDER::one"))
+        queue.enqueue(sample("c.png", 1L, folder = "FOLDER::two"))
+
+        assertEquals(
+            setOf("a.png", "b.png"),
+            queue.namesInFolder("FOLDER::one").toSet()
+        )
+        assertEquals(listOf("c.png"), queue.namesInFolder("FOLDER::two"))
+    }
+
+    /**
+     * Completing an upload must drop the progress string.
+     *
+     * The SHA phase writes `校验中 0%`; leaving it behind made 27 historical SUCCESS rows claim
+     * they were still validating, which the banner renders verbatim.
+     */
+    @Test
+    fun markSuccessClearsStaleProgressText() = runBlocking {
+        val dao = FakeDriveUploadDao()
+        val queue = DriveUploadQueue(dao)
+
+        val id = queue.enqueue(sample("done.png", 100L))
+        queue.updateProgressAndSpeed(id, 0L, "校验中 0%")
+        queue.markSuccess(id, "doc-1")
+
+        val row = dao.getById(id)!!
+        assertEquals(DriveUploadStatus.SUCCESS, row.status)
+        assertNull("a completed row must not keep a progress string", row.speedText)
+    }
+
+    private fun sample(
+        name: String,
+        size: Long,
+        folder: String = "FOLDER::root"
+    ) = DriveUploadEntity(
+        localPath = "/cache/$name",
+        targetFolderDrivewsId = folder,
+        targetFolderPath = "/",
+        filename = name,
+        filesize = size,
+        mimeType = "image/png"
+    )
 }

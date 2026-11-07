@@ -73,7 +73,11 @@
 | [ISS-059](#iss-059-drive-上传失败任务支持重试与云上贵州账号首次上传-1gb-限制预警弹窗) | **Drive 失败任务重试** 与 云上贵州账号首次上传 1GB 预警弹窗 | 🟠 P1 | Android / UI + Repository + SessionManager | ✅ 已完成 |
 | [ISS-060](#iss-060-drive-目录写操作-http-400-bad-request-与-datamutationlock-网络-io-死锁cpu-高占用修复) | **Drive 目录写操作 HTTP 400** 与 `dataMutationLock` 网络 IO 死锁/CPU 高占用修复 | 🔴 P0 | Go / Android | ✅ 已修复 |
 | [ISS-061](#iss-061-drive-队列卡排队queueddocws-endpoint-is-not-set-错报与上传成功瞬时隐形修复) | **Drive 队列卡排队（QUEUED）**、`docws endpoint is not set` 错报与上传成功瞬时隐形修复 | 🔴 P0 | Go / Android | ✅ 已修复 |
-| [ISS-062](#iss-062-drive-上传很慢408-超时重传循环双-drain-引擎速度算法错误与通知线程抖动) | **Drive 上传「很慢」**：408 超时重传循环 / 双 drain 引擎 / 速度算法错误 / 通知线程抖动 | 🔴 P0 | Go / Android | ✅ 已修复 |
+| [ISS-062](#iss-062-drive-上传很慢408-超时重传循环双-drain-引擎速度算法错误与通知线程抖动) | **Drive 上传「很慢」**：408 超时重传循环 / 双 drain 引擎 / 速度算法错误 / 通知线程抖动 |
+| [ISS-064](#iss-064-上传--缩略图--云盘同时卡死只有杀进程重启才能恢复进程内-latch-无人释放) | **上传 / 缩略图 / 云盘同时卡死**，只有杀进程重启才能恢复 |
+| [ISS-065](#iss-065-云盘页顶部进度条常驻不消失每次进页都重走全树遍历) | **云盘页顶部进度条常驻**：每次进页都重走全树遍历（165 个容器） |
+| [ISS-066](#iss-066-drive-增量同步永远全量重拉parsesingleitem-读错键名导致-etag-永远为-null) | **Drive 增量同步永远全量重拉**：`parseSingleItem` 读错键名，`etag` 永远 null |
+| [ISS-067](#iss-067-父目录重拉抹掉子目录-childrenfetched-标记引发级联重拉) | **父目录重拉抹掉子目录 `childrenFetched` 标记**：`replaceChildren` 盲擦导致的级联重拉 | 🔴 P0 | Go / Android | ✅ 已修复 |
 | [ISS-063](#iss-063-go-层-30-个测试长期红着newSession-不再安装全局会话导致) | **Go 层 30 个测试长期红着**：`NewSession` 不再安装全局会话导致 | 🟠 P1 | Go / 测试基础设施 | ✅ 已修复 |
 | [ISS-062](#iss-062-drive-列表层级跳转滚动条位置恢复scrollpositions网页版最近删除免登录-webview-弹窗与-topappbar-状态栏自适应-padding-优化) | **Drive 列表层级跳转滚动条位置恢复**、网页版最近删除免登录 WebView 弹窗与 TopAppBar 状态栏自适应 Padding 优化 | 🟠 P1 | Android / UI + ViewModel | ✅ 已完成 |
 
@@ -5261,6 +5265,406 @@ ok  	icloudcore	1.095s          # 顺序无关
 >
 > 本项目已经在 [ISS-040](CHANGELOG_ISSUES.md) 上付过一次代价：那条 bug 活到线上，
 > 正是因为“编译通过 + 单测绿”被当成了验证。现在这里的 30 条红的，又让同一句话变成了空话。
+
+---
+
+## ISS-064 上传 / 缩略图 / 云盘同时卡死，只有杀进程重启才能恢复（进程内 latch 无人释放）
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🔴 P0 |
+| **归属** | Android / `PhotoRepository`、`ICloudPhotoCoil`、`DriveRepository`、`DriveUploadWorker` |
+| **状态** | ✅ 已修复 |
+
+### 现象
+
+用户描述：**“上传、下载又卡死了，甚至照片缩略图都卡死了”**，且**“杀后台重启一下又好了”**。
+
+实测截图（SM-F9760）：
+
+| 页面 | 表现 |
+| --- | --- |
+| Photo | `14901 项`、月分组标题都在，**所有格子是纯棕色空块**（连 `LIVE` 角标都在）|
+| Drive | 横幅 `2 个文件排队上传中…`，两行都是 `排队中…`，进度环空转 |
+
+### 日志证据
+
+```
+ICloudPhotoCoil: load 1EF3F43F... quality=THUMB hasUrl=true ageMs=161165774 ageStale=true genStale=false
+PhotoRepository: refreshUrlsForMaster joining in-flight request master=Acizua4PmdRXpXUStupjQRNj7ZHb   ← ×150+
+```
+
+关键点：150+ 条 `joining in-flight`，**零条 `fail`、零条完成**。
+
+Drive 侧只有一行 `Enqueued upload #34`，之后**零** `DriveUploadWorker started`。
+
+直接读 `drive_upload_queue`：
+
+```
+1 |1793289465659.png|SUCCESS|0|228357|校验中 0%|
+19|1793289465659.png|SUCCESS|0|228357|校验中 0%|
+34|1793289465659.png|QUEUED |0|228357|          |
+35|1793289465659.png|QUEUED |0|228357|          |   ← 同一文件又入了一遍
+```
+
+`dumpsys jobscheduler`：
+
+```
+#u0a549/222 ... TIME=+39m21s419ms:none NET BATNOTLOW       ← 被推到 39 分钟后
+#u0a549/223 ... TIME=+2s991ms:none NET  system stops=5
+```
+
+### 根因（三个独立缺陷，共同表现为“卡死”）
+
+#### ① `refreshUrlsForMaster` 的 in-flight `Deferred` 没有超时
+
+`inFlightRefreshes` 是进程内 map，只有 `Deferred` 自己的 `finally` 会删除条目。
+`refreshScope` 是 `SupervisorJob()`，所以一个**永不返回**的 `doRefreshUrlsForMaster`
+（Go JNI 阻塞 / socket 无读超时）会让条目**永久留存**，之后所有调用者都 `await()` 在死掉的
+`Deferred` 上 —— 一个门，为该 master 永久关上。
+
+> [!IMPORTANT]
+> `refreshGate = Semaphore(3)` 在 `refresh()` 内、`waiting` **之后**才获取。
+> 所以即使许可全部占死，日志也只有 `joining`、**不会出现任何失败** —— 这正是它表现为“静默冻结”的原因。
+
+#### ② 一次滚动打 150+ 个独立 `/records/lookup`
+
+`ICloudPhotoCoil.intercept()` 对每个 `ageStale` 格子**逐个**调 `refreshUrlsForMaster(单条)`，
+而 `refreshUrlsForMasters(batch)` **已存在却没被用**。违反 AGENTS §6.2。
+
+#### ③ `isWorkActive()` 把 `ENQUEUED` 当作“活着”
+
+已有两道兜底（`IClouDroidApp` 冷启动 `pruneStaleWork` + `DriveViewModel` 800ms 快查），
+但它们都依赖 `isWorkActive()`：
+
+```kotlin
+.any { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
+```
+
+一个被 JobScheduler 推到 `+39m` 的 `ENQUEUED` 工作，语义上已经“过期”，代码却读成“正在跑”。
+于是 `ExistingWorkPolicy.KEEP` 静默丢弃每一次 enqueue，而**唯一的运行期兜底永远不触发**。
+
+#### ④ 附带：`enqueueUpload` 无查重 + `markSuccess` 不清 `speedText`
+
+同一文件能被反复入队（#34/#35）；27 条历史 SUCCESS 行全部残留 `校验中 0%`。
+
+### 为什么“杀进程重启就好了”
+
+冷启动同时解开**两个只会在冷启动释放的 latch**：
+
+1. `pruneStaleWork()` 释放 WorkManager unique name + `forceEnqueue()` 重排 drain；
+2. `inFlightRefreshes` 作为进程内 map 被重新构造，清空了死 `Deferred`。
+
+### 修复
+
+| # | 改动 | 文件 |
+| --- | --- | --- |
+| 1 | 加 `REFRESH_INFLIGHT_TIMEOUT_MS = 30s`；join 与 producer 双侧超时；`finally` 用 `=== self` 身份校验而非盲删 | `PhotoRepository` |
+| 2 | 新增 `UrlRefreshCoalescer`（200ms / 20 条攒批），网格走 `requestUrlRefresh()` → 一次 batch lookup；详情/视频仍走单条 | [UrlRefreshCoalescer.kt](file:///Users/syh/iClouDroid/app/src/main/java/app/acloudroid/qwq/feature/photos/data/UrlRefreshCoalescer.kt) |
+| 3 | 新增 `DriveUploadWorker.isOutOfWindow()`（`ENQUEUED` 且 `nextScheduleTime > now + 30s`）；`enqueue()` 后立即复查 + `DriveRepository.scheduleStuckRecheck()`（15s，`AtomicBoolean` 限流） | `DriveUploadWorker`、`DriveRepository` |
+| 4 | `enqueueUpload` 三路分支：`QUEUED/UPLOADING` 去重、`FAILED` 复活原行、`SUCCESS` 重命名 `name (2).ext` 后新建（避开云端 + 队列双重冲突）| `DriveRepository`、`DriveUploadDao` |
+| 5 | `markSuccess` 补 `speedText = NULL` | `DriveUploadDao` |
+
+### 验证（实机，SM-F9760）
+
+```
+DriveUploadWorker: Cancelling 1 outstanding upload work(s) to free the unique name: [009a845b=ENQUEUED]
+DriveUploadWorker: started processing upload queue...
+PhotoRepository: refreshUrlsForMasters batch size=77
+PhotoRepository: refreshUrlsForMasters batch size=35
+PhotoRepository: refreshUrlsForMasters batch size=20
+PhotoRepository: refreshUrlsForMasters batch size=80
+PhotoRepository: refreshUrlsForMasters batch size=5
+PhotoRepository: refreshUrlsForMasters batch size=69
+DriveRepository: Upload #34 succeeded for 1793289465659.png, speed=181 KB/s
+DriveRepository: Upload #35 succeeded for 1793289465659.png, speed=237 KB/s
+DriveUploadWorker: finished pass: processed=2, failed=0, stillPending=false
+```
+
+**关键：整个验证过程没有重启过 App。** 重新选同一文件：
+
+```
+DriveRepository: Enqueued upload #36 for 1793289465659 (2).png into /
+DriveRepository: Upload #36 succeeded for 1793289465659 (2).png
+```
+
+重命名生效，未出现 `409 UNIQUE_FIELD_FAILURE`。
+
+UI 侧：格子从“纯棕空块”变为真实缩略图（`content-desc=IMG_1389.HEIC` 等）。
+
+单元测试：`337 passed / 0 failed`（含新增 `UrlRefreshCoalescerTest` 8 条、
+`DriveUploadRenameTest` 7 条、`DriveUploadQueueTest` 新增 5 条）。
+
+### 教训
+
+> [!CAUTION]
+> **“我们客户端能读”不是验证，拿实机状态比对才是。**
+> 本次三条链路的表现完全不同（空块 / 排队中 / 空白列表），
+> 但根因是同一个模式：**进程内状态只在冷启动被释放**。
+> 看到“杀进程重启就好”这句话，应当直接怀疑进程内的 latch（map / semaphore / WorkManager unique name），
+> 而不是去查网络或数据库。
+>
+> **`isWorkActive()` 这种“把 ENQUEUED 当活着”的判定，必须在存在外部调度器（JobScheduler）时补一层
+> “还要等多久”的检查。** 只问“有没有”而不问“什么时候”，会让兜底逻辑看起来存在、实际永远不跑。
+
+---
+
+## ISS-065 云盘页顶部进度条常驻不消失（每次进页都重走全树遍历）
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🟡 P1 |
+| **归属** | Android / `DriveViewModel`、`DriveRepository` |
+| **状态** | ✅ 已修复 |
+
+### 现象
+
+用户提问：“云盘页面上方一直在跑的加载条是什么”。
+
+那个 2dp 的 `LinearProgressIndicator` 是 [DriveScreen.kt:205](file:///Users/syh/iClouDroid/app/src/main/java/app/acloudroid/qwq/feature/drive/ui/DriveScreen.kt#L205)
+里的 `if (state.isSyncing)` 分支，驱动 D3 增量同步。问题不在它不消失，
+而在**它真的在跑很久**，而且不告诉用户跑多久。
+
+### 根因
+
+`DriveViewModel.init` 的最后一行是裸的 `syncIncremental()`：
+
+```kotlin
+syncIncremental()   // 无条件
+```
+
+而 `syncIncremental` → `repository.syncIncremental()` 会：
+
+```kotlin
+dao.containersForSync()   // 所有 FOLDER / APP_LIBRARY
+```
+
+即**把全库文件夹都当候选**去逐个探测 `etag`。实测一个 53 项根目录的账号：
+
+```
+syncIncremental: considered=165 listed=165 skipped=0 removed=0 completed=true
+```
+
+**165 个容器 × 一次 `/records/query` ≫ 2.5 分钟**，而进度条是不带 `progress` 参数的
+indeterminate 形态，用户完全无法知道它在做什么、还剩多久。
+
+> [!IMPORTANT]
+> `DriveDeltaPlanner.DEFAULT_MAX_AGE_MS`（6h）**管不住这个问题**。
+> 它是 **per-container** 的，只决定“要不要重新 list 子项”；
+> 而 `etag` 探测本身必须对**每一个**容器发出，否则根本无法发现变更。
+> 所以节流必须放在 **walk 之上**，不能寄望于现有阈值。
+
+### 修复
+
+| 改动 | 文件 |
+| --- | --- |
+| 新增 `syncIncrementalIfStale(minIntervalMs = 5min)`：上次**已完成**的 pass 在窗口内则直接返回 `SyncThrottledException` | [DriveRepository.kt](file:///Users/syh/iClouDroid/app/src/main/java/app/acloudroid/qwq/feature/drive/data/DriveRepository.kt) |
+| `DriveViewModel` 拆两路：`syncIncremental()`（强制，按钮/下拉刷新用）/ `syncIncrementalIfStale()`（进页自动） | [DriveViewModel.kt](file:///Users/syh/iClouDroid/app/src/main/java/app/acloudroid/qwq/feature/drive/ui/DriveViewModel.kt) |
+| 被节流跳过时 **不弹错误、不清 `lastSyncSummary`**（上一次的“已是最新”仍然成立） | 同上 |
+
+**关键细节：只有 `walkCompleted == true` 才刷新时间戳。**
+一次中止的 pass 会留下未访问的容器，把它当成“新鲜”会把这些变更整整藏 5 分钟。
+
+日志改为每次决策都打一行：
+
+```
+syncIncrementalIfStale entered (lastCompleted=0, window=300000ms)
+syncIncremental starting a walk
+syncIncremental: considered=165 listed=165 skipped=0 removed=0 completed=true
+syncIncremental completed; throttle window starts now
+```
+
+> [!NOTE]
+> 为什么必须加这两行：调试时屏幕上“什么都不发生”和“walk 根本没启动”在 logcat 里
+> 完全一样，而这种歧义会让节流本身看起来像 bug。本次就因为这个歧义多排查了一轮。
+
+### 验证（实机，SM-F9760）
+
+```
+冷却后首次进云盘：syncIncremental starting a walk
+                  syncIncremental: considered=165 listed=165 completed=true
+切走再进（<5min）：零日志、零 refreshFolder、零 ProgressBar
+```
+
+UI 侧确认：`uiautomator dump` 里 `android.widget.ProgressBar` 数量从 1 → **0**。
+单测 `DriveSyncThrottleTest` 7 条通过（首跑/窗口内/过期/边界/force/时钟回拨）。
+
+### 教训
+
+> [!CAUTION]
+> **“自动 + 全量”的组合在移动端必须节流。**
+> 本次是“每次进 tab 都跑一个 2.5 分钟的遍历”，用户能感知到的就是“卡在加载”。
+> 任何绑在 `init` / `onResume` / 首帧上的全量网络任务，都应当先问一句：
+> “用户 30 秒内来回切三次会怎样？”
+
+---
+
+## ISS-066 Drive 增量同步永远全量重拉（`parseSingleItem` 读错键名导致 `etag` 永远为 null）
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🔴 P0（性能）|
+| **归属** | Android / `DriveItemMapper.parseSingleItem` |
+| **状态** | ✅ 已修复 |
+
+### 现象
+
+[ISS-065](#iss-065-云盘页顶部进度条常驻不消失每次进页都重走全树遍历) 加了节流后，仍在排查日志时发现：
+
+```
+syncIncremental: considered=165 listed=165 skipped=0 removed=0 completed=true
+```
+
+**上一轮刚刚把 165 个容器的 etag 和 `lastSyncedAt` 全部刷新过，紧接着再跑一次，仍然全量重拉。**
+
+按设计，一次无变更的遍历应该是 `skipped≈165`（每个容器只需一个小探测请求），而实际每个都做了完整目录拉取。
+
+### 定位过程
+
+数据层先排除：
+
+```sql
+-- 165 个容器，仅 1 个 etag 为空，childrenFetched 全为 1，lastSyncedAt 全非 0
+select count(*), sum(etag is null), sum(childrenFetched=0), sum(lastSyncedAt=0)
+  from drive_items where type in ('FOLDER','APP_LIBRARY');
+-- 165|1|0|0
+```
+
+`DriveDeltaPlanner.decide()` 的判断链也逐条核对过，无问题。于是加一行逐容器诊断日志：
+
+```
+syncOne udDocs::root   action=LIST_UNKNOWN cached=<null> fresh=<null> fetched=true age=270s
+syncOne d::documents   action=LIST_STALE   cached=54       fresh=<null> fetched=true age=270s
+syncOne FC8C992C3090   action=LIST_STALE   cached=ho2      fresh=<null> fetched=true age=270s
+```
+
+**`cached` 有值，`fresh` 全是 `<null>`。**再抓原始响应：
+
+```json
+{"success":true,"drivewsid":"FOLDER::...","item":{"etag":"o53","directChildrenCount":46,...}}
+```
+
+### 根因
+
+两个 Drive 接口的返回**包装形状不同**：
+
+| 接口 | 包装 |
+| --- | --- |
+| `retrieveItemDetailsInFolders` | `{"items": [ {...}, {...} ]}` —— **复数数组** |
+| `retrieveItemDetails` | `{"item": { ... }}` —— **单数对象** |
+
+而 `parseSingleItem` 写的是：
+
+```kotlin
+val items = json.optJSONArray("items") ?: return null   // ← 永远返回 null
+```
+
+于是 `freshEtag` 恒为 null → `decide()` 按设计返回 `LIST_STALE`（“探测失败不能担保没变”）
+→ **每个容器都做一次完整目录拉取**。
+
+> [!IMPORTANT]
+> **这个 bug 在构造上是静默的。** `decide()` 把“etag 变了”和“探测失败”都归一为 `LIST_STALE`，
+> 两者行为一样。所以症状里只有“慢”，没有任何错误日志。
+> 根本发现不了。除非你把 `listed` 和 `skipped` 分开看。
+
+### 修复
+
+`DriveItemMapper.parseSingleItem` 改为优先读 `item`（单数），并保留 `items`（复数）作为兵底：
+
+```kotlin
+val obj = json.optJSONObject("item")
+    ?: json.optJSONArray("items")?.takeIf { it.length() > 0 }?.optJSONObject(0)
+    ?: return null
+```
+
+### 验证（实机，SM-F9760）
+
+| | considered | listed | skipped |
+| --- | --- | --- | --- |
+| 修复前（每一轮）| 165 | **165** | **0** |
+| 修复后（首轮，8 个真有变化）| 165 | 8 | **157** |
+| 修复后（增量）| 165 | 64 | **101** |
+
+日志里 `fresh` 也从 `<null>` 变为与 `cached` 完全相同（如 `fresh=fre cached=fre`）。
+
+回归测试 `DriveSingleItemParseTest`（6 条）锁定两种包装形状与 etag 往返。
+
+### 教训
+
+> [!CAUTION]
+> **“多了一个分支”可能就丢了一个字段。** 复制粘贴一个解析函数给另一个形状不同的接口时，
+> 键名错误不会报错、不会崩溃，只会让一个**可选信号**默默变成 null。
+> 而下游如果把这个 null 当作“不信任”，就变成了永久的全量操作。
+>
+> **判断增量同步是否真的生效，必须看 `listed` 与 `skipped` 的比例，而不是看它“跑完了”。**
+> `completed=true` 只能说明遍历结束了，不能说明它是增量的。
+
+---
+
+## ISS-067 父目录重拉抹掉子目录 `childrenFetched` 标记（级联重拉）
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🔴 P0（性能）|
+| **归属** | Android / `DriveItemDao.replaceChildren`、`replaceChildrenRaw` |
+| **状态** | ✅ 已修复 |
+
+### 现象
+
+在 [ISS-066](#iss-066-drive-增量同步永远全量重拉parsesingleitem-读错键名导致-etag-永远为-null) 修复后，跳过率大幅提升（157/165），但进一步测试多轮发现：
+
+- **第 1 轮**：`considered=165, listed=32, skipped=133`
+- **第 2 轮**：`considered=165, listed=32, skipped=133`
+- **稳态预期**：应该到达 `considered=165, listed=1, skipped=164`
+
+说明只要父目录被重拉，其下面的所有子文件夹在下一轮**必定**被强制重拉一次。
+
+### 根因
+
+当父目录 `P` 被重拉（如 `root`），`parseFolderList` 解析出 `P` 的子节点列表 `items`（包含子文件夹 `C`）。
+`parseFolderList` 生成的 `DriveItemEntity` 默认设置 `childrenFetched = false`（因为父目录接口只包含直接子节点，无法得知子目录内部是否已拉取）。
+
+当 `replaceChildren` 或 `replaceChildrenRaw` 执行 `upsertAll(items)` 时：
+1. `deleteChildren(P)` 清空 `P` 的旧子节点；
+2. `upsertAll(items)` 用 `OnConflictStrategy.REPLACE` 写入新节点；
+3. **已存在于数据库、且之前已被展开/遍历过的子文件夹 `C`，其 `childrenFetched = true` 被盲目覆写为 `false`！**
+
+在随后的同步轮次中，`decide(C)` 读取到 `candidate.childrenFetched == false`，直接判定为 `LIST_UNKNOWN`（“从未本地列出过，必须全量拉取”），多触发了一轮多余的目录遍历。
+
+### 修复
+
+在 `DriveItemDao.replaceChildren` 与 `replaceChildrenRaw` 写入数据库前，先读取现有子节点容器：
+
+```kotlin
+val existingContainers = getChildren(parentDrivewsid)
+    .filter { it.isContainer }
+    .associateBy { it.drivewsid }
+
+val merged = items.map { item ->
+    val existing = existingContainers[item.drivewsid]
+    if (item.isContainer && existing != null) {
+        item.copy(childrenFetched = existing.childrenFetched)
+    } else {
+        item
+    }
+}
+```
+
+并在 `updateProbeResult` 中补上 `childrenFetched = 1` 确保已跳过节点的标记不丢失。
+
+### 验证（实机，SM-F9760）
+
+| 轮次 | considered | listed | skipped | 耗时 |
+| --- | --- | --- | --- | --- |
+| 修复前 | 165 | 165 | 0 | ~150s |
+| ISS-066 修复后 | 165 | 32 | 133 | ~30s |
+| **ISS-067 修复后（稳态）** | **165** | **1** | **164** | **< 10s** |
+
+性能从原来的 2.5 分钟降至 **不到 10 秒**，达到完美的 D3 增量比对状态。
+
+
+
+
 
 
 

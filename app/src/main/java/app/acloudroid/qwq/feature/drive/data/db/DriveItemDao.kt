@@ -65,12 +65,34 @@ interface DriveItemDao {
      * Done as one transaction because a partially-applied refresh is indistinguishable from a
      * genuine deletion once the UI subscribes to the `Flow` — the folder would visibly lose rows
      * and then get them back.
+     *
+     * Preserves `childrenFetched` on subfolders that already existed in the local cache. When a
+     * parent folder is re-listed, its response includes subfolder nodes built by `parseFolderList`
+     * with `childrenFetched = false`. Blindly replacing existing subfolder rows with these
+     * un-expanded nodes would reset `childrenFetched` to `0` in the database, stripping the
+     * "already fetched" mark from subtrees that are still fully cached. On the next sync pass, the
+     * planner would see `childrenFetched == false` and force those subfolders to re-list as
+     * `LIST_UNKNOWN` — making a single parent re-list trigger a cascading re-list of every
+     * descendant container regardless of whether its `etag` changed.
      */
     @Transaction
     suspend fun replaceChildren(parentDrivewsid: String, items: List<DriveItemEntity>) {
+        val existingContainers = getChildren(parentDrivewsid)
+            .filter { it.isContainer }
+            .associateBy { it.drivewsid }
+
+        val merged = items.map { item ->
+            val existing = existingContainers[item.drivewsid]
+            if (item.isContainer && existing != null) {
+                item.copy(childrenFetched = existing.childrenFetched)
+            } else {
+                item
+            }
+        }
+
         deleteChildren(parentDrivewsid)
-        if (items.isNotEmpty()) {
-            upsertAll(items)
+        if (merged.isNotEmpty()) {
+            upsertAll(merged)
         }
         markChildrenFetched(parentDrivewsid)
     }
@@ -99,13 +121,15 @@ interface DriveItemDao {
      * Refreshes only the container's own metadata, leaving its children untouched.
      *
      * Used by the sync walk to stamp a fresh `etag` on a container it decided not to re-list,
-     * so the next pass has an up-to-date tag to compare against.
+     * so the next pass has an up-to-date tag to compare against. Also ensures `childrenFetched`
+     * remains 1 since a skipped container's listing was already complete.
      */
     @Query(
         """
         UPDATE drive_items
         SET etag = :etag,
             directChildrenCount = :childCount,
+            childrenFetched = 1,
             lastSyncedAt = :now
         WHERE drivewsid = :drivewsid
         """
@@ -120,9 +144,22 @@ interface DriveItemDao {
      */
     @Transaction
     suspend fun replaceChildrenRaw(parentDrivewsid: String, items: List<DriveItemEntity>) {
+        val existingContainers = getChildren(parentDrivewsid)
+            .filter { it.isContainer }
+            .associateBy { it.drivewsid }
+
+        val merged = items.map { item ->
+            val existing = existingContainers[item.drivewsid]
+            if (item.isContainer && existing != null) {
+                item.copy(childrenFetched = existing.childrenFetched)
+            } else {
+                item
+            }
+        }
+
         deleteChildren(parentDrivewsid)
-        if (items.isNotEmpty()) {
-            upsertAll(items)
+        if (merged.isNotEmpty()) {
+            upsertAll(merged)
         }
     }
 
@@ -133,6 +170,9 @@ interface DriveItemDao {
     /** Root marker — inserted lazily so the UI has something to subscribe to on first launch. */
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertRootIfMissing(root: DriveItemEntity)
+
+    @Query("UPDATE drive_items SET name = :name WHERE drivewsid = :drivewsid")
+    suspend fun updateRootName(drivewsid: String, name: String)
 
     @Query("SELECT COUNT(*) FROM drive_items")
     suspend fun count(): Int

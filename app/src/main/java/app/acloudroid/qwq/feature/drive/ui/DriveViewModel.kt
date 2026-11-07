@@ -71,7 +71,7 @@ data class DriveUiState(
         }
 
     val currentName: String
-        get() = trail.lastOrNull()?.name ?: "iCloud Drive"
+        get() = trail.lastOrNull()?.name ?: "Drive"
 
     val canGoUp: Boolean get() = trail.size > 1
 }
@@ -139,12 +139,19 @@ class DriveViewModel(
             repository.ensureRoot()
             val restoredTrail = restoreTrailFromSavedState()
             val root = repository.getItem(DriveItemEntity.ROOT_DRIVEWSID)
+            val rootName = root?.name?.takeIf { it.isNotBlank() && it != "iCloud Drive" } ?: "Drive"
             val rootCrumb = DriveCrumb(
                 drivewsid = DriveItemEntity.ROOT_DRIVEWSID,
-                name = root?.name?.takeIf { it.isNotBlank() } ?: "iCloud Drive"
+                name = rootName
             )
             val currentTrail = if (!restoredTrail.isNullOrEmpty()) {
-                restoredTrail
+                restoredTrail.mapIndexed { index, crumb ->
+                    if (index == 0 && crumb.drivewsid == DriveItemEntity.ROOT_DRIVEWSID) {
+                        crumb.copy(name = rootName)
+                    } else {
+                        crumb
+                    }
+                }
             } else {
                 listOf(rootCrumb)
             }
@@ -190,7 +197,7 @@ class DriveViewModel(
                 }
             }
 
-            syncIncremental()
+            syncIncrementalIfStale()
         }
     }
 
@@ -286,12 +293,39 @@ class DriveViewModel(
     }
 
     /** Manually triggers an incremental D3 walk. */
-    fun syncIncremental() {
+    /**
+     * Manually triggers an incremental D3 walk. Always runs, ignoring the freshness window —
+     * pressing the button is an explicit "check now".
+     */
+    fun syncIncremental() = runSync(force = true)
+
+    /**
+     * The automatic pass fired when the screen first observes the current folder.
+     *
+     * Throttled on purpose. This used to call [syncIncremental] unconditionally, so *every* visit
+     * to the Drive tab re-probed the entire cached tree — up to 200 containers, one request each,
+     * behind an indeterminate progress strip. Tabbing away and back re-ran the whole thing.
+     */
+    private fun syncIncrementalIfStale() = runSync(force = false)
+
+    private fun runSync(force: Boolean) {
         if (syncJob?.isActive == true) return
         syncJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isSyncing = true)
             try {
-                val reportResult = repository.syncIncremental()
+                val reportResult = if (force) {
+                    repository.syncIncremental()
+                } else {
+                    repository.syncIncrementalIfStale()
+                }
+
+                // A throttled skip is not an error and must not clear the existing summary —
+                // "已是最新（检查 37 个文件夹）" from the previous pass is still accurate.
+                if (reportResult.exceptionOrNull() is DriveRepository.SyncThrottledException) {
+                    Log.d(TAG, "sync skipped: a recent pass is still fresh")
+                    return@launch
+                }
+
                 _uiState.value = _uiState.value.copy(
                     lastSyncSummary = reportResult.getOrNull()?.let { summarize(it) }
                 )
@@ -327,18 +361,57 @@ class DriveViewModel(
             val folderId = _uiState.value.currentDrivewsid
             val folderPath = _uiState.value.currentFolderPath
 
+            // Outcome counts, aggregated per selection.
+            //
+            // `GetMultipleContents()` lets one pick return dozens of files, so reporting per file
+            // would queue up dozens of toasts. One summary at the end is the only readable option.
+            var deduped = 0
+            var revived = 0
+            var renamed = 0
+            var renamedSample: String? = null
+
             for (uri in uris) {
-                repository.enqueueUpload(uri, folderId, folderPath)
+                repository.enqueueUpload(uri, folderId, folderPath) { outcome ->
+                    when (outcome) {
+                        is DriveRepository.EnqueueOutcome.Deduped -> deduped++
+                        is DriveRepository.EnqueueOutcome.Revived -> revived++
+                        is DriveRepository.EnqueueOutcome.Renamed -> {
+                            renamed++
+                            if (renamedSample == null) renamedSample = outcome.filename
+                        }
+                        is DriveRepository.EnqueueOutcome.Queued -> Unit
+                    }
+                }
             }
 
-            DriveUploadWorker.enqueue(context)
+            val parts = buildList {
+                if (deduped > 0) add("$deduped 个文件已在队列中")
+                if (revived > 0) add("$revived 个失败任务已重新排队")
+                if (renamed > 0) add("$renamed 个同名文件已改名为 $renamedSample 等")
+            }
+            if (parts.isNotEmpty()) {
+                android.widget.Toast.makeText(
+                    context,
+                    parts.joinToString("；"),
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
 
+            // NOTE: no second `DriveUploadWorker.enqueue(context)` here — `enqueueUpload` already
+            // schedules one per file. Calling it again per selection only gave KEEP more chances
+            // to be misjudged.
+
+            // Fast recheck for the "KEEP dropped us because the slot was not released yet" case.
+            // The slow one lives in DriveRepository.scheduleStuckRecheck() and covers the case this
+            // delay is far too short to see: a work JobScheduler deferred by tens of minutes.
             kotlinx.coroutines.delay(ENQUEUE_RECOVERY_DELAY_MS)
             val stillQueued = repository.uploadQueue.hasPendingWork()
-            if (stillQueued && !DriveUploadWorker.isWorkActive(context)) {
+            if (stillQueued && (!DriveUploadWorker.isWorkActive(context) ||
+                    DriveUploadWorker.isOutOfWindow(context))
+            ) {
                 android.util.Log.w(
                     TAG,
-                    "No active upload work after enqueue; forcing a drain pass"
+                    "No usable upload work after enqueue; forcing a drain pass"
                 )
                 DriveUploadWorker.forceEnqueue(context)
             }

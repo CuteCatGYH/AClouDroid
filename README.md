@@ -1,9 +1,9 @@
-# iClouDroid
+# AClouDroid
 
 > **在 Android 手机上直接浏览与同步你的 iCloud 。** 不需要 iPhone，不需要 iPad，也不需要开电脑。
 
-如果你手上是 Android 主力机，但照片都存在 iCloud 里（或家里有 iPhone、iPad、Mac 在拍），
-**iClouDroid** 让你在 Android 上流畅浏览 iCloud 照片与视频、将本地相册自动备份到 iCloud，甚至让其他 Android App 也能直接选择 iCloud 里的照片。
+如果你的主力机是安卓设备，或有一两个安卓副机，但照片都存在 iCloud 里。
+**iClouDroid** 能让你在 Android 上流畅浏览 iCloud 中的照片、视频与文件，将本地相册自动备份到 iCloud，甚至可以让其他 Android App 也能直接选择 iCloud 里的照片。
 
 ---
 
@@ -83,72 +83,6 @@ Android 13+ 支持系统级的 PhotoPicker 云端扩展。在 iClouDroid 的「�
 - **照片更新同步**：你在 iPhone 或 Mac 上新拍的照片，需待其上传至 iCloud 并在 iClouDroid 触发增量同步后呈现。
 - **后台备份电池优化**：如开启了本地相册自动备份，建议在系统设置中将 iClouDroid 的电池优化设置为「不受限制」，以保障后台备份顺畅运行。
 
----
-
-## 🛠️ 编译与构建（给开发者）
-
-<details>
-<summary>点击展开开发者构建指南</summary>
-
-### 环境要求
-
-- **Go**：1.21+（推荐 1.27）
-- **JDK**：17+（建议使用 Android Studio 附带的 JBR）
-- **Android SDK**：API 35+
-- **Android NDK**：26+
-
-### 构建步骤
-
-1. **构建 Go 跨语言核心层**（首次构建或修改 `go-core/` 后必需）：
-
-   ```bash
-   # 如果在某些网络环境下 sum.golang.org 不可达，可添加 GOSUMDB=off
-   ./scripts/build_aar.sh
-   ```
-
-   该脚本会自动配置编译环境并在 `app/libs/` 下生成 `icloudcore.aar`。
-
-2. **编译 Android APK**：
-
-   ```bash
-   ./gradlew :app:assembleDebug
-   ```
-
-   构建产物位于 `app/build/outputs/apk/debug/app-debug.apk`。
-
-### 技术架构概览
-
-```
-Android (Kotlin + Jetpack Compose)
-    │
-    │  WebView 官方登录页 → 自动提取 Cookie → EncryptedSharedPreferences
-    │
-    ▼  JNI / JNA (gomobile bind)
-Go 核心层 (go-core)
-    │
-    │  CloudKit 私有协议 (ckdatabasews / cvws)
-    ▼
-iCloud 照片服务
-```
-
-- **UI 层**：Jetpack Compose + Material 3，`LazyColumn` 行展开月分组网格、全屏手势查看器。
-- **数据与存储**：Room 本地数据库 (`photo_assets` / `photo_month_index`) + Coil 图片加载拦截器。
-- **系统集成**：Android 13 `CloudMediaProvider`，支持 Shizuku 注入 Shell 白名单。
-- **跨语言协议层**：Go 实现 CloudKit `/records/query` 游标分页、`/records/changes` 增量同步、`/assets/upload` MMCS 零内存流式上传。
-
-### 核心项目文档
-
-| 文档 | 说明 |
-| --- | --- |
-| [docs/AGENTS.md](docs/AGENTS.md) | **开发者与 AI Agent 协助规范**（含架构约定、会话/URL 生命周期、血泪避坑铁律） |
-| [docs/CHANGELOG_ISSUES.md](docs/CHANGELOG_ISSUES.md) | **已修复问题案例库**（ISS-001 ~ ISS-046 完整现象、根因与验证记录） |
-| [docs/PITFALLS.md](docs/PITFALLS.md) | **工程避坑指南** |
-| [docs/REFERENCE.md](docs/REFERENCE.md) | **iCloud 协议实测逆向参考与 CloudKit 字段字典** |
-| [docs/TODO.md](docs/TODO.md) | **分阶段功能路线图** |
-
-</details>
-
----
 
 ## 🤝 致谢
 

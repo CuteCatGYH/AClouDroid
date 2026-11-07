@@ -94,6 +94,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -482,7 +483,8 @@ private fun DriveHeader(
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = state.currentName,
-                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.headlineMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)

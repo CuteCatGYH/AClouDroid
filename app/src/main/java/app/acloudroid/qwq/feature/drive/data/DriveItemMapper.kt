@@ -54,9 +54,19 @@ object DriveItemMapper {
      */
     fun parseSingleItem(json: JSONObject): DriveItemEntity? {
         if (!json.optBoolean("success", false)) return null
-        val items = json.optJSONArray("items") ?: return null
-        if (items.length() == 0) return null
-        val obj = items.optJSONObject(0) ?: return null
+
+        // `retrieveItemDetails` wraps the node in a **singular `item` object**; it does not use the
+        // `items` array that `retrieveItemDetailsInFolders` returns. Reading `items` here made
+        // every probe return null, which the planner correctly treats as "cannot vouch" and
+        // escalates to LIST_STALE — so D1 re-listed all 165 containers on every pass (~2.5 min)
+        // and `skipped` was permanently 0. Verified against a real response:
+        //   {"success":true,"item":{...,"etag":"o53","directChildrenCount":46}}
+        val obj = json.optJSONObject("item")
+            // Tolerate the array shape too, so a future server change (or a caller passing folder
+            // output by mistake) degrades to "first element" instead of silently returning null.
+            ?: json.optJSONArray("items")?.takeIf { it.length() > 0 }?.optJSONObject(0)
+            ?: return null
+
         // No parent fallback: a probe is about the node itself, and inventing a parent here would
         // make an unreachable row look reachable.
         return parseItem(obj, parentDrivewsidFallback = obj.optString("parentId"))
@@ -131,7 +141,7 @@ object DriveItemMapper {
         drivewsid = DriveItemEntity.ROOT_DRIVEWSID,
         docwsid = "root",
         parentDrivewsid = "", // the root has no parent; it is the entry point
-        name = "iCloud Drive",
+        name = "Drive",
         type = DriveItemEntity.TYPE_FOLDER,
         zone = DriveItemEntity.CLOUD_DOCS_ZONE,
         size = 0L,

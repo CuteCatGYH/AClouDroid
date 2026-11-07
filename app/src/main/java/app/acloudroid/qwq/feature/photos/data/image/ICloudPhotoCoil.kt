@@ -239,18 +239,41 @@ class ICloudPhotoInterceptor(
             .build()
     }
 
-    private suspend fun refresh(data: ICloudImageModel): RefreshedUrls? = refreshGate.withPermit {
-        // Bound the burst: a generation bump makes every visible cell stale at once.
-        val result = repository.refreshUrlsForMaster(data.masterId)
-        result.getOrNull().also {
-            if (it == null) {
-                Log.w(
-                    TAG,
-                    "refresh failed for master=${data.masterId}: ${result.exceptionOrNull()?.message}"
-                )
+    private suspend fun refresh(data: ICloudImageModel): RefreshedUrls? {
+        // The grid (THUMB) goes through the coalescing batch instead of a per-cell lookup.
+        //
+        // A scroll of a large library makes every visible cell stale at once. `refreshGate` capped
+        // that at 3 at a time, so the rest queued up and logcat filled with hundreds of
+        // `joining in-flight request` lines while no thumbnail rendered (AGENTS §6.2 explicitly
+        // calls this path out as the one that gets the account rate-limited).
+        //
+        // Detail / video pages keep the single-shot path: they are one asset, user-driven, and
+        // must not pay a coalescing window.
+        if (data.quality == ICloudImageModel.Quality.THUMB) {
+            val result = repository.requestUrlRefresh(data.masterId)
+            return result.getOrNull().also {
+                if (it == null) {
+                    Log.w(
+                        TAG,
+                        "grid refresh failed for master=${data.masterId}: " +
+                            "${result.exceptionOrNull()?.message}"
+                    )
+                }
             }
         }
-        return@withPermit result.getOrNull()
+
+        return refreshGate.withPermit {
+            // Bound the burst: a generation bump makes every visible cell stale at once.
+            val result = repository.refreshUrlsForMaster(data.masterId)
+            result.getOrNull().also {
+                if (it == null) {
+                    Log.w(
+                        TAG,
+                        "refresh failed for master=${data.masterId}: ${result.exceptionOrNull()?.message}"
+                    )
+                }
+            }
+        }
     }
 
     private fun pickFreshUrl(data: ICloudImageModel, urls: RefreshedUrls?): String? {

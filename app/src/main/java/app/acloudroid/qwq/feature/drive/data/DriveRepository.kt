@@ -12,12 +12,14 @@ import app.acloudroid.qwq.data.lock.DataMutationLock
 import app.acloudroid.qwq.data.session.SessionManager
 import app.acloudroid.qwq.feature.drive.data.db.DriveItemEntity
 import app.acloudroid.qwq.feature.drive.data.db.DriveUploadEntity
+import app.acloudroid.qwq.feature.drive.data.db.DriveUploadStatus
 import app.acloudroid.qwq.feature.drive.work.DriveUploadWorker
 import com.getup.icloudcore.Icloudcore
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
@@ -175,7 +177,9 @@ class DriveRepository(
      * empty container that is obviously still loading.
      */
     suspend fun ensureRoot() = withContext(Dispatchers.IO) {
-        dao.insertRootIfMissing(DriveItemMapper.rootEntity())
+        val root = DriveItemMapper.rootEntity()
+        dao.insertRootIfMissing(root)
+        dao.updateRootName(DriveItemEntity.ROOT_DRIVEWSID, root.name)
     }
 
     // ----------------------------------------------------------------------------------------
@@ -213,6 +217,78 @@ class DriveRepository(
     ): Result<DriveDeltaPlanner.SyncReport> = withContext(Dispatchers.IO) {
         syncIncrementalLocked(maxContainers)
     }
+
+    /**
+     * Like [syncIncremental], but skips the walk when one already ran recently.
+     *
+     * ## Why this exists
+     *
+     * `DriveViewModel.init` calls the walk unconditionally, so **every** visit to the Drive tab
+     * re-probes the whole cached tree — up to [DEFAULT_SYNC_CONTAINER_BUDGET] containers, one
+     * request each. On a real account that is minutes of traffic behind an indeterminate progress
+     * strip that gives no hint of what it is doing or how long it will take.
+     *
+     * The walk does have its own staleness escape hatch
+     * ([DriveDeltaPlanner.DEFAULT_MAX_AGE_MS], 6 h), but that is per-container and only decides
+     * whether to *re-list*; the cheap `etag` probe is still issued for all of them or the walk
+     * could never discover a change in the first place. So the throttle has to sit here, above
+     * the walk.
+     *
+     * @param minIntervalMs how long a previous pass stays authoritative. Five minutes matches
+     *   the window used elsewhere in the app for "this data is probably still good" (see
+     *   `PhotoRepository.REFRESH_DEDUP_WINDOW_MS`) and is far longer than the time it takes a user
+     *   to tab away and back. Pass `0` to force a walk — that is what the header's sync button and
+     *   pull-to-refresh should use.
+     */
+    suspend fun syncIncrementalIfStale(
+        minIntervalMs: Long = SYNC_THROTTLE_MS,
+        maxContainers: Int = DEFAULT_SYNC_CONTAINER_BUDGET
+    ): Result<DriveDeltaPlanner.SyncReport> = withContext(Dispatchers.IO) {
+        // Always log the decision. "Nothing in logcat" is indistinguishable from "the walk
+        // never started", and that ambiguity is exactly what makes a throttle look like a bug.
+        Log.d(
+            TAG,
+            "syncIncrementalIfStale entered (lastCompleted=$lastSyncCompletedAt, " +
+                "window=${minIntervalMs}ms)"
+        )
+
+        if (minIntervalMs > 0) {
+            val since = System.currentTimeMillis() - lastSyncCompletedAt
+            if (lastSyncCompletedAt > 0L && since in 0 until minIntervalMs) {
+                Log.i(
+                    TAG,
+                    "syncIncremental skipped: last pass finished ${since / 1000}s ago " +
+                        "(window ${minIntervalMs / 1000}s)"
+                )
+                return@withContext Result.failure(
+                    SyncThrottledException(minIntervalMs - since)
+                )
+            }
+        }
+
+        Log.d(TAG, "syncIncremental starting a walk")
+        val result = syncIncrementalLocked(maxContainers)
+        // Only a completed walk may suppress the next one. An aborted pass leaves containers
+        // unvisited, and treating it as "fresh" would hide those changes for the whole window.
+        if (result.getOrNull()?.walkCompleted == true) {
+            lastSyncCompletedAt = System.currentTimeMillis()
+            Log.d(TAG, "syncIncremental completed; throttle window starts now")
+        }
+        result
+    }
+
+    /**
+     * Signals that a sync was skipped because a recent pass is still authoritative.
+     *
+     * A dedicated type rather than a bare `Exception` so the ViewModel can tell "nothing to do"
+     * apart from "the walk failed" — the former must not surface an error to the user.
+     */
+    class SyncThrottledException(val remainingMs: Long) :
+        Exception("Sync skipped: last pass is still fresh (${remainingMs / 1000}s remaining)")
+
+    /** When the last *completed* walk finished, or 0 if none has. Guards [syncIncrementalIfStale]. */
+    @Volatile
+    private var lastSyncCompletedAt: Long = 0L
 
     private suspend fun syncIncrementalLocked(
         maxContainers: Int
@@ -345,8 +421,22 @@ class DriveRepository(
         // vouch for "nothing changed".
         val probe = runCatching { DriveItemMapper.parseSingleItem(JSONObject(probeRaw)) }.getOrNull()
         val freshEtag = probe?.etag
+        val action = DriveDeltaPlanner.decide(candidate, freshEtag, now)
 
-        return when (DriveDeltaPlanner.decide(candidate, freshEtag, now)) {
+        // Diagnostic: the walk reporting `listed=N skipped=0` on every pass means `decide` never
+        // returns SKIP, and there are three very different reasons that can happen (unparseable
+        // probe, etag genuinely moving, staleness). Without this line they all look identical in
+        // the summary — and a null probe in particular made every container look "stale" forever.
+        if (BuildConfig.DEBUG) {
+            Log.d(
+                TAG,
+                "syncOne ${candidate.drivewsid.takeLast(12)} action=$action " +
+                    "cached=${candidate.cachedEtag ?: "<null>"} fresh=${freshEtag ?: "<null>"} " +
+                    "fetched=${candidate.childrenFetched} age=${(now - candidate.lastSyncedAt) / 1000}s"
+            )
+        }
+
+        return when (action) {
             DriveDeltaPlanner.Action.SKIP -> {
                 // Stamp the successful probe so the staleness window restarts. Without this a
                 // container is judged stale forever once DEFAULT_MAX_AGE_MS has passed, even
@@ -615,10 +705,28 @@ class DriveRepository(
     // D5 — upload
     // ----------------------------------------------------------------------------------------
 
+    /**
+     * What [enqueueUpload] did, so the caller can report it without re-querying the queue.
+     */
+    sealed interface EnqueueOutcome {
+        /** A brand-new row at the original name. */
+        data class Queued(val id: Long, val filename: String) : EnqueueOutcome
+
+        /** The file is already waiting or in flight; nothing new was added. */
+        data class Deduped(val id: Long, val filename: String) : EnqueueOutcome
+
+        /** An earlier FAILED row for the same file was put back in the queue. */
+        data class Revived(val id: Long, val filename: String) : EnqueueOutcome
+
+        /** An earlier copy already went up, so this one is queued under a `(n)` name. */
+        data class Renamed(val id: Long, val filename: String, val original: String) : EnqueueOutcome
+    }
+
     suspend fun enqueueUpload(
         uri: Uri,
         targetFolderDrivewsId: String,
-        targetFolderPath: String
+        targetFolderPath: String,
+        onOutcome: ((EnqueueOutcome) -> Unit)? = null
     ): Result<Long> = withContext(Dispatchers.IO) {
         wipeBlocked()?.let { return@withContext Result.failure(it) }
 
@@ -642,6 +750,52 @@ class DriveRepository(
 
             appContext.contentResolver.getType(uri)?.let { mimeType = it }
 
+            val folderId = targetFolderDrivewsId.ifBlank { DriveItemEntity.ROOT_DRIVEWSID }
+
+            // ---------------------------------------------------------------------------------
+            // Duplicate handling, BEFORE copying the file.
+            //
+            // The copy can be gigabytes, so the decision has to happen while the source is still
+            // a `content://` handle. Three cases, all keyed on `(filename, filesize)`:
+            //
+            //   QUEUED / UPLOADING -> skip. Observed on device as the same PNG queued twice in
+            //                         one second (#34 and #35) with a successful upload of that
+            //                         exact file already in the table twice before it.
+            //   FAILED             -> revive that row. A second selection of a file that failed
+            //                         means "try again", not "upload another copy"; creating a
+            //                         new row leaves the old failure orphaned in the banner.
+            //   SUCCESS            -> rename and enqueue. The user genuinely wants another copy
+            //                         (maybe after editing), but CloudDocs rejects a same-named
+            //                         file in the same folder with 409 UNIQUE_FIELD_FAILURE.
+            // ---------------------------------------------------------------------------------
+            val duplicate = runCatching { uploadQueue.findDuplicate(filename, filesize) }.getOrNull()
+            when (duplicate?.status) {
+                DriveUploadStatus.QUEUED, DriveUploadStatus.UPLOADING -> {
+                    Log.i(
+                        TAG,
+                        "enqueueUpload deduped: #${duplicate.id} already ${duplicate.status} " +
+                            "for $filename"
+                    )
+                    onOutcome?.invoke(EnqueueOutcome.Deduped(duplicate.id, filename))
+                    DriveUploadWorker.enqueue(appContext)
+                    return@withContext Result.success(duplicate.id)
+                }
+
+                DriveUploadStatus.FAILED -> {
+                    uploadQueue.retryUpload(duplicate.id)
+                    Log.i(TAG, "enqueueUpload revived failed #${duplicate.id} for $filename")
+                    onOutcome?.invoke(EnqueueOutcome.Revived(duplicate.id, filename))
+                    DriveUploadWorker.enqueue(appContext)
+                    return@withContext Result.success(duplicate.id)
+                }
+
+                else -> Unit // no match, or a SUCCESS we will upload again under a new name
+            }
+
+            val needsRename = duplicate != null ||
+                runCatching { nameExistsInFolder(filename, folderId) }.getOrDefault(false)
+            val finalName = if (needsRename) resolveUploadName(filename, folderId) else filename
+
             val uploadDir = File(appContext.cacheDir, "drive_uploads")
             if (!uploadDir.exists()) {
                 uploadDir.mkdirs()
@@ -660,15 +814,19 @@ class DriveRepository(
 
             val uploadEntity = DriveUploadEntity(
                 localPath = localFile.absolutePath,
-                targetFolderDrivewsId = targetFolderDrivewsId.ifBlank { DriveItemEntity.ROOT_DRIVEWSID },
+                targetFolderDrivewsId = folderId,
                 targetFolderPath = targetFolderPath.ifBlank { "/" },
-                filename = filename,
+                filename = finalName,
                 filesize = filesize,
                 mimeType = mimeType
             )
 
             val id = uploadQueue.enqueue(uploadEntity)
-            Log.i(TAG, "Enqueued upload #$id for $filename into $targetFolderPath")
+            Log.i(TAG, "Enqueued upload #$id for $finalName into $targetFolderPath")
+            onOutcome?.invoke(
+                if (finalName != filename) EnqueueOutcome.Renamed(id, finalName, filename)
+                else EnqueueOutcome.Queued(id, finalName)
+            )
             // Do NOT drain from here.
             //
             // `DriveUploadWorker` is the single drain engine (AGENTS §6.7.9 ①). This used to also
@@ -682,10 +840,96 @@ class DriveRepository(
             // Enqueue only writes the row. WorkManager survives a process kill, which the
             // in-process coroutine does not, so the worker is also the safer of the two.
             DriveUploadWorker.enqueue(appContext)
+
+            // WorkManager's KEEP can silently drop us when the unique name is held by a work that
+            // JobScheduler has pushed far into the future (observed: TIME=+39m). The ViewModel's
+            // 800 ms check is too early to see that, so a later, stricter recheck backs it up.
+            scheduleStuckRecheck()
+
             Result.success(id)
         } catch (e: Exception) {
             Log.e(TAG, "enqueueUpload failed", e)
             Result.failure(e)
+        }
+    }
+
+    // ----------------------------------------------------------------------------------------
+    // Upload naming
+    // ----------------------------------------------------------------------------------------
+
+    /** True when [name] is already taken in [folderId] on the server, per the local index. */
+    private suspend fun nameExistsInFolder(name: String, folderId: String): Boolean {
+        val children = runCatching { database.driveItemDao().getChildren(folderId) }.getOrNull()
+            ?: return false
+        return children.any { it.name.equals(name, ignoreCase = true) }
+    }
+
+    /**
+     * `report.pdf` -> `report (2).pdf`, `report (3).pdf`, … until nothing collides.
+     *
+     * Starts at **2**, not 1: the caller only gets here because a first copy already exists (or
+     * is being uploaded), so `(1)` would be a lie.
+     *
+     * Collisions are checked against both the server-side listing and this app's own pending
+     * queue. Checking only one of them is guaranteed to produce a 409 — the server does not know
+     * about rows that have not been uploaded yet, and the queue does not know about files other
+     * Apple devices put there.
+     *
+     * Extension splitting reuses [DriveDownloader.splitExtension] so downloads and uploads agree
+     * on edge cases (`.hidden` has no extension; `report.tar.gz` becomes `report.tar (2).gz`).
+     * After [DriveDownloader.MAX_DUPLICATE_SUFFIX] collisions it falls back to a timestamp rather
+     * than looping forever.
+     */
+    private suspend fun resolveUploadName(original: String, folderId: String): String {
+        val (stem, suffix) = DriveDownloader.splitExtension(original)
+
+        val taken = buildSet {
+            runCatching { uploadQueue.namesInFolder(folderId) }.getOrNull()?.let { addAll(it) }
+            runCatching { database.driveItemDao().getChildren(folderId) }
+                .getOrNull()?.forEach { add(it.name) }
+        }
+
+        for (n in 2..DriveDownloader.MAX_DUPLICATE_SUFFIX) {
+            val candidate = if (suffix.isEmpty()) "$stem ($n)" else "$stem ($n).$suffix"
+            if (candidate !in taken) return candidate
+        }
+
+        val stamp = System.currentTimeMillis()
+        return if (suffix.isEmpty()) "$stem ($stamp)" else "$stem ($stamp).$suffix"
+    }
+
+    /** Guards [scheduleStuckRecheck] so a burst of enqueues schedules only one recheck. */
+    private val stuckRecheckInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /**
+     * Schedules a delayed recheck for the one failure mode `ExistingWorkPolicy.KEEP` cannot
+     * recover from on its own.
+     *
+     * `KEEP` treats an `ENQUEUED` work as "already handled", which is right for a job about to
+     * run and wrong for one JobScheduler has deferred — measured on device as
+     * `TIME=+39m21s419ms`, during which every enqueue was silently discarded and the banner sat at
+     * "排队中" with no worker ever starting. `pruneStaleWork()` fixes this, but only at process
+     * start, so a long-lived process never gets a second chance.
+     *
+     * Runs on the repository's own scope so it survives the caller (the upload picker callback
+     * returns immediately) and is bounded to one in flight at a time.
+     */
+    private fun scheduleStuckRecheck() {
+        if (!stuckRecheckInFlight.compareAndSet(false, true)) return
+
+        scope.launch {
+            try {
+                delay(STUCK_RECHECK_DELAY_MS)
+                if (!uploadQueue.hasPendingWork()) return@launch
+                if (DriveUploadWorker.isOutOfWindow(appContext)) {
+                    Log.w(TAG, "Upload work is scheduled far out; forcing a drain pass")
+                    DriveUploadWorker.forceEnqueue(appContext)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "stuck recheck failed: ${e.message}")
+            } finally {
+                stuckRecheckInFlight.set(false)
+            }
         }
     }
 
@@ -1476,6 +1720,17 @@ class DriveRepository(
          */
         private const val SPEED_WINDOW_MS = 2_000L
 
+        /**
+         * How long after an enqueue to re-check that a drain actually got scheduled.
+         *
+         * Deliberately later than `DriveViewModel`'s 800 ms check, and for a different failure:
+         * `ExistingWorkPolicy.KEEP` treats an `ENQUEUED` work as handled, so when JobScheduler has
+         * pushed that work out (measured: `TIME=+39m21s419ms`) every subsequent enqueue is silently
+         * dropped. 800 ms is far too early to observe that; 15 s is comfortably past a healthy
+         * dispatch while still short enough that the user has not given up.
+         */
+        private const val STUCK_RECHECK_DELAY_MS = 15_000L
+
         /** Apple's two "your session is no longer valid" statuses. */
         private val AUTH_STATUS_CODES = setOf(401, 421)
 
@@ -1486,5 +1741,17 @@ class DriveRepository(
          * cannot hold [DataMutationLock] for minutes and starve foreground folder refreshes.
          */
         internal const val DEFAULT_SYNC_CONTAINER_BUDGET = 200
+
+        /**
+         * How long a completed sync walk stays authoritative for the automatic, on-open trigger.
+         *
+         * Deliberately short enough that tabbing away and back does not re-walk a large tree, and
+         * long enough that it actually saves something: a full pass over a few hundred containers
+         * takes minutes on mobile data. Five minutes mirrors
+         * `PhotoRepository.REFRESH_DEDUP_WINDOW_MS`, the app's existing "probably still good" window.
+         *
+         * The manual sync button and pull-to-refresh bypass this entirely.
+         */
+        internal const val SYNC_THROTTLE_MS = 5 * 60 * 1000L
     }
 }

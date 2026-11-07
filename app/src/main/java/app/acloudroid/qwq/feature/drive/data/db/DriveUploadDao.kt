@@ -31,6 +31,30 @@ interface DriveUploadDao {
     @Query("SELECT COUNT(*) FROM drive_upload_queue WHERE status = 'FAILED'")
     suspend fun countFailed(): Int
 
+    /**
+     * Newest queue row for this exact file, regardless of status.
+     *
+     * Deliberately **not** filtered by status: the caller has to tell three cases apart that all
+     * look like "this file is already known" — `QUEUED`/`UPLOADING` (skip), `FAILED` (revive the
+     * row rather than pile up a second failed one) and `SUCCESS` (upload a renamed copy).
+     * Picking the newest row means the most recent state wins when a file has a history.
+     */
+    @Query(
+        "SELECT * FROM drive_upload_queue WHERE filename = :filename AND filesize = :filesize " +
+            "ORDER BY createdAt DESC LIMIT 1"
+    )
+    suspend fun findDuplicate(filename: String, filesize: Long): DriveUploadEntity?
+
+    /**
+     * Filenames already spoken for in [folder], used to pick a non-colliding rename.
+     *
+     * CloudDocs rejects a second file with the same name in the same folder with
+     * `409 UNIQUE_FIELD_FAILURE`, so a rename has to check what is already queued for that folder
+     * as well as what the server already has.
+     */
+    @Query("SELECT filename FROM drive_upload_queue WHERE targetFolderDrivewsId = :folder")
+    suspend fun namesInFolder(folder: String): List<String>
+
     @Query("SELECT * FROM drive_upload_queue ORDER BY createdAt DESC")
     fun observeAllUploads(): Flow<List<DriveUploadEntity>>
 
@@ -64,7 +88,14 @@ interface DriveUploadDao {
     @Query("UPDATE drive_upload_queue SET bytesUploaded = :bytesUploaded, speedText = :speedText, updatedAt = :updatedAt WHERE id = :id")
     suspend fun updateProgressAndSpeed(id: Long, bytesUploaded: Long, speedText: String?, updatedAt: Long = System.currentTimeMillis())
 
-    @Query("UPDATE drive_upload_queue SET status = 'SUCCESS', documentId = :documentId, bytesUploaded = filesize, updatedAt = :updatedAt WHERE id = :id")
+    /*
+     * `speedText = NULL` is part of marking a row SUCCESS, not an afterthought.
+     *
+     * `updateProgressAndSpeed` writes "校验中 0%" during the SHA-256 phase, and nothing used to
+     * clear it. Every completed row therefore kept a stale progress string forever — visible in
+     * the queue table on device as 27 SUCCESS rows all claiming `校验中 0%`.
+     */
+    @Query("UPDATE drive_upload_queue SET status = 'SUCCESS', documentId = :documentId, bytesUploaded = filesize, speedText = NULL, updatedAt = :updatedAt WHERE id = :id")
     suspend fun markSuccess(id: Long, documentId: String, updatedAt: Long = System.currentTimeMillis())
 
     @Query("UPDATE drive_upload_queue SET status = 'FAILED', errorMessage = :errorMessage, retryCount = retryCount + 1, updatedAt = :updatedAt WHERE id = :id")

@@ -326,7 +326,7 @@
 
 ---
 
-### Phase 5: iCloud Drive（云盘浏览与同步）⏳ 未开始
+### Phase 5: iCloud Drive（云盘浏览与同步） 🟡 进行中 (D0~D7 已完成)
 
 > **详细拆分见 [docs/TODO_DRIVE.md](TODO_DRIVE.md)（D0 ~ D8）。**
 

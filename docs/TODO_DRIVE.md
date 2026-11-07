@@ -76,7 +76,7 @@ D0 协议侦察与探针（必须最先）
 | D4 | 下载（直链 + 落盘） | D2 | ✅ **已完成** |
 | D5 | 上传（单文件直链 + 队列） | D4 | ✅ **已完成**（包含单文件流式上传、队列与 Worker 保活、云上贵州 1GB 上传限制预检及拦截，见 §7） |
 | D6 | 目录操作与冲突处理 | D3 | ✅ **已完成**（包含新建文件夹、重命名、云盘层级嵌套移动选择器、移入最近删除、App内网页版垃圾桶弹窗、TopAppBar 状态栏 Padding 适配，见 §8） |
-| D7 | 预览与分享 | D4 | ⏳ 未开始 |
+| D7 | 预览与分享 | D4 | ✅ **已完成**（含 Coil+ExoPlayer 媒体预览、FileProvider+ACTION_VIEW 外部查看、iWork 网页版嵌入及 FileProvider+ACTION_SEND 系统分享，见 §9） |
 | D8 | 跨功能收尾 | D2~D7 | ⏳ 未开始 |
 
 **MVP 范围** = `D0 + D1 + D2 + D4`：能登录 → 能浏览目录树 → 能下载文件。
@@ -660,13 +660,20 @@ CWS streaming upload failed with HTTP 413: <html><title>413 Request Entity Too L
 
 ---
 
-## 9. D7 · 预览与分享
+## 9. D7 · 预览与分享 ✅ 已完成
 
-- [ ] 图片 / 视频：复用现有 Coil（`ICloudImageLoaderFactory`）+ ExoPlayer 栈
-  - **必须显式传 `imageLoader`**（AGENTS §6.6 硬规则①），否则会静默失败且无日志
-- [ ] PDF / 文本：系统组件或轻量渲染
-- [ ] iWork 文档包缩略图：Drive 提供 thumbnail 端点，D0 探明后再实现
-- [ ] 分享 / 导出：`FileProvider` + `ACTION_SEND`
+- [x] 图片 / 视频：复用现有 Coil（`ICloudImageLoaderFactory`）+ ExoPlayer 栈
+  - **已显式传 `imageLoader`**（`DriveMediaViewer.kt`，遵循 AGENTS §6.6 硬规则①），避免缺漏 keyer/interceptor 导致静默失败
+  - ExoPlayer 播放器自带生命周期 `DisposableEffect` 回收
+- [x] PDF / 文本及常规文件：系统组件或轻量渲染
+  - 未下载文件先拉取到沙盒缓存 `cache/drive_preview/` (`DrivePreviewCache`)
+  - 通过 `FileProvider.getUriForFile` 拿到带有只读授权的 safe URI，发出 `Intent.ACTION_VIEW` 调起系统或第三方组件渲染预览
+  - iWork 文档包 (`.pages`, `.numbers`, `.key`) 提供 `DriveIWorkWebDialog` 在线网页嵌入预览
+- [x] 缩略图（Thumbnail）：
+  - 接入 Go 侧 `thumbnail_token` 直链，本地 `cache/drive_thumbs` / `drive_preview` 双层缓存，网格/列表展示
+- [x] 分享 / 导出：`FileProvider` + `ACTION_SEND`
+  - Manifest 配置权威名 `app.acloudroid.qwq.fileprovider` 及 `file_paths.xml`
+  - `DriveViewModel.shareItem` 生成带读授权 Safe URI 并发出 `Intent.ACTION_SEND` 呼出系统原生分享 chooser
 
 ---
 

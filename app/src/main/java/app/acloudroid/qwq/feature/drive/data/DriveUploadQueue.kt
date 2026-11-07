@@ -91,6 +91,20 @@ class DriveUploadQueue(
         dao.resetUploadingToQueued()
     }
 
+    /**
+     * Newest row for this exact `(filename, filesize)`, whatever its status.
+     *
+     * Used by [DriveRepository.enqueueUpload] to decide between skip / revive / rename; see the
+     * query's own KDoc for why the status filter is intentionally absent.
+     */
+    suspend fun findDuplicate(filename: String, filesize: Long): DriveUploadEntity? =
+        queueMutex.withLock { dao.findDuplicate(filename, filesize) }
+
+    /** Filenames already queued for [folder], so a rename does not collide with pending work. */
+    suspend fun namesInFolder(folder: String): List<String> = queueMutex.withLock {
+        dao.namesInFolder(folder)
+    }
+
     suspend fun markUploading(id: Long) = queueMutex.withLock {
         dao.updateStatus(id, DriveUploadStatus.UPLOADING)
     }

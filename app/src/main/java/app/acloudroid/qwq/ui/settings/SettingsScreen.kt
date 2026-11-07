@@ -1154,7 +1154,7 @@ private fun AboutSubScreen(
                 )
             } else {
                 Image(
-                    painter = painterResource(id = app.acloudroid.qwq.R.drawable.ic_launcher_foreground),
+                    painter = painterResource(id = app.acloudroid.qwq.R.mipmap.ic_launcher_foreground),
                     contentDescription = "App Icon",
                     modifier = Modifier
                         .size(96.dp)

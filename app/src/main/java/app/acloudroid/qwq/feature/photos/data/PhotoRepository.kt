@@ -25,11 +25,13 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Collections
@@ -269,6 +271,62 @@ class PhotoRepository(
 
     /** masterId -> in-flight refresh, so N concurrent failures share a single /records/lookup. */
     private val inFlightRefreshes = mutableMapOf<String, Deferred<Result<RefreshedUrls>>>()
+
+    /**
+     * Coalesces grid thumbnail refreshes into one `/records/lookup` per burst.
+     *
+     * Each thumbnail used to call [refreshUrlsForMaster] on its own, so one scroll of a 14 901
+     * photo library issued 150+ separate lookups (AGENTS §6.2 forbids exactly this). The batched
+     * variant [refreshUrlsForMasters] already existed — the grid just was not using it.
+     *
+     * The batching logic lives in [UrlRefreshCoalescer] so it can be unit-tested without a Room
+     * database.
+     */
+    private val gridRefresher = UrlRefreshCoalescer(
+        scope = refreshScope,
+        coalesceMs = GRID_REFRESH_COALESCE_MS,
+        maxBatch = GRID_REFRESH_MAX_BATCH
+    ) { masterIds -> refreshUrlsForMasters(masterIds) }
+
+    /**
+     * Grid-only entry point: ask for [masterId]'s URLs to be re-minted, coalesced with every other
+     * grid item that needs the same thing within [GRID_REFRESH_COALESCE_MS].
+     *
+     * Behaviourally equivalent to [refreshUrlsForMaster] from the caller's point of view — it
+     * returns the master's URLs or a failure — but N concurrent cells become one
+     * `/records/lookup` instead of N (AGENTS §6.2).
+     *
+     * Kept separate from [refreshUrlsForMaster] rather than replacing it: the detail viewer, video
+     * playback and user-driven "retry" taps are one-shot, single-asset, and must not be delayed by
+     * a 200 ms coalescing window.
+     */
+    suspend fun requestUrlRefresh(masterId: String): Result<RefreshedUrls> {
+        wipeBlocked()?.let { return Result.failure(it.exceptionOrNull()!!) }
+        if (masterId.isBlank()) {
+            return Result.failure(IllegalArgumentException("blank masterId"))
+        }
+
+        // Layer 2 first: a recent success is served straight from the DB, so a cell that was
+        // already refreshed never enters the batch at all.
+        refreshMutex.withLock {
+            val last = recentRefreshes[masterId] ?: 0L
+            if (System.currentTimeMillis() - last < REFRESH_DEDUP_WINDOW_MS) {
+                return withContext(Dispatchers.IO) { readUrlsFromDb(masterId) }
+            }
+        }
+
+        val waiter = gridRefresher.request(masterId)
+        return withTimeoutOrNull(REFRESH_INFLIGHT_TIMEOUT_MS) { waiter.await() }
+            ?: run {
+                // Never leave a waiter stranded: if this caller is abandoned, the next request for
+                // the same master must be able to create a fresh one.
+                gridRefresher.abandon(masterId, waiter)
+                Log.w(TAG, "grid refresh timed out for master=$masterId")
+                Result.failure(
+                    Exception("URL refresh timed out after ${REFRESH_INFLIGHT_TIMEOUT_MS}ms")
+                )
+            }
+    }
 
     // EXIF lookups get their own mutex/map rather than sharing the URL-refresh ones: the two are
     // unrelated requests and must be able to proceed independently.
@@ -1307,21 +1365,72 @@ class PhotoRepository(
         }
 
         // Layer 1: join an in-flight refresh for the same master.
+        //
+        // ## Why the join has a timeout (ISS: "所有缩略图同时卡死")
+        //
+        // [inFlightRefreshes] is a process-local map and the only thing that ever removed an entry
+        // was the Deferred's own `finally`. [refreshScope] is a `SupervisorJob`, so a
+        // `doRefreshUrlsForMaster` that never returns (blocking JNI call, socket with no read
+        // deadline) left its entry in the map *forever*. Every later caller then awaited a dead
+        // Deferred and hung with it — one gate, permanently closed, for that master.
+        //
+        // Observed on device: scrolling a 14 901-photo library produced 150+ consecutive
+        // `joining in-flight request` lines, zero `fail` lines and zero completed lookups, and not
+        // a single thumbnail ever rendered. Killing the process "fixed" it because the map was
+        // rebuilt — i.e. the only recovery was a cold start.
+        //
+        // `refreshGate` (Semaphore(3)) sits *inside* `doRefreshUrlsForMaster`, so a wedged refresh
+        // never even reached the log that would have shown it failing. That is why the symptom
+        // presented as a silent freeze rather than an error.
         val existing = refreshMutex.withLock { inFlightRefreshes[masterId] }
         if (existing != null) {
             Log.d(TAG, "refreshUrlsForMaster joining in-flight request master=$masterId")
-            return existing.await()
+            val joined = withTimeoutOrNull(REFRESH_INFLIGHT_TIMEOUT_MS) { existing.await() }
+            if (joined != null) return joined
+
+            // The shared refresh is wedged. Drop *our* claim on it rather than the whole entry:
+            // `remove(key, value)` only removes when the map still holds the exact Deferred we
+            // waited on, so a refresh someone else installed in the meantime is left alone.
+            refreshMutex.withLock { inFlightRefreshes.remove(masterId, existing) }
+            Log.w(
+                TAG,
+                "in-flight refresh timed out after ${REFRESH_INFLIGHT_TIMEOUT_MS}ms; " +
+                    "re-issuing master=$masterId"
+            )
+            return withContext(Dispatchers.IO) { doRefreshUrlsForMaster(masterId) }
         }
 
-        val deferred = refreshScope.async {
+        // The Deferred is created, then published into the map by the coroutine itself once it has
+        // a reference to itself. `CoroutineStart.LAZY` is what makes that ordering possible: the
+        // body cannot run before `deferred` is assigned, so the self-reference below is safe.
+        //
+        // This indirection exists purely so the `finally` can do an IDENTITY check
+        // (`=== self`) instead of a blind `remove(masterId)`. A blind remove would delete a fresh
+        // refresh that a concurrent caller had already installed at the same key, reopening the
+        // very "map entry outlives its usefulness" hole this change is closing.
+        lateinit var deferred: Deferred<Result<RefreshedUrls>>
+        deferred = refreshScope.async(start = CoroutineStart.LAZY) {
             try {
+                // Publish ourselves so callers can join. Done before the first suspension point
+                // so there is no window where the refresh runs but nobody can see it.
+                refreshMutex.withLock { inFlightRefreshes[masterId] = deferred }
+
                 // Layer 3: spread out the burst that follows a session rebuild.
                 val sinceSession = System.currentTimeMillis() - sessionUrlRefreshedAt
                 if (sinceSession in 0 until REFRESH_DEDUP_WINDOW_MS) {
                     delay((20L..120L).random())
                 }
 
-                val result = doRefreshUrlsForMaster(masterId)
+                // Second half of the timeout guard: the producer itself gives up on time, so the
+                // `finally` below always runs and the map entry is always released even when no
+                // caller is waiting to notice. Belt and braces on purpose — the bug being fixed
+                // here was precisely "nobody ever cleaned up".
+                val result = withTimeoutOrNull(REFRESH_INFLIGHT_TIMEOUT_MS) {
+                    doRefreshUrlsForMaster(masterId)
+                } ?: Result.failure(
+                    Exception("URL refresh timed out after ${REFRESH_INFLIGHT_TIMEOUT_MS}ms")
+                )
+
                 if (result.isSuccess) {
                     refreshMutex.withLock {
                         recentRefreshes[masterId] = System.currentTimeMillis()
@@ -1329,11 +1438,16 @@ class PhotoRepository(
                 }
                 result
             } finally {
-                refreshMutex.withLock { inFlightRefreshes.remove(masterId) }
+                // Remove by identity, so a newer Deferred that replaced ours survives.
+                refreshMutex.withLock {
+                    if (inFlightRefreshes[masterId] === deferred) {
+                        inFlightRefreshes.remove(masterId)
+                    }
+                }
             }
         }
 
-        refreshMutex.withLock { inFlightRefreshes[masterId] = deferred }
+        deferred.start()
         return deferred.await()
     }
 
@@ -2245,6 +2359,11 @@ class PhotoRepository(
                 inFlightRefreshes.clear()
             }
 
+            // Same for the grid refresher: any waiter still parked here belongs to the account
+            // that was just wiped, and its masterId will never resolve. Complete them with a
+            // failure instead of dropping the map entry, so no caller waits out the 30 s timeout.
+            gridRefresher.abortAll(Exception("Session wiped while refreshing URLs"))
+
             Log.i(TAG, "Photo database wiped (photo_assets + sync_state + month index + scan state)")
             true
         } catch (e: Exception) {
@@ -2271,6 +2390,35 @@ class PhotoRepository(
          * hitting `/records/lookup` again (P2-008).
          */
         private const val REFRESH_DEDUP_WINDOW_MS = 5 * 60 * 1000L
+
+        /**
+         * Hard ceiling on a single in-flight URL refresh.
+         *
+         * A normal `/records/lookup` completes in 1–2 s; 30 s is ~15x that, so a healthy request is
+         * never cut short. What it does catch is the pathological case that used to require killing
+         * the app: `inFlightRefreshes` is process-local, and before this timeout a refresh that
+         * never returned kept its map entry forever, so every later caller for that master awaited
+         * a dead `Deferred` and the whole thumbnail grid stopped rendering. See the comment on the
+         * Layer 1 join in [refreshUrlsForMaster].
+         */
+        private const val REFRESH_INFLIGHT_TIMEOUT_MS = 30_000L
+
+        /**
+         * How long the grid-refresh consumer waits for more work before firing a batch.
+         *
+         * Short on purpose. The first screen of the grid is ~24 cells, so a burst normally closes
+         * on [GRID_REFRESH_MAX_BATCH] well before this fires; the timeout only bounds the latency
+         * of a caller that arrives alone.
+         */
+        private const val GRID_REFRESH_COALESCE_MS = 200L
+
+        /**
+         * Most masters sent in one grid refresh batch.
+         *
+         * Matches the first screen of the grid: large enough that a normal scroll is one
+         * `/records/lookup`, small enough that the response stays small.
+         */
+        private const val GRID_REFRESH_MAX_BATCH = 20
 
         /**
          * How many months' cover URLs are re-minted per batched `/records/lookup`.
