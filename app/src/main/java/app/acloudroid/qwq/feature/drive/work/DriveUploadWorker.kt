@@ -468,5 +468,13 @@ class DriveUploadWorker(
                     .build()
             )
         }
+
+        /** Cancels any running or scheduled upload worker task (used on logout). */
+        fun cancel(context: Context) {
+            runCatching {
+                val workManager = WorkManager.getInstance(context.applicationContext)
+                workManager.cancelUniqueWork(UNIQUE_WORK_NAME)
+            }.onFailure { Log.w(TAG, "cancel failed: ${it.message}") }
+        }
     }
 }

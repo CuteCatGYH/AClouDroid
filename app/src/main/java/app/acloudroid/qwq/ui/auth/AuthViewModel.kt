@@ -376,6 +376,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 ScanScheduler.cancel(getApplication<Application>())
                 PeriodicScanScheduler.cancel(getApplication<Application>())
                 ScanNotificationHelper.cancel(getApplication<Application>())
+                app.acloudroid.qwq.feature.drive.work.DriveUploadWorker.cancel(getApplication<Application>())
             }.onFailure { Log.w(AUTH_LOG_TAG, "Failed to cancel scan worker: ${it.message}") }
 
             // 1. Block new network work and stop the paging pipeline.

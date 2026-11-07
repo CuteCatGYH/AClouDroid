@@ -77,7 +77,7 @@ D0 协议侦察与探针（必须最先）
 | D5 | 上传（单文件直链 + 队列） | D4 | ✅ **已完成**（包含单文件流式上传、队列与 Worker 保活、云上贵州 1GB 上传限制预检及拦截，见 §7） |
 | D6 | 目录操作与冲突处理 | D3 | ✅ **已完成**（包含新建文件夹、重命名、云盘层级嵌套移动选择器、移入最近删除、App内网页版垃圾桶弹窗、TopAppBar 状态栏 Padding 适配，见 §8） |
 | D7 | 预览与分享 | D4 | ✅ **已完成**（含 Coil+ExoPlayer 媒体预览、FileProvider+ACTION_VIEW 外部查看、iWork 网页版嵌入及 FileProvider+ACTION_SEND 系统分享，见 §9） |
-| D8 | 跨功能收尾 | D2~D7 | ⏳ 未开始 |
+| D8 | 跨功能收尾 | D2~D7 | ✅ **已完成** |
 
 **MVP 范围** = `D0 + D1 + D2 + D4`：能登录 → 能浏览目录树 → 能下载文件。
 这是一个可以实机验收的最小闭环，后续阶段都是在这个骨架上加能力。
@@ -677,17 +677,15 @@ CWS streaming upload failed with HTTP 413: <html><title>413 Request Entity Too L
 
 ---
 
-## 10. D8 · 跨功能收尾
+## 10. D8 · 跨功能收尾 ✅ 已完成
 
-- [ ] **退出登录四阶段清洗必须扩展到 Drive**
+- [x] **退出登录四阶段清洗已扩展到 Drive**
   - 顺序固定：**阻断 → Drive Room + Photo Room → Coil → Cookie/Vault**
-  - `isWiping` 哨兵位必须能阻断 Drive 的同步 / 上传 / 下载
-  - 检查是否有**新的异步写回路径**（[PITFALLS §8](PITFALLS.md)：
-    「只清不拦，等于没清」）
-- [ ] Drive 相关设置项进**同一个设置页**（`SettingsCatalog` 三步走，AGENTS §10.0）
-- [ ] 更新 [TODO.md](TODO.md) 的 Phase 5 状态
-- [ ] 若过程中暴露通用性陷阱 → 补进 [PITFALLS.md](PITFALLS.md)；
-  修复真实 bug → 在 [CHANGELOG_ISSUES.md](CHANGELOG_ISSUES.md) 新增条并更新索引
+  - `AuthViewModel.logout()` 阶段 0 取消 `DriveUploadWorker` 任务；`DriveDownloadQueue.clearAll()` 同步取消底层 Go 流与协程
+  - `isWiping` 哨兵位已阻断 `drainUploadQueue()` 与 `enqueueDownload()`
+  - `DriveRepository.wipeAllData()` 清空 `drive_items` 与 `drive_upload_queue` 全量表，并递归清理 `drive_downloads` / `drive_preview` / `drive_uploads` / `drive_thumbs` / `drive_icons` 缓存目录
+- [x] Drive 相关设置项进**同一个设置页**（`SettingsCatalog` 三步走：`DRIVE_DISPLAY_MODE` / `DRIVE_SORT_FIELD` / `DRIVE_SORT_ORDER`）
+- [x] 更新 [TODO.md](TODO.md) 的 Phase 5 状态为 ✅ 完成
 
 ---
 

@@ -62,6 +62,15 @@ enum class SettingsItem {
     /** Periodic backup interval in minutes. */
     PERIODIC_BACKUP_INTERVAL,
 
+    /** Display mode for iCloud Drive items (List / Grid). */
+    DRIVE_DISPLAY_MODE,
+
+    /** Default sorting field for iCloud Drive items. */
+    DRIVE_SORT_FIELD,
+
+    /** Default sorting direction for iCloud Drive items. */
+    DRIVE_SORT_ORDER,
+
     /** About sub-screen containing app icon, name, version, and repository link. */
     ABOUT
 }
@@ -124,6 +133,15 @@ object SettingsCatalog {
             title = "自动扫描",
             description = "按设定周期在后台（凌晨 3 点）自动执行全盘扫描与增量同步。",
             items = listOf(SettingsItem.SCAN_FREQUENCY, SettingsItem.CUSTOM_INTERVAL)
+        ),
+        SettingsGroup(
+            title = "iCloud Drive 云盘",
+            description = "设置 iCloud Drive 云盘文件列表的默认显示方式与排序规则。",
+            items = listOf(
+                SettingsItem.DRIVE_DISPLAY_MODE,
+                SettingsItem.DRIVE_SORT_FIELD,
+                SettingsItem.DRIVE_SORT_ORDER
+            )
         ),
         SettingsGroup(
             title = "关于",

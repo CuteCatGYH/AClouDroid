@@ -116,6 +116,18 @@ class DriveDownloadQueue(
         }
     }
 
+    /** Cancels all active jobs and clears tasks from memory (used on logout). */
+    suspend fun clearAll() = queueLock.withLock {
+        activeJobs.forEach { (id, job) ->
+            _tasks.value[id]?.item?.let { DriveDownloader.signalGoCancel(it) }
+            if (job.isActive) {
+                job.cancel(CancellationException("Clearing queue on logout"))
+            }
+        }
+        activeJobs.clear()
+        _tasks.value = emptyMap()
+    }
+
     private fun processQueueLocked(
         downloadAction: suspend (DriveItemEntity, (Int) -> Unit) -> Result<DriveDownloadOutcome>
     ) {

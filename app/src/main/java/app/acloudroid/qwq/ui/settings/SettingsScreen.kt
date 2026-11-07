@@ -64,6 +64,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.acloudroid.qwq.data.settings.AppSettings
+import app.acloudroid.qwq.data.settings.DriveDisplayMode
+import app.acloudroid.qwq.data.settings.DriveSortField
+import app.acloudroid.qwq.data.settings.DriveSortOrder
 import app.acloudroid.qwq.data.settings.ScanCadence
 import app.acloudroid.qwq.data.settings.ScanFrequency
 import app.acloudroid.qwq.ui.theme.ThemeMode
@@ -769,6 +772,39 @@ private fun SettingsRow(
             options = CUSTOM_DAY_OPTIONS.map { it to "$it 天" },
             onSelect = { onCustomIntervalChanged(it) }
         )
+
+        SettingsItem.DRIVE_DISPLAY_MODE -> {
+            val displayMode by settings.driveDisplayMode.collectAsStateWithLifecycle()
+            DropdownRow(
+                title = "云盘显示模式",
+                subtitle = "切换文件与文件夹在云盘中的显示样式",
+                current = displayMode.label,
+                options = DriveDisplayMode.entries.map { it to it.label },
+                onSelect = { settings.setDriveDisplayMode(it) }
+            )
+        }
+
+        SettingsItem.DRIVE_SORT_FIELD -> {
+            val sortField by settings.driveSortField.collectAsStateWithLifecycle()
+            DropdownRow(
+                title = "默认排序字段",
+                subtitle = "设置云盘文件与文件夹的默认排序依据",
+                current = sortField.label,
+                options = DriveSortField.entries.map { it to it.label },
+                onSelect = { settings.setDriveSortField(it) }
+            )
+        }
+
+        SettingsItem.DRIVE_SORT_ORDER -> {
+            val sortOrder by settings.driveSortOrder.collectAsStateWithLifecycle()
+            DropdownRow(
+                title = "默认排序方向",
+                subtitle = "设置云盘文件与文件夹的默认排序升降序",
+                current = sortOrder.label,
+                options = DriveSortOrder.entries.map { it to it.label },
+                onSelect = { settings.setDriveSortOrder(it) }
+            )
+        }
 
         SettingsItem.ABOUT -> ActionRow(
             title = "关于",

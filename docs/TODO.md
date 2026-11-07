@@ -326,7 +326,7 @@
 
 ---
 
-### Phase 5: iCloud Drive（云盘浏览与同步） 🟡 进行中 (D0~D7 已完成)
+### Phase 5: iCloud Drive（云盘浏览与同步） ✅ 完成 (D0~D8 全部完成)
 
 > **详细拆分见 [docs/TODO_DRIVE.md](TODO_DRIVE.md)（D0 ~ D8）。**
 
@@ -337,18 +337,18 @@
 > 上传（`/upload/web` 分片 vs 单文件直传）、下载（`data_token` vs `cvws` 直链）
 > **全部不能照搬**。
 
-- [ ] **Phase 5.0: 协议侦察与探针**（必须最先，禁止读代码猜字段）
-  - [ ] 探明 `webservices.drivews` 端点与字段字典 → 补充 [REFERENCE.md](REFERENCE.md) §5
-  - [ ] 逐字段 diff「普通文件夹」与「iWork 文档包」
-- [ ] **Phase 5.1: Go 协议底座**（`drive.go` + `Session.DrivewsURL` 回写 + 目录列举）
-- [ ] **Phase 5.2: 数据层与目录浏览 UI**（`DriveDatabase` 独立库 + `feature/drive/` + 面包屑列表）
-- [ ] **Phase 5.3: 增量同步与对账**（`changes/zone` + `changes/database`、显式 `walkCompleted`、可推导闸门）
-- [ ] **Phase 5.4: 下载**（`download/by_id` → `ws/download`，直链刷新复用三层去重）
-- [ ] **Phase 5.5: 上传**（`/upload/web` 分片，零内存流式，独立上传队列）
-- [ ] **Phase 5.6: 目录操作与冲突处理**（本地优先 + 乐观更新 + 失败回滚）
-- [ ] **Phase 5.7: 预览与分享**（图片/视频复用 Coil + ExoPlayer；PDF；iWork 缩略图）
-- [ ] **Phase 5.8: 跨功能收尾**（登出四阶段清洗扩展到 Drive、设置项、文档归档）
-- [ ] **前置重构**：`dataMutationMutex` 从 `PhotoRepository` 提取为中立设施（Drive 必须共用，不得另起一把）
+- [x] **Phase 5.0: 协议侦察与探针**（必须最先，禁止读代码猜字段）
+  - [x] 探明 `webservices.drivews` 端点与字段字典 → 补充 [REFERENCE.md](REFERENCE.md) §5
+  - [x] 逐字段 diff「普通文件夹」与「iWork 文档包」
+- [x] **Phase 5.1: Go 协议底座**（`drive.go` + `Session.DrivewsURL` 回写 + 目录列举）
+- [x] **Phase 5.2: 数据层与目录浏览 UI**（`DriveDatabase` 独立库 + `feature/drive/` + 面包屑列表）
+- [x] **Phase 5.3: 增量同步与对账**（目录级 `etag` 差量列举）
+- [x] **Phase 5.4: 下载**（`download/by_id` → `ws/download`，支持续传/自动重命名/通知直调）
+- [x] **Phase 5.5: 上传**（`/upload/web` 直链，零内存流式，独立队列与云上贵州预检拦截）
+- [x] **Phase 5.6: 目录操作与冲突处理**（新建/重命名/移动/移入最近删除/网页版垃圾桶弹窗）
+- [x] **Phase 5.7: 预览与分享**（媒体预览/外部查看/iWork网页内嵌/FileProvider分享）
+- [x] **Phase 5.8: 跨功能收尾**（登出四阶段清洗扩展到 Drive、设置项、文档归档）
+- [x] **前置重构**：`dataMutationMutex` 从 `PhotoRepository` 提取为中立设施（`DataMutationLock`）
 
 ---
 

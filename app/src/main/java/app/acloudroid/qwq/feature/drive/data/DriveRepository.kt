@@ -693,7 +693,11 @@ class DriveRepository(
     suspend fun wipeAllData(): Boolean = withContext(Dispatchers.IO) {
         try {
             dao.clearAll()
-            uploadQueue.clearCompleted()
+            database.driveUploadDao().deleteAll()
+            downloadQueue.clearAll()
+            listOf("drive_downloads", "drive_preview", "drive_uploads", "drive_thumbs", "drive_icons").forEach { dirName ->
+                File(appContext.cacheDir, dirName).deleteRecursively()
+            }
             true
         } catch (e: Exception) {
             Log.e(TAG, "wipeAllData failed", e)
@@ -960,7 +964,9 @@ class DriveRepository(
         uploadDrainMutex.withLock {
             uploadQueue.resetUploadingToQueued()
             while (true) {
+                if (isWiping) break
                 val pending = uploadQueue.getNextPending() ?: break
+                if (isWiping) break
                 Log.i(TAG, "Worker executing upload #${pending.id}: ${pending.filename}")
                 if (executeUpload(pending.id).isSuccess) succeeded++ else failed++
             }
@@ -1474,6 +1480,7 @@ class DriveRepository(
 
     /** Enqueues a file for background download via [DriveDownloadQueue]. */
     suspend fun enqueueDownload(drivewsid: String) {
+        if (isWiping) return
         val item = dao.getById(drivewsid) ?: return
         if (item.type != DriveItemEntity.TYPE_FILE) return
         downloadQueue.enqueue(item) { taskItem, onProgress ->
