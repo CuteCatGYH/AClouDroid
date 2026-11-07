@@ -1693,7 +1693,7 @@ class DriveRepository(
         fileResult.mapCatching { file ->
             androidx.core.content.FileProvider.getUriForFile(
                 context,
-                "app.acloudroid.qwq.fileprovider",
+                "${app.acloudroid.qwq.BuildConfig.APPLICATION_ID}.fileprovider",
                 file
             )
         }

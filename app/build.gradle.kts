@@ -15,17 +15,34 @@ android {
         minSdk = 29
         targetSdk = 37
         versionCode = 1
-        versionName = "1.0"
+        versionName = "0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
-            optimization {
-                enable = true
-                packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
-            }
+            isMinifyEnabled = false
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            // 正式版在桌面上显示的名字
+            resValue("string", "app_name", "AClouDroid")
+            // 注意：不要在这里加 optimization { } 块。
+            // isMinifyEnabled = false 只关闭 shrink/obfuscate，并不会关闭 R8 的
+            // class-merging/repackaging；两者叠加会把 kotlin.** / androidx.** 重打包成
+            // 单字母包，导致 Room/WorkManager 初始化时抛 IllegalAccessError
+            // （"Class kotlin.text.j extended by class sh2 is inaccessible"），
+            // 表现为 release 版一启动就闪退。要真正启用优化，必须同时打开
+            // isMinifyEnabled = true 并补齐 keep 规则。
+        }
+
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+            // 测试版在桌面上显示的名字（自动带上后缀，一眼区分）
+            resValue("string", "app_name", "AClouDroid (Debug)")
         }
     }
     compileOptions {
@@ -37,6 +54,7 @@ android {
         // P2-013: auth diagnostics are gated behind BuildConfig.DEBUG so the verbose cookie-probe
         // lines are compiled out of release builds entirely.
         buildConfig = true
+        resValues = true
     }
 }
 
