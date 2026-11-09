@@ -201,9 +201,15 @@ private fun QueueItemRow(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = formatFileSize(task.fileSize) + if (task.lastError != null) " · ${task.lastError}" else "",
+                    // The error suffix only renders while the row is FAILED -- a re-queued row
+                    // still holding a stale `lastError` would read as "this retry is failing".
+                    text = QueueSubtitle.build(
+                        fileSizeText = formatFileSize(task.fileSize),
+                        status = task.status,
+                        lastError = task.lastError
+                    ),
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (task.status == "FAILED") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (QueueSubtitle.isFailed(task.status)) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )

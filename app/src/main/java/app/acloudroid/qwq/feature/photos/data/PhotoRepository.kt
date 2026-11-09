@@ -2321,6 +2321,25 @@ class PhotoRepository(
                 val nextStatus = if (nextRetry <= MAX_AUTO_RETRIES) "PENDING" else "FAILED"
                 val errorMsg = "$errCode: $errMsg" + if (nextStatus == "PENDING") " (自动重试 $nextRetry/$MAX_AUTO_RETRIES)" else ""
 
+                // Withdraw the pre-upload claim: these bytes are NOT in the cloud.
+                //
+                // The placeholder is written before the call for one reason only -- to stop a
+                // concurrent scan from enqueueing the same file twice. It was never proof that the
+                // upload landed, and leaving it behind after a failure made it exactly that: the
+                // claim outlived the queue row, so after MAX_AUTO_RETRIES the file sat in the queue
+                // as FAILED *and* was skipped by every later scan. Weak-network uploads (a 6 MB
+                // HEIC times out easily outdoors) hit the ceiling in one session and were stranded
+                // permanently (ISS-069).
+                //
+                // Done unconditionally, not just on the FAILED transition: while the queue row
+                // still exists `findByUri` is what prevents double-enqueue, so dropping the claim
+                // early costs nothing and keeps the table honest at all times.
+                try {
+                    database.uploadedFingerprintDao().withdrawUnconfirmed(fingerprintKey)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to withdraw upload fingerprint for ${queueItem.filename}: ${e.message}")
+                }
+
                 database.uploadQueueDao().update(
                     queueItem.copy(
                         status = nextStatus,
@@ -2336,6 +2355,75 @@ class PhotoRepository(
                 Result.failure(Exception("$errCode: $errMsg"))
             }
         }
+
+    /**
+     * Releases fingerprints that were claimed for an upload that never landed.
+     *
+     * ## Why this exists
+     *
+     * A claim (`masterId = ''`) is written before the Go call purely to stop a concurrent scan from
+     * enqueueing the same file twice. [uploadPhotoFromQueue] withdraws it on failure, so in a
+     * correct build this has nothing to do. It stays because the bug it repairs was **silent and
+     * permanent**: a placeholder outliving its queue row made every later scan skip the file, so an
+     * already-affected install would keep a photo un-backed-up forever with no error anywhere
+     * (ISS-069).
+     *
+     * ## Rule
+     *
+     * A claim is only released when **no** queue row proves it is still alive:
+     *
+     * | Queue row for the file | Action |
+     * | --- | --- |
+     * | none | withdraw -- nothing is working on it |
+     * | `PENDING` / `UPLOADING` | keep -- a live attempt will confirm or withdraw it itself |
+     * | `FAILED` | withdraw -- it burned every retry and is not in the cloud |
+     *
+     * Erring towards withdrawal matters more than erring towards keeping: a wrongly withdrawn claim
+     * costs at most one wasted upload (Go's `masterRecordExists()` still prevents a duplicate
+     * record), whereas a wrongly kept one strands a file indefinitely.
+     *
+     * @return how many claims were released, for logging.
+     */
+    suspend fun healUnconfirmedFingerprints(): Int = withContext(Dispatchers.IO) {
+        if (isWiping) return@withContext 0
+
+        val dao = database.uploadedFingerprintDao()
+        val unconfirmed = dao.countUnconfirmed()
+        if (unconfirmed == 0) return@withContext 0
+
+        // `key -> status` for every known queue row. A key absent from this map has no queue row.
+        val queueStatusByKey = HashMap<String, String>()
+        for (task in database.uploadQueueDao().getAllTasks()) {
+            val key = app.acloudroid.qwq.feature.local.data.LocalAlbumRepository
+                .buildFingerprintKey(task.filename, task.fileSize, task.dateModified)
+            queueStatusByKey[key] = task.status
+        }
+
+        // Unconfirmed fingerprints are rare (normally zero), so an unfiltered scan is cheap.
+        var healed = 0
+        for (contentKey in FingerprintHealing.keysToWithdraw(
+            unconfirmedKeys = dao.getAllUnconfirmed().map { it.contentKey },
+            queueStatusByKey = queueStatusByKey
+        )) {
+            try {
+                dao.withdrawUnconfirmed(contentKey)
+                healed++
+            } catch (e: Exception) {
+                Log.w(TAG, "heal: withdraw failed for $contentKey: ${e.message}")
+            }
+        }
+
+        if (healed > 0) {
+            Log.i(
+                TAG,
+                "healUnconfirmedFingerprints: released $healed/$unconfirmed stale claims " +
+                    "(queued rows were left alone) - these files are eligible for upload again"
+            )
+        } else {
+            Log.d(TAG, "healUnconfirmedFingerprints: $unconfirmed claim(s) still backed by a live queue row")
+        }
+        healed
+    }
 
     @Volatile
     var isWiping: Boolean = false

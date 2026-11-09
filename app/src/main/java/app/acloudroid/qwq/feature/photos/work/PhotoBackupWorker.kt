@@ -49,6 +49,16 @@ class PhotoBackupWorker(
             // Reset any stale UPLOADING tasks from interrupted runs back to PENDING
             db.uploadQueueDao().resetUploadingToPending()
 
+            // Heal fingerprints that were claimed but never proved, *before* the scan below.
+            //
+            // `uploadPhotoFromQueue` now withdraws its own claim when an upload fails, so this is
+            // for rows written by builds that did not: they outlived their queue row and made every
+            // later scan skip the file, leaving it permanently un-backed-up (ISS-069). Runs first
+            // because the scan is what consumes these rows -- healing afterwards would mean the
+            // file waits a whole extra work cycle.
+            runCatching { repo.healUnconfirmedFingerprints() }
+                .onFailure { Log.w(TAG, "Fingerprint healing failed: ${it.message}") }
+
             // 1. Pre-scan enabled backup buckets to enqueue any newly added local photos/videos
             val enabledBucketIds = appSettings.enabledBackupBucketIds.value
             if (enabledBucketIds.isNotEmpty()) {

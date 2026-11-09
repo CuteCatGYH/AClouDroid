@@ -86,7 +86,16 @@ class LocalAlbumRepository(private val context: Context) {
                     size = item.size,
                     dateModifiedSeconds = item.dateTaken / 1000L
                 )
-                if (uploadedFingerprintDao.exists(fingerprintKey)) {
+                // Only a *confirmed* fingerprint may skip. A placeholder row (masterId = '') means
+                // "an upload was started for these bytes", not "they are in the cloud" -- the
+                // upload may still fail, and skipping on it would strand the file forever once it
+                // hit the retry ceiling in a bad network (ISS-069).
+                //
+                // In that case we fall through and enqueue normally. That is safe: the queue's own
+                // `findByUri` above already prevents a second row for a file that is still being
+                // retried, so falling through here only decides about files whose queue row is
+                // gone (cleared by the user) while their upload never succeeded.
+                if (uploadedFingerprintDao.isConfirmed(fingerprintKey)) {
                     skippedAlreadyUploaded++
                     continue
                 }

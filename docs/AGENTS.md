@@ -1184,10 +1184,22 @@ totalDragX > 0  →  右滑  →  上一张
    > 三条硬规则：
    > 1. **代价后置的幂等等于没有幂等。** 判断“要不要传”必须排在 `/assets/upload` 与
    >    `uploadFileToUrl()` **之前**；放到 `masterRecordExists()` 那一步已经太晚。
-   > 2. **队列是视图，不是真相。** 真相在 `uploaded_fingerprints`（只有 `wipeAllData()` 能清），
+   > 4. **队列是视图，不是真相。** 真相在 `uploaded_fingerprints`（只有 `wipeAllData()` 能清），
    >    且 key 只能由 `LocalAlbumRepository.buildFingerprintKey()` 生成 —— 扫描与上传两侧格式漂移
    >    会让 lookup 永远不命中，且表面看不出任何异常（同 §6.3 的 Coil cache key）。
-   > 3. 退出登录必须清该表：`masterId` 属于特定 Apple ID，见 §5.5。
+   > 5. 退出登录必须清该表：`masterId` 属于特定 Apple ID，见 §5.5。
+   > 6. **占位行不是完成凭证。**（[ISS-069](CHANGELOG_ISSUES.md#iss-069-上传连续失败三次后文件被永久卡住权限声明冒充已上传)）
+   >    `masterId = ''` 的指纹只表示「有人正在传」，扫描必须用 `isConfirmed()` 而不是 `exists()`，
+   >    否则弱网失败 3 次后文件会被永久跳过且不报错。
+
+   > [!CAUTION]
+   > **任何「先写一行表示我要做某事」的乐观占位设计，必须同时回答两个问题：**
+   > 1. **失败了谁来撤销？**（答案不能是“没人” —— 否则留下假事实）
+   > 2. **读取方怎么区分「声明」和「结论」？**（否则留下僵尸行）
+   >
+   > 只做第一件会留下假事实，只做第二件会留下僵尸行。ISS-069 就是只做了半个：
+   > 写了占位行，但既没撤销路径，读取方又用 `exists()` 把两者等同。
+   > 撤销的方向也必须不对称地倾向安全侧：错撤销最多白跑一次，错保留则永久失联。
 3. **上传前校验 `X-APPLE-WEBAUTH-PCS-Photos` Cookie** —— 无此凭证无法写入照片库
    （当前只校验了 `PCS-CloudKit`，需补上）
 4. **EXIF 时间戳必须准确** —— iCloud 依赖 `assetDate` 排序，写错导致照片乱序

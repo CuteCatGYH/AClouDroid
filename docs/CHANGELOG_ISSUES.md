@@ -81,6 +81,8 @@
 | [ISS-063](#iss-063-go-层-30-个测试长期红着newSession-不再安装全局会话导致) | **Go 层 30 个测试长期红着**：`NewSession` 不再安装全局会话导致 | 🟠 P1 | Go / 测试基础设施 | ✅ 已修复 |
 | [ISS-062](#iss-062-drive-列表层级跳转滚动条位置恢复scrollpositions网页版最近删除免登录-webview-弹窗与-topappbar-状态栏自适应-padding-优化) | **Drive 列表层级跳转滚动条位置恢复**、网页版最近删除免登录 WebView 弹窗与 TopAppBar 状态栏自适应 Padding 优化 | 🟠 P1 | Android / UI + ViewModel | ✅ 已完成 |
 | [ISS-068](#iss-068-照片备份清空队列后已上传文件被重复流式上传流量浪费) | **照片备份「清空队列」后已上传文件被重复上传**：去重事实存在可删的队列行上 | 🔴 P0 | Android / Room + Repository + Worker | ✅ 已修复 |
+| [ISS-069](#iss-069-上传连续失败三次后文件被永久卡住不再重试权限声明冒充已上传) | **上传连续失败三次后文件被永久卡住**："已写指纹"被当成"已上传" | 🔴 P0 | Android / Room + Repository | ✅ 已修复 |
+| [ISS-070](#iss-070-重试失败按钮不清旧错误文案状态与显示不一致) | **「重试失败」按钮不清旧错误文案**：`lastError` 跨状态残留，看着像没生效 | 🟡 P2 | Android / DAO + UI | ✅ 已修复 |
 
 ---
 
@@ -5760,6 +5762,180 @@ val merged = items.map { item ->
   彻底解决需要实现 MMCS 21 字节指纹算法，让本地哈希可直接 `/records/lookup`（见 AGENTS §4.6）。
   当前未做 —— 该场景每文件只需付一次。
 - `photo_assets.localSha256` 兜底列（原方案 C）未实施。
+
+---
+
+## ISS-069 上传连续失败三次后文件被永久卡住（权限声明冒充已上传）
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🔴 P0（照片永久丢失备份，且不报任何错误）|
+| **归属** | Android / `PhotoRepository` + `LocalAlbumRepository` + Room |
+| **状态** | ✅ 已修复 |
+| **引入自** | [ISS-068](#iss-068-照片备份清空队列后已上传文件被重复流式上传流量浪费) 的修复 |
+
+### 现象
+
+用户在户外弱网环境备份照片。某个文件（实测：`20261108_191331.heic`，6.28 MB）
+连续上传失败 3 次后进入备份队列的 **FAILED 持久化列表**，此后无论网络多好、
+重开 App、重新扫描，该文件 **永远不再上传**，且 UI 上没有任何错误提示。
+
+### 根因：把「已声明」当成了「已上传」
+
+ISS-068 为了防止「上传进行中，扫描又把它入队一次」，在 `uploadPhotoFromQueue`
+调 Go **之前**写一条**占位指纹行**（`masterId = ""`）。设计意图是正确的，但把
+两件不同的事压在了同一种行上：
+
+| 行状态 | 真正的语义 |
+| --- | --- |
+| `masterId = ""` | **声明**：「有人正在传这些字节」——不是证据 |
+| `masterId != ""` | **证据**：「这些字节已经在云端」|
+
+而扫描路径用的是 `uploadedFingerprintDao.exists(key)` —— **两者一视同仁**。
+
+配合失败分支的缺失：`uploadPhotoFromQueue` 在 `success == false` 时只改队列行状态，
+**从不撤销指纹声明**。于是产生了一个不可恢复的组合：
+
+```
+弱网 → 每次上传都进了 Go 且失败 → 每次失败都留下 claim
+  → 第 4 次 -> status = FAILED（用户看到的持久化列表）
+  → 指纹表里 masterId="" 的行却活了下来
+  → 之后每次扫描：exists() == true -> 跳过
+  → 永远不上传，永远不报错
+```
+
+> [!CAUTION]
+> **这是典型的「授权凭据与事实凭据混用」。**
+> 占位行是**乐观锁**（“我要做这件事”），不是**完成凭证**（“这件事做完了”）。
+> 一旦同一个字段兼扮两个角色，任何失败路径都会把它永久固化为假事实。
+> 设计模式上应问一句：**这行数据是「意图」还是「结论」？** 两者不能共用一个 DAO 判定。
+
+### 修复：三处改动，缺一不可
+
+**① 扫描只认已确认（`LocalAlbumRepository`）**
+
+```kotlin
+// 旧：占位行也会跳过
+if (uploadedFingerprintDao.exists(fingerprintKey)) { skipped++; continue }
+// 新：只认有 masterId 的行
+if (uploadedFingerprintDao.isConfirmed(fingerprintKey)) { skipped++; continue }
+```
+
+占位行现在不再阻止扫描 —— 因为队列自身的 `findByUri` 已经挡住了「还在重试中的文件」，
+所以放行到入队只会影响「队列行已消失但上传从未成功」的文件，正是要救的那一类。
+
+**② 失败即撤销声明（`PhotoRepository.uploadPhotoFromQueue`）**
+
+在 `success == false` 分支里调 `withdrawUnconfirmed(key)`。**无条件调用，不只在转 FAILED 时** ——
+队列行还在时由 `findByUri` 防重复，提前撤销零代价，且能让表始终诚实。
+
+DAO 的 `withdrawUnconfirmed` 自带安全销：`WHERE ... AND masterId = ''`。
+即使调用方再犯一次错，**已确认的行也绝不可能被删**。
+
+**③ 存量修复（`healUnconfirmedFingerprints`）**
+
+①② 只能救未来。已经装上的用户（包括本次实测的正式版）库里躺着毒行，
+所以 `PhotoBackupWorker` 在**扫描之前**先跑一次清道夫：
+
+| 该文件的队列行 | 动作 |
+| --- | --- |
+| 不存在 | 撤销 —— 没人在处理它 |
+| `PENDING` / `UPLOADING` | 保留 —— 正在进行中的尝试会自己收尾 |
+| `FAILED` | 撤销 —— 重试次数已用尽，不在云端 |
+| `SUCCESS` | 保留 —— 双保险 |
+
+必须排在扫描**之前**：扫描是这些行的消费方，事后修复会让文件白等一个完整的 work 周期。
+
+判定逻辑抽到 [`FingerprintHealing`](file:///Users/syh/iClouDroid/app/src/main/java/app/acloudroid/qwq/feature/photos/data/FingerprintHealing.kt)
+以便单测（无需数据库）。
+
+> [!IMPORTANT]
+> **纠偏方向是不对称的，且必须向「撤销」倾斜。**
+> 错误撤销最多白传一次（Go 的 `masterRecordExists()` 仍能防止重复记录）；
+> 错误保留则文件永久失联。所以除「有活跃上传」外，一切模糊情形一律撤销。
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| `FingerprintHealingTest` | ✅ 7 passed（含复现用例：`20261108_191331.heic` + FAILED + 空 masterId）|
+| `:app:testDebugUnitTest` | ✅ 357 passed / 0 failed（原 350 + 新增 7）|
+| `:app:assembleDebug` | ✅ |
+| 现场状态复现（debug 库注入 FAILED 行 + 空 masterId 行） | ✅ 旧 `exists()` → `1`（跳过）；新 `isConfirmed()` → `0`（不跳过）|
+| 修复后 heal 效果 | ✅ `fingerprints after heal = 0`，文件重新可入队 |
+| 正式版实机（`app.acloudroid.qwq`） | ⚠️ 未直接验证 —— 正式包 `run-as: package not debuggable`，无法读取其数据库；日志缓冲区已滚过 11-08 的记录 |
+
+> [!NOTE]
+> 正式版日志缺失是客观限制：`logcat` 默认缓冲区约 1MB，跨天即滚。
+> 后续排查类似问题时，要么当场 `logcat > file` 落盘，要么安装 debug 包复现。
+
+### 通用教训（已同步到 AGENTS）
+
+**乐观占位行必须有撤销路径，且判定必须区分「声明」与「证据」。**
+任何「先写一条记录表示我要做某事」的防并发设计，都要同时回答两个问题：
+
+1. 失败了谁来删？（答案不能是“没人”）
+2. 读取方怎么区分“占位”和“完成”？
+
+只回答第一个会留下假事实；只回答第二个会留下僵尸行。
+
+---
+
+## ISS-070 「重试失败」按钮不清旧错误文案（状态与显示不一致）
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🟡 P2（不影响功能，但让用户以为按钮没生效）|
+| **归属** | Android / `UploadQueueDao` + `BackupQueueSheet` |
+| **状态** | ✅ 已修复 |
+
+### 现象
+
+在备份队列管理里对一条 `FAILED` 任务点「重试失败」。队列行确实回到了 `PENDING` 并开始上传，
+但副标题仍然显示 `6.2 MB · NETWORK: timeout`。用户合理地认为重试没生效。
+
+### 根因
+
+`retryFailedTasks()` 只改两列：
+
+```sql
+UPDATE upload_queue SET status = 'PENDING', retryCount = 0 WHERE status = 'FAILED'
+```
+
+`lastError` 留了下来。而 `BackupQueueSheet` 的渲染是：
+
+```kotlin
+formatFileSize(task.fileSize) + if (task.lastError != null) " · ${task.lastError}" else ""
+```
+
+只要列不为 null 就拼上去，**完全不看 status**。于是“上一次失败的原因”被显示成了
+“这一次正在失败”。
+
+### 修复（两层，第二层才是真正的保险）
+
+| 层 | 改动 |
+| --- | --- |
+| 数据层 | `retryFailedTasks()` 同时 `lastError = NULL` 并 bump `updatedAt`（重试是真实的状态变更）|
+| 渲染层 | 抽出 [`QueueSubtitle`](file:///Users/syh/iClouDroid/app/src/main/java/app/acloudroid/qwq/feature/local/ui/QueueSubtitle.kt)，**只有 `status == FAILED` 才拼错误后缀** |
+
+为什么两层都要：数据层只能覆盖「点按钮」这一条路径。行还可以通过
+`resetUploadingToPending()`（进程被杀后恢复）变回活状态，未来任何复用行的路径都会重现同一个
+问题。**渲染规则表达的是「这个字段在什么状态下有意义」，它比「记得在每个入口清空它」可靠得多。**
+
+> [!TIP]
+> 这类 bug 的共同形态：**一个字段同时保有「历史」和「当前」两种语义。**
+> 修法不是“记得清空”，而是让消费方按状态门控 —— 与 [ISS-069](#iss-069-上传连续失败三次后文件被永久卡住权限声明冒充已上传)
+> 的「声明 vs 证据」是同一类错误的另一个面：那边是同一字段被当成两种含义，
+> 这边是同一字段跨越了两个时间点。
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| `QueueSubtitleTest` | ✅ 7 passed（含 `PENDING` / `UPLOADING` / `SUCCESS` 三个“隐藏旧文案”用例）|
+| `:app:testDebugUnitTest` | ✅ 364 passed / 0 failed（原 357 + 新增 7）|
+| `:app:assembleDebug` | ✅ |
+| 实机点击验证 | ⏳ 待测 |
 
 
 
