@@ -1365,7 +1365,7 @@ private fun AboutSubScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "打包导出 App 行为日志与 Logcat (ZIP 格式，包含精确毫秒时间戳)",
+                                text = "打包导出 App 行为日志与 Logcat",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

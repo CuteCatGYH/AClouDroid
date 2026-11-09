@@ -479,6 +479,7 @@ private fun DriveHeader(
     onToggleSortOrder: () -> Unit
 ) {
     var sortMenuExpanded by remember { mutableStateOf(false) }
+    var moreMenuExpanded by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
@@ -566,14 +567,44 @@ private fun DriveHeader(
             IconButton(onClick = onCreateFolderClick) {
                 Icon(Icons.Default.CreateNewFolder, contentDescription = "新建文件夹")
             }
-            IconButton(onClick = onOpenTrashWebClick) {
-                Icon(Icons.Default.Delete, contentDescription = "最近删除 (网页端)")
-            }
-            IconButton(onClick = onSync, enabled = !state.isSyncing) {
-                Icon(Icons.Default.Sync, contentDescription = "增量同步")
-            }
-            IconButton(onClick = onRefresh, enabled = !state.isRefreshing) {
-                Icon(Icons.Default.Refresh, contentDescription = "刷新")
+
+            // More Actions Overflow Menu
+            Box {
+                IconButton(onClick = { moreMenuExpanded = true }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "更多操作")
+                }
+                DropdownMenu(
+                    expanded = moreMenuExpanded,
+                    onDismissRequest = { moreMenuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("增量同步") },
+                        leadingIcon = { Icon(Icons.Default.Sync, contentDescription = null) },
+                        onClick = {
+                            moreMenuExpanded = false
+                            onSync()
+                        },
+                        enabled = !state.isSyncing
+                    )
+                    DropdownMenuItem(
+                        text = { Text("全量刷新") },
+                        leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                        onClick = {
+                            moreMenuExpanded = false
+                            onRefresh()
+                        },
+                        enabled = !state.isRefreshing
+                    )
+                    HorizontalDivider()
+                    DropdownMenuItem(
+                        text = { Text("最近删除 (网页端)") },
+                        leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                        onClick = {
+                            moreMenuExpanded = false
+                            onOpenTrashWebClick()
+                        }
+                    )
+                }
             }
         }
 

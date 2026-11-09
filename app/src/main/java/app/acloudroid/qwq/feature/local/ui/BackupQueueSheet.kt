@@ -1,6 +1,8 @@
 package app.acloudroid.qwq.feature.local.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -78,25 +80,30 @@ fun BackupQueueSheet(
                 .fillMaxHeight(0.75f)
                 .padding(horizontal = 20.dp, vertical = 8.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "备份队列管理",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = "共 ${tasks.size} 项（待上传 $pendingCount / 上传中 $uploadingCount / 失败 $failedCount）",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "备份队列管理",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "共 ${tasks.size} 项（待上传 $pendingCount / 上传中 $uploadingCount / 失败 $failedCount）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val hasActions = (tasks.isNotEmpty() || isForceActive || failedCount > 0 || successCount > 0)
+            if (hasActions) {
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     if (tasks.isNotEmpty() || isForceActive) {
                         OutlinedButton(
                             onClick = onForceUpload,
