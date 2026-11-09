@@ -29,6 +29,8 @@ class IClouDroidApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        app.acloudroid.qwq.util.AppLogger.init(this)
+        app.acloudroid.qwq.util.AppLogger.i("IClouDroidApp", "Application starting...")
         container = AppContainer(this)
 
         // Register MediaStoreObserver for real-time photo backup detection

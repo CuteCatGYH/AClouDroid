@@ -550,6 +550,7 @@ class PhotoRepository(
                 }
 
                 Log.i(TAG, "Rebuilding Go core session (force=$force)...")
+                app.acloudroid.qwq.util.AppLogger.i(TAG, "Rebuilding Go core session (force=$force)...")
                 val cookieStr = sessionManager.getCookieString()
                 if (cookieStr.isNullOrBlank()) {
                     return@withContext Result.failure(Exception("本地缺少 iCloud Cookie 凭证，请重新登录"))
@@ -1145,6 +1146,7 @@ class PhotoRepository(
             }
 
             Log.d(TAG, "Starting incremental sync with token: ${currentSyncToken.take(15)}...")
+            app.acloudroid.qwq.util.AppLogger.i(TAG, "Starting photo incremental sync")
             var totalChanged = 0
             var pageCount = 0
             val maxPages = 10
@@ -2508,6 +2510,7 @@ class PhotoRepository(
             gridRefresher.abortAll(Exception("Session wiped while refreshing URLs"))
 
             Log.i(TAG, "Photo database wiped (photo_assets + sync_state + month index + scan state)")
+            app.acloudroid.qwq.util.AppLogger.i(TAG, "Photo database wiped")
             true
         } catch (e: Exception) {
             Log.e(TAG, "wipeAllData failed", e)
