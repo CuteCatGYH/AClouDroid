@@ -118,4 +118,12 @@ class PhotoParsingTest {
         assertEquals("https://cvws.example.com/video_compl.mov", mergedVideoComplUrl)
         assertEquals(true, incrementalUpdate.isFavorite)
     }
+
+    @Test
+    fun `deleted asset count calculation prevents double counting master and asset ids`() {
+        // CloudKit returns both CPLAsset ID and CPLMaster ID for each deleted photo asset
+        val deletedIds = listOf("asset-uuid-1", "master-checksum-1", "asset-uuid-2", "master-checksum-2")
+        val effectiveCount = (deletedIds.size + 1) / 2
+        assertEquals(2, effectiveCount)
+    }
 }

@@ -22,7 +22,7 @@ interface PhotoDao {
     suspend fun getYearMonthsForIds(ids: List<String>): List<Int>
 
     @Query("DELETE FROM photo_assets WHERE id IN (:ids) OR masterId IN (:ids)")
-    suspend fun deleteByIds(ids: List<String>)
+    suspend fun deleteByIds(ids: List<String>): Int
 
     @Query("DELETE FROM photo_assets WHERE assetDate <= 0 OR id = masterId")
     suspend fun deleteOrphanRows(): Int

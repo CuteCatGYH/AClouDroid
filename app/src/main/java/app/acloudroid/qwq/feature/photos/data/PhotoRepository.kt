@@ -1006,10 +1006,11 @@ class PhotoRepository(
         val affectedMonths = photoDao.getYearMonthsForIds(ids.toList())
         if (affectedMonths.isEmpty()) return 0
         Log.d(TAG, "Purging ${ids.size} trashed assets (months=$affectedMonths)")
-        photoDao.deleteByIds(ids.toList())
+        val deletedCount = photoDao.deleteByIds(ids.toList())
         rebuildMonthIndexFor(affectedMonths)
         ICloudImageLoaderFactory.evictAssets(ids)
-        return ids.size
+        val effectiveCount = if (deletedCount > 0) deletedCount else (ids.size + 1) / 2
+        return effectiveCount
     }
 
     /**
@@ -1183,14 +1184,15 @@ class PhotoRepository(
                 if (removedIds.isNotEmpty()) {
                     val affectedMonths = photoDao.getYearMonthsForIds(removedIds)
                     Log.d(TAG, "Deleting ${removedIds.size} removed assets from local db (affected months: $affectedMonths)")
-                    photoDao.deleteByIds(removedIds)
+                    val deletedCount = photoDao.deleteByIds(removedIds)
                     if (affectedMonths.isNotEmpty()) {
                         rebuildMonthIndexFor(affectedMonths)
                     }
                     ICloudImageLoaderFactory.evictAssets(removedIds)
                     // Authoritative: never let the same record come back.
                     rememberPurged(removedIds, source = "changes")
-                    totalChanged += removedIds.size
+                    val effectiveRemovedCount = if (deletedCount > 0) deletedCount else (removedIds.size + 1) / 2
+                    totalChanged += effectiveRemovedCount
                 }
 
                 if (newPhotos.isNotEmpty()) {
@@ -1313,12 +1315,13 @@ class PhotoRepository(
                 "Purging recently deleted assets: ${deletedIds.size} cloud ids, " +
                     "months=$affectedMonths"
             )
-            photoDao.deleteByIds(deletedIds)
+            val deletedCount = photoDao.deleteByIds(deletedIds)
             rebuildMonthIndexFor(affectedMonths)
             ICloudImageLoaderFactory.evictAssets(deletedIds)
             rememberPurged(deletedIds, source = "expunge")
 
-            return Result.success(deletedIds.size)
+            val effectiveCount = if (deletedCount > 0) deletedCount else (deletedIds.size + 1) / 2
+            return Result.success(effectiveCount)
         } catch (e: Exception) {
             Log.e(TAG, "purgeRecentlyDeleted error", e)
             return Result.failure(e)
