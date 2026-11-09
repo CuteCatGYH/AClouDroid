@@ -82,6 +82,10 @@ class AppContainer(private val appContext: Context) {
         DriveRepository(driveDatabase, sessionManager, dataMutationLock, appContext)
     }
 
+    val updateRepository: app.acloudroid.qwq.feature.update.data.UpdateRepository by lazy {
+        app.acloudroid.qwq.feature.update.data.UpdateRepository(appSettings, appContext)
+    }
+
     // Future features plug in here:
     // val notesRepository: NotesRepository by lazy { NotesRepository(...) }
 }

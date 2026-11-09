@@ -1,17 +1,28 @@
 package app.acloudroid.qwq.ui
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.windowsizeclass.WindowSizeClass
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
@@ -23,12 +34,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.acloudroid.qwq.IClouDroidApp
 import app.acloudroid.qwq.feature.photos.ui.PhotosScreen
 import app.acloudroid.qwq.feature.photos.ui.PhotosViewModel
 import app.acloudroid.qwq.feature.photos.work.PeriodicScanScheduler
+import app.acloudroid.qwq.feature.update.data.UpdateState
 import app.acloudroid.qwq.ui.navigation.AppDestination
 import app.acloudroid.qwq.ui.settings.SettingsContainer
 
@@ -96,6 +109,25 @@ fun AppShell(
 
     val activeDestinations = remember(navBarDestinations) {
         AppDestination.entries.filter { it in navBarDestinations }
+    }
+
+    val updateRepository = container.updateRepository
+    val autoCheckUpdate by settings.autoCheckUpdate.collectAsStateWithLifecycle()
+    val updateState by updateRepository.updateState.collectAsStateWithLifecycle()
+
+    var showUpdateDialog by rememberSaveable { mutableStateOf(false) }
+    val activeUpdate = (updateState as? UpdateState.UpdateAvailable)?.releaseInfo
+
+    // Automatic update check on launch (protected by 24-hour rate limit)
+    androidx.compose.runtime.LaunchedEffect(autoCheckUpdate) {
+        if (autoCheckUpdate) {
+            val versionName = try {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "1.0"
+            } catch (_: Exception) {
+                "1.0"
+            }
+            updateRepository.checkLatestReleaseIfDue(currentVersion = versionName, force = false)
+        }
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -172,6 +204,26 @@ fun AppShell(
             }
         }
 
+        // Home screen update prompt banner
+        if (activeUpdate != null && !viewerOpen && !settingsOpen) {
+            UpdateBanner(
+                releaseInfo = activeUpdate,
+                onViewUpdate = { showUpdateDialog = true },
+                onDismiss = { updateRepository.dismissUpdatePrompt() },
+                modifier = Modifier.align(Alignment.TopCenter)
+            )
+        }
+
+        if (showUpdateDialog && activeUpdate != null) {
+            app.acloudroid.qwq.feature.update.ui.UpdateDialog(
+                releaseInfo = activeUpdate,
+                onDismiss = { showUpdateDialog = false },
+                onConfirmUpdate = {
+                    updateRepository.openReleasePage(context, activeUpdate.releaseUrl)
+                }
+            )
+        }
+
         if (settingsOpen) {
             SettingsContainer(
                 onClose = { settingsOpen = false },
@@ -239,5 +291,53 @@ private fun MainContentArea(
         AppDestination.Notes -> FeatureWebViewScreen(url = "https://www.icloud.com.cn/notes/")
         AppDestination.Reminders -> FeatureWebViewScreen(url = "https://www.icloud.com.cn/reminders/")
         AppDestination.FindMy -> FeatureWebViewScreen(url = "https://www.icloud.com.cn/find/")
+    }
+}
+
+@Composable
+private fun UpdateBanner(
+    releaseInfo: app.acloudroid.qwq.feature.update.data.ReleaseInfo,
+    onViewUpdate: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.primaryContainer,
+        tonalElevation = 6.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "🎉 发现新版本 ${releaseInfo.tagName}",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+                Text(
+                    text = "点击前往 GitHub 查看并更新",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                )
+            }
+            TextButton(onClick = onViewUpdate) {
+                Text("查看", fontWeight = FontWeight.Bold)
+            }
+            IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "忽略",
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+        }
     }
 }

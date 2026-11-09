@@ -71,6 +71,9 @@ enum class SettingsItem {
     /** Default sorting direction for iCloud Drive items. */
     DRIVE_SORT_ORDER,
 
+    /** Automatically check for updates on startup. */
+    AUTO_CHECK_UPDATE,
+
     /** About sub-screen containing app icon, name, version, and repository link. */
     ABOUT
 }
@@ -146,7 +149,7 @@ object SettingsCatalog {
         SettingsGroup(
             title = "关于",
             description = "查看应用版本信息与开源仓库",
-            items = listOf(SettingsItem.ABOUT)
+            items = listOf(SettingsItem.AUTO_CHECK_UPDATE, SettingsItem.ABOUT)
         )
     )
 }

@@ -809,6 +809,34 @@ private fun SettingsRow(
             )
         }
 
+        SettingsItem.AUTO_CHECK_UPDATE -> {
+            val autoCheck by settings.autoCheckUpdate.collectAsStateWithLifecycle()
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { settings.setAutoCheckUpdate(!autoCheck) }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "自动检查更新",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = "应用启动时自动检测 GitHub Releases 最新版本",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = autoCheck,
+                    onCheckedChange = { settings.setAutoCheckUpdate(it) }
+                )
+            }
+        }
+
         SettingsItem.ABOUT -> ActionRow(
             title = "关于",
             subtitle = "关于 AClouDroid",
@@ -1113,6 +1141,12 @@ private fun AboutSubScreen(
 ) {
     val context = LocalContext.current
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    val scope = rememberCoroutineScope()
+    val container = remember(context) { (context.applicationContext as IClouDroidApp).container }
+    val updateRepository = container.updateRepository
+
+    var isCheckingUpdate by remember { androidx.compose.runtime.mutableStateOf(false) }
+    var updateDialogReleaseInfo by remember { androidx.compose.runtime.mutableStateOf<app.acloudroid.qwq.feature.update.data.ReleaseInfo?>(null) }
 
     val versionName = remember(context) {
         try {
@@ -1229,16 +1263,44 @@ private fun AboutSubScreen(
                 )
             ) {
                 Column {
-                    // Version Item
+                    // Version Item (Click to manually check update)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable {
-                                android.widget.Toast.makeText(
-                                    context,
-                                    "iClouDroid v$versionName (Build $versionCode)",
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
+                            .clickable(enabled = !isCheckingUpdate) {
+                                scope.launch {
+                                    isCheckingUpdate = true
+                                    android.widget.Toast.makeText(
+                                        context,
+                                        "正在检查更新...",
+                                        android.widget.Toast.LENGTH_SHORT
+                                    ).show()
+                                    val result = updateRepository.checkLatestReleaseIfDue(
+                                        currentVersion = versionName,
+                                        force = true
+                                    )
+                                    isCheckingUpdate = false
+                                    result.fold(
+                                        onSuccess = { releaseInfo ->
+                                            if (releaseInfo != null) {
+                                                updateDialogReleaseInfo = releaseInfo
+                                            } else {
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "当前已是最新版本 (v$versionName)",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        },
+                                        onFailure = { error ->
+                                            android.widget.Toast.makeText(
+                                                context,
+                                                error.localizedMessage ?: "检查更新失败",
+                                                android.widget.Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    )
+                                }
                             }
                             .padding(horizontal = 16.dp, vertical = 16.dp),
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
@@ -1250,17 +1312,24 @@ private fun AboutSubScreen(
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "v$versionName (Build $versionCode)",
+                                text = if (isCheckingUpdate) "正在检查更新..." else "v$versionName (Build $versionCode)",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Text(
-                            text = "v$versionName",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        if (isCheckingUpdate) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text(
+                                text = "检查更新",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
 
                     HorizontalDivider(
@@ -1437,5 +1506,15 @@ private fun AboutSubScreen(
 
             Spacer(Modifier.height(32.dp))
         }
+    }
+
+    updateDialogReleaseInfo?.let { releaseInfo ->
+        app.acloudroid.qwq.feature.update.ui.UpdateDialog(
+            releaseInfo = releaseInfo,
+            onDismiss = { updateDialogReleaseInfo = null },
+            onConfirmUpdate = {
+                updateRepository.openReleasePage(context, releaseInfo.releaseUrl)
+            }
+        )
     }
 }

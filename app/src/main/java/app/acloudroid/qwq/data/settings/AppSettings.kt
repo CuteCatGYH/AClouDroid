@@ -334,6 +334,30 @@ class AppSettings(context: Context) {
         _driveSortOrder.value = value
     }
 
+    // ---------------------------------------------------------------------------------------
+    // Software Updates
+    // ---------------------------------------------------------------------------------------
+
+    private val _autoCheckUpdate = MutableStateFlow(
+        prefs.getBoolean(KEY_AUTO_CHECK_UPDATE, true)
+    )
+    val autoCheckUpdate: StateFlow<Boolean> = _autoCheckUpdate.asStateFlow()
+
+    fun setAutoCheckUpdate(value: Boolean) {
+        prefs.edit { putBoolean(KEY_AUTO_CHECK_UPDATE, value) }
+        _autoCheckUpdate.value = value
+    }
+
+    private val _lastUpdateCheckTimestamp = MutableStateFlow(
+        prefs.getLong(KEY_LAST_UPDATE_CHECK_TIMESTAMP, 0L)
+    )
+    val lastUpdateCheckTimestamp: StateFlow<Long> = _lastUpdateCheckTimestamp.asStateFlow()
+
+    fun setLastUpdateCheckTimestamp(value: Long) {
+        prefs.edit { putLong(KEY_LAST_UPDATE_CHECK_TIMESTAMP, value) }
+        _lastUpdateCheckTimestamp.value = value
+    }
+
     companion object {
         private const val PREFS_NAME = "icloud_droid_settings"
         private const val KEY_THEME_MODE = "theme_mode"
@@ -354,6 +378,8 @@ class AppSettings(context: Context) {
         private const val KEY_DRIVE_DISPLAY_MODE = "drive_display_mode"
         private const val KEY_DRIVE_SORT_FIELD = "drive_sort_field"
         private const val KEY_DRIVE_SORT_ORDER = "drive_sort_order"
+        private const val KEY_AUTO_CHECK_UPDATE = "auto_check_update"
+        private const val KEY_LAST_UPDATE_CHECK_TIMESTAMP = "last_update_check_timestamp"
 
         const val MIN_CUSTOM_DAYS = 1
         const val MAX_CUSTOM_DAYS = 365
