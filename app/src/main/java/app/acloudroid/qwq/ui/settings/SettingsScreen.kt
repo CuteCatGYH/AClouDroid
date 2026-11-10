@@ -104,6 +104,7 @@ fun SettingsScreen(
     val showBackupNotification by settings.showBackupNotification.collectAsStateWithLifecycle()
     val periodicBackupInterval by settings.periodicBackupInterval.collectAsStateWithLifecycle()
 
+    val context = LocalContext.current
     var showScanWarning by remember { mutableStateOf(false) }
     var showAboutScreen by remember { mutableStateOf(false) }
 
@@ -167,7 +168,18 @@ fun SettingsScreen(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
                     ) {
                         Column {
-                            group.items.forEachIndexed { index, item ->
+                            val powerManager = remember { context.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager }
+                            val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+                            val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow.collectAsStateWithLifecycle()
+                            val isIgnoringBatteryOptimizations = remember(lifecycleState) {
+                                powerManager.isIgnoringBatteryOptimizations(context.packageName)
+                            }
+
+                            val visibleItems = group.items.filter { item ->
+                                if (item == SettingsItem.KEEP_BACKGROUND_ALIVE) isIgnoringBatteryOptimizations else true
+                            }
+
+                            visibleItems.forEachIndexed { index, item ->
                                 if (index > 0) {
                                     HorizontalDivider(
                                         modifier = Modifier.padding(horizontal = 16.dp),
@@ -376,20 +388,72 @@ private fun SettingsRow(
                 )
             }
         }
-        
+
+        SettingsItem.KEEP_BACKGROUND_ALIVE -> {
+            val keepBackgroundAlive by settings.keepBackgroundAlive.collectAsStateWithLifecycle()
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        val newValue = !keepBackgroundAlive
+                        settings.setKeepBackgroundAlive(newValue)
+                        if (newValue) {
+                            app.acloudroid.qwq.feature.photos.work.KeepAliveBackupService.start(context)
+                        } else {
+                            app.acloudroid.qwq.feature.photos.work.KeepAliveBackupService.stop(context)
+                        }
+                    }
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "显示常驻通知",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = if (keepBackgroundAlive) "已开启常驻通知" else "显示一条常驻通知，阻止应用被系统杀死",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Switch(
+                    checked = keepBackgroundAlive,
+                    onCheckedChange = { newValue ->
+                        settings.setKeepBackgroundAlive(newValue)
+                        if (newValue) {
+                            app.acloudroid.qwq.feature.photos.work.KeepAliveBackupService.start(context)
+                        } else {
+                            app.acloudroid.qwq.feature.photos.work.KeepAliveBackupService.stop(context)
+                        }
+                    }
+                )
+            }
+        }
+
         SettingsItem.PERIODIC_BACKUP_INTERVAL -> {
             var showCustomIntervalDialog by remember { mutableStateOf(false) }
 
             DropdownRow(
                 title = "周期备份频率",
-                subtitle = "后台触发自动扫描的最高频率",
-                current = if (periodicBackupInterval == 15L) "15 分钟 (最高效)" else if (periodicBackupInterval == 30L) "30 分钟" else if (periodicBackupInterval == 60L) "1 小时" else "$periodicBackupInterval 分钟",
+                subtitle = if (periodicBackupInterval == 0L) "新增照片后立刻触发备份" else "后台触发自动备份的最高频率",
+                current = when (periodicBackupInterval) {
+                    0L -> "立即"
+                    15L -> "15 分钟"
+                    30L -> "30 分钟"
+                    60L -> "1 小时"
+                    else -> "$periodicBackupInterval 分钟"
+                },
                 options = listOf(
-                    15L to "15 分钟 (最高效)",
+                    0L to "立即 (媒体监听)",
+                    15L to "15 分钟",
                     30L to "30 分钟",
                     60L to "1 小时",
                     -1L to "自定义..."
-                ) + (if (listOf(15L, 30L, 60L, -1L).contains(periodicBackupInterval)) emptyList() else listOf(periodicBackupInterval to "$periodicBackupInterval 分钟 (自定义)")),
+                ) + (if (listOf(0L, 15L, 30L, 60L, -1L).contains(periodicBackupInterval)) emptyList() else listOf(periodicBackupInterval to "$periodicBackupInterval 分钟 (自定义)")),
                 onSelect = {
                     if (it == -1L) {
                         showCustomIntervalDialog = true
@@ -408,7 +472,7 @@ private fun SettingsRow(
                     title = { Text("自定义周期备份频率") },
                     text = {
                         Column {
-                            Text("输入间隔分钟数 (至少 15 分钟):", style = MaterialTheme.typography.bodyMedium)
+                            Text("输入间隔分钟数 (分钟):", style = MaterialTheme.typography.bodyMedium)
                             Spacer(Modifier.height(8.dp))
                             androidx.compose.material3.OutlinedTextField(
                                 value = customInput,

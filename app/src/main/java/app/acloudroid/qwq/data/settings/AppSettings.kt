@@ -284,14 +284,24 @@ class AppSettings(context: Context) {
     }
 
     private val _periodicBackupInterval = MutableStateFlow(
-        prefs.getLong(KEY_PERIODIC_BACKUP_INTERVAL, 60L).coerceAtLeast(15L)
+        prefs.getLong(KEY_PERIODIC_BACKUP_INTERVAL, 0L).coerceAtLeast(0L)
     )
     val periodicBackupInterval: StateFlow<Long> = _periodicBackupInterval.asStateFlow()
 
     fun setPeriodicBackupInterval(minutes: Long) {
-        val clamped = minutes.coerceAtLeast(15L)
+        val clamped = minutes.coerceAtLeast(0L)
         prefs.edit { putLong(KEY_PERIODIC_BACKUP_INTERVAL, clamped) }
         _periodicBackupInterval.value = clamped
+    }
+
+    private val _keepBackgroundAlive = MutableStateFlow(
+        prefs.getBoolean(KEY_KEEP_BACKGROUND_ALIVE, false)
+    )
+    val keepBackgroundAlive: StateFlow<Boolean> = _keepBackgroundAlive.asStateFlow()
+
+    fun setKeepBackgroundAlive(value: Boolean) {
+        prefs.edit { putBoolean(KEY_KEEP_BACKGROUND_ALIVE, value) }
+        _keepBackgroundAlive.value = value
     }
 
     // ---------------------------------------------------------------------------------------
@@ -375,6 +385,7 @@ class AppSettings(context: Context) {
         private const val KEY_SHOW_BACKUP_NOTIFICATION = "show_backup_notification"
         private const val KEY_FORCE_UPLOAD_UNTIL = "force_upload_until"
         private const val KEY_PERIODIC_BACKUP_INTERVAL = "periodic_backup_interval"
+        private const val KEY_KEEP_BACKGROUND_ALIVE = "keep_background_alive"
         private const val KEY_DRIVE_DISPLAY_MODE = "drive_display_mode"
         private const val KEY_DRIVE_SORT_FIELD = "drive_sort_field"
         private const val KEY_DRIVE_SORT_ORDER = "drive_sort_order"

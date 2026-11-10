@@ -59,6 +59,9 @@ enum class SettingsItem {
     /** Request ignore battery optimizations to keep app alive in background. */
     BATTERY_OPTIMIZATION,
 
+    /** Persistent foreground service to keep process alive in background. */
+    KEEP_BACKGROUND_ALIVE,
+
     /** Periodic backup interval in minutes. */
     PERIODIC_BACKUP_INTERVAL,
 
@@ -119,6 +122,7 @@ object SettingsCatalog {
             description = "配置本地相册后台备份时的网络与电量运行约束条件。",
             items = listOf(
                 SettingsItem.BATTERY_OPTIMIZATION,
+                SettingsItem.KEEP_BACKGROUND_ALIVE,
                 SettingsItem.PERIODIC_BACKUP_INTERVAL,
                 SettingsItem.BACKUP_CELLULAR_DATA,
                 SettingsItem.BACKUP_REQUIRE_CHARGING,

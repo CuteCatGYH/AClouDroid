@@ -58,6 +58,11 @@ class IClouDroidApp : Application() {
         // Schedule background backup worker on startup
         app.acloudroid.qwq.feature.photos.work.PhotoBackupWorker.scheduleBackup(this)
 
+        // Start KeepAliveBackupService if enabled in settings
+        if (container.appSettings.keepBackgroundAlive.value) {
+            app.acloudroid.qwq.feature.photos.work.KeepAliveBackupService.start(this)
+        }
+
         // Repair a queue left behind by a process kill.
         //
         // Two separate pieces of state can be orphaned, and both must be cleared or uploads appear

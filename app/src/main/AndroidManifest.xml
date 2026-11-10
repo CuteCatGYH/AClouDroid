@@ -10,6 +10,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Local Media permissions -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
@@ -86,6 +89,21 @@
                 <action android:name="app.acloudroid.qwq.ACTION_CANCEL_DOWNLOAD" />
             </intent-filter>
         </receiver>
+
+        <!-- AlarmManager Receiver for Doze penetrating photo backup -->
+        <receiver
+            android:name=".feature.photos.work.BackupAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="app.acloudroid.qwq.action.TRIGGER_BACKUP_ALARM" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Keep-Alive Persistent Foreground Service -->
+        <service
+            android:name=".feature.photos.work.KeepAliveBackupService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- FileProvider for file sharing and external previewing -->
         <provider

@@ -3,6 +3,7 @@ package app.acloudroid.qwq.feature.photos.work
 import android.content.Context
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.provider.MediaStore
 import android.util.Log
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -190,15 +191,26 @@ class PhotoBackupWorker(
             val requireBatteryNotLow = if (isForceUpload) false else (appSettings?.requireBatteryNotLow?.value ?: true)
 
             val networkType = if (allowCellular) NetworkType.CONNECTED else NetworkType.UNMETERED
+            val intervalMinutes = appSettings?.periodicBackupInterval?.value?.coerceAtLeast(0L) ?: 0L
+            val isImmediateMediaTrigger = intervalMinutes == 0L
 
-            val immediateConstraints = Constraints.Builder()
+            val constraintsBuilder = Constraints.Builder()
                 .setRequiredNetworkType(networkType)
                 .setRequiresCharging(requireCharging)
                 .setRequiresBatteryNotLow(requireBatteryNotLow)
-                .build()
+
+            if (isImmediateMediaTrigger && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                constraintsBuilder
+                    .addContentUriTrigger(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true)
+                    .addContentUriTrigger(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true)
+                    .setTriggerContentUpdateDelay(2, TimeUnit.SECONDS)
+                    .setTriggerContentMaxDelay(5, TimeUnit.SECONDS)
+            }
+
+            val constraints = constraintsBuilder.build()
 
             val immediateRequest = OneTimeWorkRequestBuilder<PhotoBackupWorker>()
-                .setConstraints(immediateConstraints)
+                .setConstraints(constraints)
                 .build()
 
             WorkManager.getInstance(context).enqueueUniqueWork(
@@ -207,22 +219,37 @@ class PhotoBackupWorker(
                 immediateRequest
             )
 
-            val intervalMinutes = appSettings?.periodicBackupInterval?.value?.coerceAtLeast(15L) ?: 60L
-            val periodicRequest = PeriodicWorkRequestBuilder<PhotoBackupWorker>(intervalMinutes, TimeUnit.MINUTES)
-                .setConstraints(immediateConstraints)
-                .build()
+            if (isImmediateMediaTrigger) {
+                BackupAlarmScheduler.cancel(context)
+                val periodicRequest = PeriodicWorkRequestBuilder<PhotoBackupWorker>(15L, TimeUnit.MINUTES)
+                    .setConstraints(constraints)
+                    .build()
 
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
-                UNIQUE_WORK_NAME,
-                ExistingPeriodicWorkPolicy.UPDATE,
-                periodicRequest
-            )
-            Log.i(TAG, "Scheduled immediate & periodic PhotoBackupWorker (interval=${intervalMinutes}m, isForceUpload=$isForceUpload, cellular=$allowCellular, charging=$requireCharging, batteryNotLow=$requireBatteryNotLow)")
+                WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                    UNIQUE_WORK_NAME,
+                    ExistingPeriodicWorkPolicy.UPDATE,
+                    periodicRequest
+                )
+            } else {
+                val effectiveInterval = intervalMinutes.coerceAtLeast(15L)
+                val periodicRequest = PeriodicWorkRequestBuilder<PhotoBackupWorker>(effectiveInterval, TimeUnit.MINUTES)
+                    .setConstraints(constraints)
+                    .build()
+
+                WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                    UNIQUE_WORK_NAME,
+                    ExistingPeriodicWorkPolicy.UPDATE,
+                    periodicRequest
+                )
+                BackupAlarmScheduler.schedule(context, effectiveInterval)
+            }
+            Log.i(TAG, "Scheduled PhotoBackupWorker (interval=${intervalMinutes}m, isImmediateMediaTrigger=$isImmediateMediaTrigger, isForceUpload=$isForceUpload, cellular=$allowCellular, charging=$requireCharging, batteryNotLow=$requireBatteryNotLow)")
         }
 
         fun cancelBackup(context: Context) {
             WorkManager.getInstance(context).cancelUniqueWork(IMMEDIATE_WORK_NAME)
             WorkManager.getInstance(context).cancelUniqueWork(UNIQUE_WORK_NAME)
+            BackupAlarmScheduler.cancel(context)
             BackupNotificationHelper.cancel(context)
             Log.i(TAG, "Cancelled PhotoBackupWorker")
         }
