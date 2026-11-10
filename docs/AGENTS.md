@@ -772,6 +772,27 @@ JNI 调用不返回时 `defer` 不执行，残留条目会被下一个文件继�
 > （[ISS-040](CHANGELOG_ISSUES.md) 手写 bplist、[ISS-052](CHANGELOG_ISSUES.md#iss-052-drive-单次-body-上传大文件被-cdn-以-413-拒绝1gb-不是-clouddocs-的限制)、
 > [ISS-056](CHANGELOG_ISSUES.md#iss-056-drive-上传上限实测为-1-gib且无法绕过)）。
 
+### 6.7.10 系统文件选择器（DocumentsProvider / SAF）
+
+> 踩坑记录：[ISS-073](CHANGELOG_ISSUES.md#iss-073-系统文件选择器-documentsprovider-对接与照片云盘二级目录浏览缩略图自愈与补零排序)。
+
+`provider/ICloudDocumentsProvider.kt` 将 AClouDroid 接入 Android 系统文件选择器（DocumentsUI / SAF）。
+
+**① 根节点与二级目录划分：**
+- 侧边栏显示 **iCloud** 存储根（带有账号 DSID 摘要）。
+- 根目录下显示两个二级虚拟文件夹：`iCloud Photo` 与 `iCloud Drive`。
+- `iCloud Photo` 按年月虚拟目录（`2026年11月`、`2026年10月` ...）分类展平照片与视频，避免单 Cursor 载入数千行引发 Binder IPC 超时。
+
+**② 时间戳与字符串排序约束（ISS-073）：**
+- 月份文件夹显示名必须**补零**（`%d年%02d月`），确保文本字典序与自然时间序一致（避免 `10月`/`11月` 被字典序排到 `2月` 前面）。
+- 必须显式为文件夹节点注入 `COLUMN_LAST_MODIFIED` 时间戳。
+- 照片/视频行 `COLUMN_LAST_MODIFIED` 需防 1000 倍二次乘算溢出（`assetDate` 本身已为毫秒级）。
+
+**③ 缩略图自愈与视频降级防护：**
+- 缩略图未命中时，因 CDN 直链签名寿命只有 15 分钟，遇下载失败（403/410）必须调用 `photoRepository.refreshUrlsForMaster` 重新签发并重试。
+- 视频 / Live Photo 缩略图**严格仅使用 `thumbUrl`**，禁止降级使用 `medUrl`/`originalUrl`（视频字节本身）。
+- 所有输出缩略图必须经过 `isPlausiblePreview` 魔数校验。
+
 ### 6.8 实况照片 (Live Photo / Motion Photo) 开发规范
 1. **增量更新防覆写**：
    CloudKit 增量同步 (`/records/changes`) 仅返回被修改的 `CPLAsset`，缺省 `CPLMaster`。
@@ -980,8 +1001,9 @@ app/src/main/java/com/getup/iClouDroid/
 │   ├── data/LocalAlbum.kt             # 模型（含 isBackupEnabled 预留位）
 │   ├── data/LocalAlbumRepository.kt   # MediaStore 按 BUCKET_ID 归集文件夹
 │   └── ui/LocalAlbumsScreen.kt        # Albums 页（封面卡片 + 媒体权限引导）
-├── provider/                          # 系统云端媒体提供方（Android 13+）
-│   ├── ICloudMediaProvider.kt         # CloudMediaProvider 实现（游标/分页/预览/全图）
+├── provider/                          # 系统接口对接
+│   ├── ICloudMediaProvider.kt         # CloudMediaProvider 实现（Photo Picker，Android 13+）
+│   ├── ICloudDocumentsProvider.kt     # DocumentsProvider 实现（SAF 系统文件选择器）
 │   └── ShizukuMediaHelper.kt          # Shizuku shell 权限 → 白名单注入 + 一键绑定
 └── ui/
     ├── AppShell.kt                    # 登录后的壳：底部导航 + 各功能入口 + 设置 overlay

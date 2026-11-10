@@ -1,15 +1,21 @@
 <resources>
     <string name="app_name">AClouDroid</string>
-    <string name="share_to_icloud_label">上传到 iCloud Photo</string>
-    <string name="share_upload_title">上传到 iCloud Photo</string>
+    <string name="share_to_icloud_label">发送到 iCloud</string>
+    <string name="share_upload_title">发送到 iCloud</string>
+    <string name="share_option_icloud_photo">上传到 iCloud Photo</string>
+    <string name="share_option_icloud_drive">上传到 iCloud Drive</string>
+    <string name="share_drive_select_target_folder">选择 iCloud Drive 上传位置</string>
+    <string name="share_drive_root_folder">iCloud Drive (根目录)</string>
     <string name="share_upload_confirm">开始上传</string>
     <string name="share_upload_cancel">取消</string>
     <string name="share_upload_enqueued">已加入 iCloud 上传队列</string>
+    <string name="share_upload_enqueued_photo">已加入 iCloud Photo 上传队列</string>
+    <string name="share_upload_enqueued_drive">已加入 iCloud Drive 上传队列</string>
     <!-- Shown when a shared URI's bytes could not be read (provider denied the grant, or the file vanished). The item is dropped instead of being queued as a row that could never upload. %1$s is the file name. -->
     <string name="share_upload_unreadable">无法读取文件：%1$s</string>
     <string name="share_upload_not_logged_in">请先登录 AClouDroid 账号</string>
     <string name="share_upload_login_now">去登录</string>
-    <string name="share_upload_no_items">未接收到可上传的照片或视频</string>
+    <string name="share_upload_no_items">未接收到可上传的文件</string>
     <string name="share_upload_location_hint">请开启「照片媒体位置权限」（非设备实时定位），以同步上传照片\视频的拍摄地点等EXIF信息</string>
     <string name="share_upload_grant_location">开启</string>
     <string name="documents_provider_label">iCloud</string>

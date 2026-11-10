@@ -131,7 +131,10 @@ object ShareUploadHandler {
                 "gif" -> "image/gif"
                 "mp4" -> "video/mp4"
                 "mov" -> "video/quicktime"
-                else -> if (mimeType?.startsWith("video/") == true) "video/mp4" else "image/jpeg"
+                else -> {
+                    val mapType = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+                    mapType ?: "application/octet-stream"
+                }
             }
         } else {
             mimeType
@@ -257,6 +260,59 @@ object ShareUploadHandler {
         }
 
         EnqueueResult(newlyAdded, skipped, unreadable)
+    }
+
+    data class DriveEnqueueResult(
+        val enqueuedCount: Int,
+        val dedupedCount: Int,
+        val revivedCount: Int,
+        val renamedCount: Int,
+        val unreadable: List<String>
+    )
+
+    /**
+     * Enqueues resolved share items into iCloud Drive repository.
+     */
+    suspend fun enqueueDriveShareItems(
+        driveRepository: app.acloudroid.qwq.feature.drive.data.DriveRepository,
+        items: List<ShareItem>,
+        targetFolderDrivewsId: String = app.acloudroid.qwq.feature.drive.data.db.DriveItemEntity.ROOT_DRIVEWSID,
+        targetFolderPath: String = "/"
+    ): DriveEnqueueResult = withContext(Dispatchers.IO) {
+        if (items.isEmpty()) return@withContext DriveEnqueueResult(0, 0, 0, 0, emptyList())
+
+        var enqueued = 0
+        var deduped = 0
+        var revived = 0
+        var renamed = 0
+        val unreadable = mutableListOf<String>()
+
+        for (item in items) {
+            val res = driveRepository.enqueueUpload(
+                uri = item.uri,
+                targetFolderDrivewsId = targetFolderDrivewsId,
+                targetFolderPath = targetFolderPath
+            ) { outcome ->
+                when (outcome) {
+                    is app.acloudroid.qwq.feature.drive.data.DriveRepository.EnqueueOutcome.Deduped -> deduped++
+                    is app.acloudroid.qwq.feature.drive.data.DriveRepository.EnqueueOutcome.Revived -> revived++
+                    is app.acloudroid.qwq.feature.drive.data.DriveRepository.EnqueueOutcome.Renamed -> renamed++
+                    is app.acloudroid.qwq.feature.drive.data.DriveRepository.EnqueueOutcome.Queued -> enqueued++
+                }
+            }
+            if (res.isFailure) {
+                Log.w(TAG, "Failed to enqueue drive item ${item.displayName}: ${res.exceptionOrNull()?.message}")
+                unreadable.add(item.displayName)
+            }
+        }
+
+        DriveEnqueueResult(
+            enqueuedCount = enqueued,
+            dedupedCount = deduped,
+            revivedCount = revived,
+            renamedCount = renamed,
+            unreadable = unreadable
+        )
     }
 
     private fun isMediaStoreOrLocalFileUri(uri: Uri): Boolean {

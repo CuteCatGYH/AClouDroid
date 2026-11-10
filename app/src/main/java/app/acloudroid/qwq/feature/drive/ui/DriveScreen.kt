@@ -1437,6 +1437,231 @@ private fun RenameDialog(
     )
 }
 
+private data class PickerCrumb(
+    val drivewsid: String,
+    val name: String
+)
+
+@Composable
+private fun HierarchicalFolderPickerDialog(
+    title: String,
+    confirmButtonText: String,
+    allContainers: List<DriveItemEntity>,
+    isLoading: Boolean = false,
+    initialFolderId: String = DriveItemEntity.ROOT_DRIVEWSID,
+    excludedFolderId: String? = null,
+    currentParentFolderId: String? = null,
+    onDismiss: () -> Unit,
+    onConfirm: (folderId: String, folderPath: String, folderName: String) -> Unit
+) {
+    val defaultRootName = "iCloud Drive"
+
+    var trail by remember(allContainers, initialFolderId) {
+        val containerMap = allContainers.associateBy { it.drivewsid }
+        val chain = mutableListOf<PickerCrumb>()
+        var curr: String? = initialFolderId
+        while (curr != null) {
+            if (curr == DriveItemEntity.ROOT_DRIVEWSID) {
+                chain.add(0, PickerCrumb(DriveItemEntity.ROOT_DRIVEWSID, defaultRootName))
+                break
+            }
+            val c = containerMap[curr]
+            if (c != null) {
+                chain.add(0, PickerCrumb(c.drivewsid, c.name))
+                curr = c.parentDrivewsid
+            } else {
+                chain.add(0, PickerCrumb(DriveItemEntity.ROOT_DRIVEWSID, defaultRootName))
+                break
+            }
+        }
+        if (chain.isEmpty()) {
+            chain.add(PickerCrumb(DriveItemEntity.ROOT_DRIVEWSID, defaultRootName))
+        }
+        mutableStateOf<List<PickerCrumb>>(chain)
+    }
+
+    val currentCrumb = trail.last()
+    val currentFolderId = currentCrumb.drivewsid
+    val currentFolderName = currentCrumb.name
+
+    val currentFolderPath = remember(trail) {
+        if (trail.size <= 1) "/" else "/" + trail.drop(1).joinToString("/") { it.name }
+    }
+
+    val childFolders = remember(allContainers, currentFolderId, excludedFolderId) {
+        val containerMap = allContainers.associateBy { it.drivewsid }
+        fun isExcluded(id: String): Boolean {
+            if (excludedFolderId == null) return false
+            var curr: String? = id
+            while (curr != null) {
+                if (curr == excludedFolderId) return true
+                if (curr == DriveItemEntity.ROOT_DRIVEWSID) break
+                curr = containerMap[curr]?.parentDrivewsid
+            }
+            return false
+        }
+
+        allContainers.filter { container ->
+            container.parentDrivewsid == currentFolderId && !isExcluded(container.drivewsid)
+        }.sortedBy { it.name.lowercase() }
+    }
+
+    val canConfirm = !isLoading && (currentParentFolderId == null || currentFolderId != currentParentFolderId)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (trail.size > 1) {
+                        IconButton(
+                            onClick = { if (trail.size > 1) trail = trail.dropLast(1) },
+                            modifier = Modifier.size(24.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "返回上级",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(4.dp))
+                    }
+                    Text(
+                        text = currentFolderPath,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        },
+        text = {
+            if (isLoading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(160.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(32.dp))
+                }
+            } else {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Active Target Banner
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Folder,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "当前选定目录: $currentFolderName",
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+
+                    if (childFolders.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(120.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "此目录下无子文件夹",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 240.dp)
+                        ) {
+                            items(childFolders, key = { it.drivewsid }) { subfolder ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable {
+                                            trail = trail + PickerCrumb(subfolder.drivewsid, subfolder.name)
+                                        }
+                                        .padding(vertical = 10.dp, horizontal = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Folder,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                        Spacer(Modifier.width(10.dp))
+                                        Text(
+                                            text = subfolder.name,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Icon(
+                                        imageVector = Icons.Default.ChevronRight,
+                                        contentDescription = "进入子目录",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(currentFolderId, currentFolderPath, currentFolderName) },
+                enabled = canConfirm
+            ) {
+                Text(confirmButtonText)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
+}
+
 @Composable
 private fun MoveDialog(
     item: DriveItemEntity,
@@ -1445,49 +1670,16 @@ private fun MoveDialog(
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit
 ) {
-    var selectedId by remember { mutableStateOf(currentFolderId) }
-    val candidates = remember(allContainers, item.drivewsid) {
-        allContainers.filter { it.drivewsid != item.drivewsid }
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("移动「${item.name}」到") },
-        text = {
-            LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
-                items(candidates, key = { it.drivewsid }) { container ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { selectedId = container.drivewsid }
-                            .padding(vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RadioButton(
-                            selected = selectedId == container.drivewsid,
-                            onClick = { selectedId = container.drivewsid }
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Icon(Icons.Default.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            text = container.name,
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onConfirm(selectedId) },
-                enabled = selectedId.isNotBlank() && selectedId != currentFolderId
-            ) { Text("移动") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+    HierarchicalFolderPickerDialog(
+        title = "移动「${item.displayName}」到",
+        confirmButtonText = "移动到此",
+        allContainers = allContainers,
+        initialFolderId = currentFolderId,
+        excludedFolderId = item.drivewsid,
+        currentParentFolderId = item.parentDrivewsid,
+        onDismiss = onDismiss,
+        onConfirm = { folderId, _, _ ->
+            onConfirm(folderId)
         }
     )
 }

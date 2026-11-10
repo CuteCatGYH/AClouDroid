@@ -85,6 +85,8 @@
 | [ISS-070](#iss-070-重试失败按钮不清旧错误文案状态与显示不一致) | **「重试失败」按钮不清旧错误文案**：`lastError` 跨状态残留，看着像没生效 | 🟡 P2 | Android / DAO + UI | ✅ 已修复 |
 | [ISS-071](#iss-071-分享菜单上传卡在排队中requireoriginal-改写第三方-uri-与失败静默入队) | **分享菜单上传卡在「排队中」**：`requireOriginal` 改写第三方 URI + 失败静默入队 | 🔴 P0 | Android / ShareUploadHandler + Repository | ✅ 已修复 |
 | [ISS-072](#iss-072-分享后上传不自动开始content-uri-trigger-污染一次性任务) | **分享后上传不自动开始**：`addContentUriTrigger` 污染一次性任务 | 🔴 P0 | Android / WorkManager | ✅ 已修复 |
+| [ISS-073](#iss-073-系统文件选择器-documentsprovider-对接与照片云盘二级目录浏览缩略图自愈与补零排序) | **系统文件选择器 (DocumentsProvider) 对接**：iCloud Photo / Drive 二级目录、防溢出时间戳、缩略图自愈与补零排序 | 🔴 P0 | Android / Provider + SAF | ✅ 已完成 |
+| [ISS-074](#iss-074-系统分享多目标扩展与层级目录索引选择器) | **系统分享多目标扩展与层级目录索引选择器**：支持分享至 Photo 与 Drive、微信式选项 Sheet 及层级目录选择器 | 🟠 P1 | Android / UI + Share + Drive | ✅ 已完成 |
 
 ---
 
@@ -6091,6 +6093,88 @@ enqueueUniquePeriodicWork(UNIQUE_WORK_NAME, UPDATE, PeriodicWork(...).setConstra
 > 强制触发只能验证「任务体逻辑对不对」，不能验证「任务会不会被调度」。
 > **凡是“该自动做的事没自动做”类问题，必须在不加任何外力的情况下复现与验证。**
 > 这与 AGENTS §9.1「实机验证优先于单测绿」是同一条纪律的延伸：绿的是逻辑，不是调度。
+
+---
+
+## ISS-073：系统文件选择器 (DocumentsProvider) 对接与照片/云盘二级目录浏览、缩略图自愈与补零排序
+
+**优先级**：🔴 P0
+**归属**：Android / Provider + Storage Access Framework (SAF) — `ICloudDocumentsProvider.kt`
+**发现时间**：2026-11 阶段功能
+
+### 现象
+1. 用户希望在系统文件选择器（DocumentsUI，即侧边栏显示“我的文件”、“云端硬盘”等的界面）中接入 AClouDroid / iCloud，且在根目录下展现 “iCloud Photo” 和 “iCloud Drive” 两个虚拟文件夹。
+2. 初始实现测试中：
+   - `iCloud Photo` 出现列表不显示（显示为空白/未加载）。
+   - 缩略图未能自动加载，需要手动点击图片右上角预览按钮触发下载后才产生缩略图；`iCloud Drive` 缩略图加载极慢。
+   - `iCloud Photo` 目录下的月份文件夹仅显示到 `2026年9月`，`2026年10月` 与 `2026年11月` “消失不见”。
+
+### 根因
+1. **时间戳量纲溢出（导致 DocumentsUI 日期解析崩溃）**：
+   `PhotoAssetEntity.assetDate` 本身为毫秒级时间戳（如 `1794305640000L`），代码中误再次乘以 `1000L` 输出了 16 位时间戳（如 `1794305640000000L`，折算为公元 58850 年），导致系统的 DocumentsUI 在解析 `COLUMN_LAST_MODIFIED` 时溢出，列表渲染异常。
+2. **全量平铺导致 IPC 载入超时**：
+   原实现在 `doc_photos` 下单次向 Cursor 输出 6000+ 照片行，导致 IPC 传输与 DocumentsUI 界面卡顿。
+3. **文本字典序与自然时间序错位**：
+   月份文件夹未补零（`2026年9月` vs `2026年10月`）。DocumentsUI 默认按 `COLUMN_DISPLAY_NAME` 字典序排序时，由于 ASCII 码 `'1' < '9'`，`2026年10月` 与 `2026年11月` 排在了 `2026年2月` 前面，使得用户在 9 月下方寻找 10/11 月时产生“消失”误解。
+4. **缩略图 15 分钟签名过期未自愈 & Drive 锁内盲等**：
+   - 数据库中保存的 `thumbUrl` 字符串非空，但 CDN 签名 15 分钟后已过期（403/410）。旧代码下载失败后直接返回 null 未尝试 `refreshUrlsForMaster` 重新签发；只有点击预览触发 `openPhotoDocument` 时才强制刷新了签名。
+   - `getDriveThumbnailFile` 检查已缓存图片前误进入了 `thumbnailSemaphore` 信号量互斥锁，造成高并发 Binder 线程盲等。
+
+### 修复方案
+1. **DocumentsProvider 架构落地**：
+   实现 `ICloudDocumentsProvider` 并注册 Manifest（`authorities="${applicationId}.documents"`、`MANAGE_DOCUMENTS` 权限），导出 `doc_root`、`doc_photos`、`doc_drive` 树形节点。
+2. **年月补零格式化与时间戳修复**：
+   - 月份文件夹统一为 `%d年%02d月`（如 `2026年09月`、`2026年10月`、`2026年11月`），确保文本字典序与时间轴一致。
+   - 显式为年月文件夹写入 `COLUMN_LAST_MODIFIED` 时间戳。
+   - 修正照片行 `COLUMN_LAST_MODIFIED` 时间戳判断（`assetDate < 10_000_000_000L ? assetDate * 1000L : assetDate`）。
+3. **缩略图自愈与快查通道**：
+   - `getPhotoThumbnailFile` 增加 `repo.refreshUrlsForMaster(asset.masterId)` 签名过期自愈重试通道，针对视频严格仅使用 `thumbUrl` 封面。
+   - `getDriveThumbnailFile` 在进入互斥锁之前进行 `isPlausiblePreview` 锁外快查，已缓存缩略图实现 0ms 秒回。
+
+### 验证
+- **单测**：`382 passed, 0 failed`。
+- **实机**：Z Fold8 侧边栏完美显示 **iCloud** 节点，点入展现 `iCloud Photo` 与 `iCloud Drive`；`2026年09月`、`2026年10月`、`2026年11月` 依序排列；所有照片/视频缩略图自动呈现且支持流式预览下载。
+
+---
+
+## ISS-074：系统分享多目标扩展与层级目录索引选择器
+
+**优先级**：🟠 P1
+**归属**：Android / ShareUpload + Drive UI — `ShareUploadActivity.kt` & `DriveScreen.kt` & `ShareUploadHandler.kt`
+**发现时间**：2026-11 阶段功能
+
+### 现象
+1. 原系统分享面板（`ShareUploadActivity`）仅针对 `image/*` 与 `video/*` 注册意图过滤器，并且只支持上传到 iCloud Photo，无法分享文档、压缩包等通用文件至 iCloud Drive。
+2. 当分享非媒体文件或希望自定义保存至 iCloud Drive 特定子目录时，无法选择目标文件夹（原选择器为平铺单选框，且包含全部目录无树形层级导航，无法直观层级穿透）。
+3. iCloud Drive 内部的文件夹「移动」功能（`MoveDialog`）同样采用平铺列表，目录层级多时挑选极为困难，缺少层级返回与树状穿透能力。
+
+### 根因
+1. **分享意图过滤与目标单一**：
+   - Manifest 中 `ShareUploadActivity` 仅声明了 `image/*` 和 `video/*`，系统分享菜单排除了通用文件。
+   - 分享逻辑仅绑定了 Photo 相册的入队与 Worker 触发。
+2. **选择器 UI 为单一平铺结构**：
+   - 之前的 `DriveFolderPickerDialog` 与 `MoveDialog` 直接拉取全量 `allContainers` 并一维平铺渲染，未实现按父子节点 `parentDrivewsid` 筛选的层级式索引导航。
+
+### 修复方案
+1. **Manifest 与文件类型解封**：
+   - `ShareUploadActivity` 更新为 `<data android:mimeType="*/*" />`，入口显示 Label 更名为 `发送到 iCloud`。
+   - `ShareUploadHandler` 支持非媒体文件的 MIME 动态解析（结合 `MimeTypeMap`），并新增 `enqueueDriveShareItems` 实现文件入队及 `DriveUploadWorker` 调度。
+2. **微信样式 Action Sheet 选项菜单**：
+   - `ShareUploadBottomSheet` 判定 shared items：
+     - 若全为照片/视频：展示 **「上传到 iCloud Photo」** 与 **「上传到 iCloud Drive」** 两个选项。
+     - 若包含非媒体文件：仅展示 **「上传到 iCloud Drive」** 选项。
+3. **层级式目录索引选择器 (`HierarchicalFolderPickerDialog`)**：
+   - 引入动态栈 `trail: List<PickerCrumb>` 管理导航树。
+   - 顶部实时渲染面包屑路径（如 `/工作/2026项目`），且提供 `<` 按钮支持返回上级目录。
+   - 中间呈现高亮选定框 `当前选定目录: [当前文件夹名称]`。
+   - 下方仅列出当前目录下的子文件夹，点击可深入穿透；`MoveDialog` 中自动排除自身及子孙文件夹以防循环嵌套。
+   - 一键确认：用户确认后将文件精准发送/移动至当前层级目录。
+
+### 验证
+- **单测**：`382 passed, 0 failed`。
+- **实机**：系统相册分享照片可自由选择相册库或选择 Drive 特定子目录上传；系统文件管理器分享 PDF 仅显示 iCloud Drive，弹窗层级导航穿透正常且确认保存成功；云盘内部「移动」文件夹层级导航完美生效。
+
+
 
 
 

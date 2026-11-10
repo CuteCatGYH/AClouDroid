@@ -674,6 +674,7 @@ CWS streaming upload failed with HTTP 413: <html><title>413 Request Entity Too L
 - [x] 分享 / 导出：`FileProvider` + `ACTION_SEND`
   - Manifest 配置权威名 `app.acloudroid.qwq.fileprovider` 及 `file_paths.xml`
   - `DriveViewModel.shareItem` 生成带读授权 Safe URI 并发出 `Intent.ACTION_SEND` 呼出系统原生分享 chooser
+  - **系统分享多目标扩展与层级目录索引选择器**（[ISS-074](CHANGELOG_ISSUES.md#iss-074-系统分享多目标扩展与层级目录索引选择器)）：`ShareUploadActivity` 通用文件分享扩展、微信式选项 Action Sheet 及与云盘「移动」共享的 `HierarchicalFolderPickerDialog` 层级式目录选择器
 
 ---
 
