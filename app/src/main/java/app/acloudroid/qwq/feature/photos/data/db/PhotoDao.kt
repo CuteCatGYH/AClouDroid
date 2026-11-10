@@ -15,6 +15,9 @@ interface PhotoDao {
     @Query("SELECT * FROM photo_assets WHERE isHidden = 0 ORDER BY assetDate DESC, id ASC")
     fun getAllPhotos(): Flow<List<PhotoAssetEntity>>
 
+    @Query("SELECT * FROM photo_assets WHERE isHidden = 0 ORDER BY assetDate DESC, id ASC")
+    suspend fun getAllPhotosList(): List<PhotoAssetEntity>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertAll(photos: List<PhotoAssetEntity>)
 
@@ -265,8 +268,26 @@ interface PhotoDao {
     suspend fun newestInMonth(yearMonth: Int): PhotoAssetEntity?
 
     /** Distinct months currently present, so the index can be rebuilt wholesale after a backfill. */
-    @Query("SELECT DISTINCT yearMonth FROM photo_assets WHERE isHidden = 0 AND yearMonth != 0")
+    @Query("SELECT DISTINCT yearMonth FROM photo_assets WHERE isHidden = 0 AND yearMonth != 0 ORDER BY yearMonth DESC")
     suspend fun distinctYearMonths(): List<Int>
+
+    @Query(
+        """
+        SELECT * FROM photo_assets
+        WHERE isHidden = 0 AND yearMonth = :yearMonth
+        ORDER BY assetDate DESC, id ASC
+        """
+    )
+    suspend fun getPhotosInMonth(yearMonth: Int): List<PhotoAssetEntity>
+
+    @Query(
+        """
+        SELECT * FROM photo_assets
+        WHERE isHidden = 0 AND yearMonth = 0
+        ORDER BY assetDate DESC, id ASC
+        """
+    )
+    suspend fun getUnbucketedPhotos(): List<PhotoAssetEntity>
 
     /** Rows written before the v4 migration (and not yet reached by the scanner). */
     @Query("SELECT id, assetDate FROM photo_assets WHERE yearMonth = 0")

@@ -81,6 +81,18 @@
             </intent-filter>
         </provider>
 
+        <!-- DocumentsProvider for System File Picker (DocumentsUI / Storage Access Framework) -->
+        <provider
+            android:name=".provider.ICloudDocumentsProvider"
+            android:authorities="${applicationId}.documents"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS">
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+            </intent-filter>
+        </provider>
+
         <!-- Drive download notification cancel receiver -->
         <receiver
             android:name=".feature.drive.data.DriveDownloadReceiver"
