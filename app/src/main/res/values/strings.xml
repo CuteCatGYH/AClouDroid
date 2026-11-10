@@ -5,6 +5,8 @@
     <string name="share_upload_confirm">开始上传</string>
     <string name="share_upload_cancel">取消</string>
     <string name="share_upload_enqueued">已加入 iCloud 上传队列</string>
+    <!-- Shown when a shared URI's bytes could not be read (provider denied the grant, or the file vanished). The item is dropped instead of being queued as a row that could never upload. %1$s is the file name. -->
+    <string name="share_upload_unreadable">无法读取文件：%1$s</string>
     <string name="share_upload_not_logged_in">请先登录 AClouDroid 账号</string>
     <string name="share_upload_login_now">去登录</string>
     <string name="share_upload_no_items">未接收到可上传的照片或视频</string>

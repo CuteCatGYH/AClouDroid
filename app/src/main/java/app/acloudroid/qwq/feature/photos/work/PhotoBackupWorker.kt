@@ -182,6 +182,16 @@ class PhotoBackupWorker(
         const val IMMEDIATE_WORK_NAME = "photo_backup_immediate_work"
         private const val MAX_ATTEMPTS = 3
 
+        /**
+         * Schedules a backlog drain.
+         *
+         * @param userInitiated true when the *user* just asked for these bytes to go up: the share
+         *   sheet's "开始上传" button, or the queue sheet's "立即上传". Those two are explicit
+         *   "现在传" instructions, so they must not inherit the background policy's
+         *   battery/metered-network gates — doing so left a shared photo sitting in the queue until
+         *   the user found the backup screen and pressed "立即上传" *again*. That second press was
+         *   never a designed step; it was the background constraints silently refusing to run.
+         */
         fun scheduleBackup(context: Context) {
             val appSettings = (context.applicationContext as? IClouDroidApp)?.container?.appSettings
             val isForceUpload = appSettings?.isForceUploadActive() == true
@@ -194,20 +204,57 @@ class PhotoBackupWorker(
             val intervalMinutes = appSettings?.periodicBackupInterval?.value?.coerceAtLeast(0L) ?: 0L
             val isImmediateMediaTrigger = intervalMinutes == 0L
 
-            val constraintsBuilder = Constraints.Builder()
+            /**
+             * Background constraints: network + the user's charging / battery policy.
+             *
+             * Deliberately **without** a content-URI trigger — see [mediaTriggerConstraints].
+             */
+            fun backgroundConstraints(): Constraints = Constraints.Builder()
                 .setRequiredNetworkType(networkType)
                 .setRequiresCharging(requireCharging)
                 .setRequiresBatteryNotLow(requireBatteryNotLow)
+                .build()
 
-            if (isImmediateMediaTrigger && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                constraintsBuilder
-                    .addContentUriTrigger(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true)
-                    .addContentUriTrigger(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true)
-                    .setTriggerContentUpdateDelay(2, TimeUnit.SECONDS)
-                    .setTriggerContentMaxDelay(5, TimeUnit.SECONDS)
+            /**
+             * Constraints for the *periodic* job in "立即" mode: same gates plus a MediaStore
+             * content trigger, so a newly captured photo starts a backup without waiting out the
+             * 15-minute interval.
+             *
+             * ## Why this must NOT be reused for the one-shot request
+             *
+             * `addContentUriTrigger` is not an "extra wake-up hint" — it is a **trigger source**.
+             * A job registered with one is *only* eligible once a monitored URI actually changes.
+             * The one-shot job used to share this constraints object, which broke every path whose
+             * bytes never touch MediaStore:
+             *
+             *  - a photo shared into the app is a `file://` in `cache/share_uploads/`, so no
+             *    MediaStore row is ever written;
+             *  - pressing "立即上传" re-enqueued (REPLACE) another job with the same trigger.
+             *
+             * Measured on device, `dumpsys jobscheduler` showed the job sitting with
+             * `Num Required Constraints: 0` — nothing unsatisfied, simply never triggered — while
+             * the queue sheet sat on "排队中" indefinitely. Forcing it with
+             * `cmd jobscheduler run -f` uploaded immediately, which is what confirmed the trigger,
+             * not the constraints, was the blocker.
+             */
+            fun mediaTriggerConstraints(): Constraints {
+                val builder = Constraints.Builder()
+                    .setRequiredNetworkType(networkType)
+                    .setRequiresCharging(requireCharging)
+                    .setRequiresBatteryNotLow(requireBatteryNotLow)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                    builder
+                        .addContentUriTrigger(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true)
+                        .addContentUriTrigger(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, true)
+                        .setTriggerContentUpdateDelay(2, TimeUnit.SECONDS)
+                        .setTriggerContentMaxDelay(5, TimeUnit.SECONDS)
+                }
+                return builder.build()
             }
 
-            val constraints = constraintsBuilder.build()
+            // One-shot: "check the queue now". Explicit `CHANGED`/`APPEND` style work, so it takes
+            // plain constraints and is eligible as soon as the network gates are met.
+            val constraints = backgroundConstraints()
 
             val immediateRequest = OneTimeWorkRequestBuilder<PhotoBackupWorker>()
                 .setConstraints(constraints)
@@ -222,7 +269,7 @@ class PhotoBackupWorker(
             if (isImmediateMediaTrigger) {
                 BackupAlarmScheduler.cancel(context)
                 val periodicRequest = PeriodicWorkRequestBuilder<PhotoBackupWorker>(15L, TimeUnit.MINUTES)
-                    .setConstraints(constraints)
+                    .setConstraints(mediaTriggerConstraints())
                     .build()
 
                 WorkManager.getInstance(context).enqueueUniquePeriodicWork(

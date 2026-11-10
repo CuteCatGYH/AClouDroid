@@ -83,6 +83,8 @@
 | [ISS-068](#iss-068-照片备份清空队列后已上传文件被重复流式上传流量浪费) | **照片备份「清空队列」后已上传文件被重复上传**：去重事实存在可删的队列行上 | 🔴 P0 | Android / Room + Repository + Worker | ✅ 已修复 |
 | [ISS-069](#iss-069-上传连续失败三次后文件被永久卡住不再重试权限声明冒充已上传) | **上传连续失败三次后文件被永久卡住**："已写指纹"被当成"已上传" | 🔴 P0 | Android / Room + Repository | ✅ 已修复 |
 | [ISS-070](#iss-070-重试失败按钮不清旧错误文案状态与显示不一致) | **「重试失败」按钮不清旧错误文案**：`lastError` 跨状态残留，看着像没生效 | 🟡 P2 | Android / DAO + UI | ✅ 已修复 |
+| [ISS-071](#iss-071-分享菜单上传卡在排队中requireoriginal-改写第三方-uri-与失败静默入队) | **分享菜单上传卡在「排队中」**：`requireOriginal` 改写第三方 URI + 失败静默入队 | 🔴 P0 | Android / ShareUploadHandler + Repository | ✅ 已修复 |
+| [ISS-072](#iss-072-分享后上传不自动开始content-uri-trigger-污染一次性任务) | **分享后上传不自动开始**：`addContentUriTrigger` 污染一次性任务 | 🔴 P0 | Android / WorkManager | ✅ 已修复 |
 
 ---
 
@@ -5936,6 +5938,159 @@ formatFileSize(task.fileSize) + if (task.lastError != null) " · ${task.lastErro
 | `:app:testDebugUnitTest` | ✅ 364 passed / 0 failed（原 357 + 新增 7）|
 | `:app:assembleDebug` | ✅ |
 | 实机点击验证 | ⏳ 待测 |
+
+---
+
+## ISS-071：分享菜单上传卡在「排队中」（`requireOriginal` 改写第三方 URI + 失败静默入队）
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🔴 P0（分享功能完全不可用，且 UI 表现为“在上传”而非“失败”）|
+| **归属** | Android / `ShareUploadHandler` + `PhotoRepository` |
+| **状态** | ✅ 已修复 |
+
+### 现象
+
+从系统分享菜单把照片发到 App，备份队列里出现一条永久「排队中」的行。但照片实际上
+已经通过相册自动备份上传成功了，所以在 iCloud 端比对文件信息完全正确。
+
+### 日志证据
+
+```
+17:43:11.665 E/ShareUploadHandler: Failed to copy transient share stream for
+  content://com.sec.android.gallery3d.fileprovider/.../20261110_174225.jpg
+java.lang.SecurityException: Permission Denial: reading
+  com.samsung.android.gallery.app.provider.GalleryFileProvider uri
+  content://.../20261110_174225.jpg?requireOriginal=1
+  requires the provider be exported, or grantUriPermission()
+17:43:11.697 I/ShareUploadHandler: Enqueued 1 shared items into upload_queue
+```
+
+注意两个 pid 不同：失败发生在分享进程，而成功上传发生在另一个进程的相册备份路径。
+同一张照片因此有**两条互不相干的队列行**。
+
+### 根因（三层叠加）
+
+| # | 缺陷 | 说明 |
+| --- | --- | --- |
+| A | `setRequireOriginal` 无差别调用 | 它把 URI 改写成 `...?requireOriginal=1`。分享 Intent 授予的是**原始 URI** 的读权限，第三方 `FileProvider` 把改写后的 URI 当成另一个未授权的 URI 并拒绝 |
+| B | 复制失败仍入队 | `copyStreamToCache` 返回 null 后回落到 `item.uri.toString()`，把一条**已经确定读不了**的 URI 写进队列（临时授权随分享 Activity 销毁而失效）|
+| C | 打开 FD 失败就写回 `PENDING` | `markTasksUploading` 只在 `status='PENDING'` 时生效，而失败路径立刻把行改回 `PENDING`，同一批的另一个协程又领到它 —— `retryCount` 无法累积，行永远在 PENDING 打转 |
+
+### 关键判断：与缩略图分辨率无关
+
+最初假设是“新的 512px 缩略图被苹果拒收”。日志直接否定了它 —— 同一份派生图在其他轮次上传成功：
+
+```
+upload ok master=ASqSyFAVlnUnI6iJp4sueIfUW4kt ... thumb=true med=true
+```
+
+`resJPEGThumbRes` / `resJPEGMedRes` 都正常入库。**上传请求本身从未失败，失败的是“读文件”。**
+
+### 修复
+
+| 位置 | 改动 |
+| --- | --- |
+| `ShareUploadHandler` | 新增 `isMediaStoreAuthority`，`requireOriginal` **只对 MediaProvider 自己的 authority 生效**；复制失败时降级重试一次原始 URI |
+| `ShareUploadHandler` | 复制彻底失败 → **丢弃该项并记录到 `EnqueueResult.unreadable`**，不再入队 |
+| `PhotoRepository` | 打开 FD 遇 `SecurityException` → `permanentlyUnreadable = true` → 立即置 `FAILED`，不再重试 |
+| `ShareUploadActivity` | 按 `EnqueueResult` 分别提示「已加入队列」/「无法读取文件：xxx」 |
+
+### 验证
+
+| 项 | 结果 |
+| --- | --- |
+| 新增 `ShareUploadAuthorityTest` | ✅ 7 passed（三星 FileProvider / Google Photos / 空 authority / 子串误匹配）|
+| `:app:testDebugUnitTest` | ✅ 379 passed / 0 failed |
+| 实机正常路径 | ✅ 复制 4566496B（`unredacted=true`，GPS 保住）→ 入队 → `upload ok thumb=true med=true gps=true` |
+| 实机失败路径 | ✅ 不存在的 MediaStore ID → 两级重试均失败 → `Dropping shared item`，**无队列行产生** |
+
+> [!CAUTION]
+> **分享 URI 的读权限绑定在「分享 Activity + 接收方 uid」上。** debug 与 release 是两个 uid，
+> 所以同一个分享 Intent 在 debug 包可能失败、在正式包却成功。这种差异极具误导性 ——
+> 它是**暴露条件**，不是缺陷本身：只要 provider 或授权范围变化，正式包同样会踩到 A/B/C。
+
+---
+
+## ISS-072：分享后上传不自动开始（`addContentUriTrigger` 污染一次性任务）
+
+| 项 | 内容 |
+| --- | --- |
+| **优先级** | 🔴 P0（用户必须再手动点一次「立即上传」，与产品语义相反）|
+| **归属** | Android / `PhotoBackupWorker` |
+| **状态** | ✅ 已修复 |
+
+### 现象
+
+点完分享面板的「开始上传」后，队列行一直停在「排队中」，必须进备份页再点一次「立即上传」。
+用户设置的约束完全正常（常驻后台开、周期备份「立即」、不要求充电、连着 WiFi）。
+
+### 诊断的关键一步：读 `dumpsys`，不要读代码猜
+
+```
+JOB #u0a562/65: app.acloudroid.qwq.debug/...SystemJobService
+    Requires: charging=false batteryNotLow=false deviceIdle=false
+    Trigger content URIs:
+        1 content://media/external/images/media
+        1 content://media/external/video/media
+    Trigger update delay: +2s0ms
+#u0a562/65 -> Num Required Constraints: 0
+```
+
+**`Num Required Constraints: 0`** —— 一条约束都不缺，却始终不执行。这个矛盾直接指向 trigger。
+
+### 根因
+
+`scheduleBackup()` 里同一个 `constraints` 对象被同时用于**一次性**和**周期**两个请求：
+
+```kotlin
+if (isImmediateMediaTrigger && SDK >= N) {
+    constraintsBuilder.addContentUriTrigger(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, true)
+}
+val constraints = constraintsBuilder.build()
+
+enqueueUniqueWork(IMMEDIATE_WORK_NAME, REPLACE, OneTimeWork(...).setConstraints(constraints))
+                                                   // ↑ 也带上了 trigger
+enqueueUniquePeriodicWork(UNIQUE_WORK_NAME, UPDATE, PeriodicWork(...).setConstraints(constraints))
+```
+
+`addContentUriTrigger` **不是「额外的唤醒提示」，而是「触发源」** —— 注册了它的 Job
+只在被监控的 URI 真的变化时才可执行。而分享进来的文件在 `cache/share_uploads/`，
+**永远不会写入 MediaStore**，所以那个 trigger 永远等不到。
+
+点「立即上传」也救不了：它走 `ExistingWorkPolicy.REPLACE`，只是又造了一个在等同样东西的 Job。
+
+### 修复
+
+把约束拆成两个函数：
+
+| 函数 | 用途 | content trigger |
+| --- | --- | --- |
+| `backgroundConstraints()` | 一次性任务（「现在就检查队列」）| ❌ 无 |
+| `mediaTriggerConstraints()` | 周期任务（「新拍照片自动备份」）| ✅ 有 |
+
+`addContentUriTrigger` 留在周期任务上是**对的** —— 拍照后能立刻触发备份而不必等满 15 分钟。
+它只是不该污染一次性任务。
+
+### 验证
+
+```
+18:12:25.439  Enqueued 1 shared items (skipped=0)
+18:12:25.439  Scheduled PhotoBackupWorker
+18:12:25.486  Processing upload for: 20261110_174225.heic (id=16)   <- 47ms
+18:12:28.254  upload ok ... thumb=true med=true gps=true duplicate=true
+18:12:28.254  Successfully uploaded 20261110_174225.heic!
+```
+
+**从点「开始上传」到 Worker 开始处理仅 47ms**，全程无任何强制触发。
+
+> [!CAUTION]
+> **本轮最大的教训是验证方法本身错了。** 第一次验证用 `cmd jobscheduler run -f` 强制触发，
+> 它恰恰**跳过了 trigger 条件**，于是“证明”了上传链路可用 —— 却把真正的阻塞点完整地掩盖了。
+>
+> 强制触发只能验证「任务体逻辑对不对」，不能验证「任务会不会被调度」。
+> **凡是“该自动做的事没自动做”类问题，必须在不加任何外力的情况下复现与验证。**
+> 这与 AGENTS §9.1「实机验证优先于单测绿」是同一条纪律的延伸：绿的是逻辑，不是调度。
 
 
 

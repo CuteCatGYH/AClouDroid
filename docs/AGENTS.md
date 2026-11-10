@@ -866,6 +866,23 @@ val code = (error.cause as? HttpDataSource.InvalidResponseCodeException)?.respon
 
 **不要编译通过 + 单测绿就宣布完成。** 本项目多次出现过「编译成功、单测全过」但实机崩溃的案例（ISS-013、ISS-016 均如此）。
 
+> [!CAUTION]
+> **验证手段本身也可能掩盖缺陷。**
+> [ISS-072](CHANGELOG_ISSUES.md#iss-072-分享后上传不自动开始content-uri-trigger-污染一次性任务) 中，
+> 用 `cmd jobscheduler run -f`（或 `am force-stop` 后强拉）成功跑完了任务，于是“证明”了链路可用 ——
+> 但那个参数**恰好绕过了真正的阻塞点**（content trigger），反而把问题藏得更深。
+>
+> 判定准则：
+>
+> | 问题类型 | 合法验证方式 | 不合法 |
+> | --- | --- | --- |
+> | 「逻辑对不对」 | 单测 / 强制触发 / 直接调用 | — |
+> | **「该自动做的事会不会自动做」** | **不加任何外力，从头走一遍，只看日志时间戳** | 强制触发、手动补一步、`-f` 参数 |
+>
+> 凡是调度类、时机类、后台类问题，**必须观察“不干预”下的行为**。
+> 当 `dumpsys jobscheduler` 报 `Num Required Constraints: 0` 却仍不执行时，
+> 不要再去看代码猜 —— 去看 `Trigger content URIs`（见 ISS-072）。
+
 修改完毕后必须：
 1. `../scripts/build_aar.sh`（如改了 Go）
 2. `gradle_build(":app:assembleDebug testDebugUnitTest")`
@@ -1219,6 +1236,31 @@ totalDragX > 0  →  右滑  →  上一张
   用户在 UI 上看不到“这次扫描没有生效”。候选：在设置页展示最近一次对账结果。
 - [x] **`refreshUrlsForMasters()` 批量刷新入口消费** —— 已在 `PhotosViewModel.observeMonth` 完成月份级批量预热，配合 `database.withTransaction` 解决滑动/跳转卡顿，见 [ISS-046](CHANGELOG_ISSUES.md#iss-046画廊缩略图加载主线程掉帧与滑动胶囊跳转重绘轰炸治理)
 - [ ] 列表项进入“本月无新照片”状态后可减少索引重建频率
+
+### 上传调度的两条硬规则（ISS-071 / ISS-072）
+
+改 `PhotoBackupWorker.scheduleBackup()` 或 `ShareUploadHandler` 前必读：
+
+**① `addContentUriTrigger` 是「触发源」，不是「唤醒提示」。**
+注册了它的 Job **只在被监控 URI 变化时才可执行**。所以：
+
+| 任务 | 能不能带 content trigger |
+| --- | --- |
+| 周期任务（新拍照片自动备份）| ✅ 该带 |
+| **一次性任务（分享进队 / 点立即上传）** | ❌ **绝对不能** |
+
+分享进来的文件在 `cache/share_uploads/`，**永远不写 MediaStore**，带上 trigger 就是永久挂起。
+约束必须拆成 `backgroundConstraints()` 与 `mediaTriggerConstraints()` 两个函数，不得共用一个对象。
+
+**② `setRequireOriginal` 只能用在 MediaProvider 自己的 URI 上。**
+它会把 URI 改写成 `...?requireOriginal=1`，而分享 Intent 授予的是**原始 URI** 的读权限，
+第三方 `FileProvider`（三星相册、Google Photos）直接报 `Permission Denial`。
+判定用 `ShareUploadHandler.isMediaStoreAuthority()`，不要用 `scheme == content` 一刀切。
+
+> [!CAUTION]
+> **复制/读取失败时绝不能“降级成原始 URI 照样入队”。**
+> 那条 URI 的授权随分享 Activity 销毁而失效，worker 永远读不到 —— 表现为「排队中」而非「失败」。
+> 读不了就是读不了：丢弃该项并告知用户，比留一个永远不会完成的幽灵行诚实得多。
 
 ### Phase 3 建议偿还的技术债
 

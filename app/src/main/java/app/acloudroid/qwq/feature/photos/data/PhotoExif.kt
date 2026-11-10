@@ -335,12 +335,24 @@ object LocalExifExtractor {
             val origH = options.outHeight
 
             if (origW > 0 && origH > 0) {
-                // 1. Generate 320px Thumbnail JPEG
-                val thumbBitmap = decodeSampledBitmap(context, uri, origW, origH, 320, orientation)
+                // 1. Generate the Thumbnail JPEG (`resJPEGThumbRes`).
+                //
+                // This is the derivative every Apple client paints in its grid, so its long edge
+                // is what "how sharp does my backup look" actually means. The 320px we shipped
+                // before was visibly soft next to a device-captured asset, whose own
+                // `resJPEGThumbRes` measures ~311x553 (video) to ~384 (photo). 512 sits just above
+                // that range: still small enough to stay inside what iCloud accepts for this
+                // field, large enough to survive a 3x-density full-width tile.
+                //
+                // Quality is 85 to match the medium derivative. Raising the edge while leaving a
+                // JPEG quality of 80 mostly buys ringing artefacts, not sharpness.
+                val thumbBitmap = decodeSampledBitmap(
+                    context, uri, origW, origH, THUMB_MAX_DIM, orientation
+                )
                 if (thumbBitmap != null) {
                     val thumbFile = java.io.File(outDir, "thumb_${System.currentTimeMillis()}_${java.util.UUID.randomUUID()}.jpg")
                     java.io.FileOutputStream(thumbFile).use { out ->
-                        thumbBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, out)
+                        thumbBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, out)
                     }
                     thumbW = thumbBitmap.width
                     thumbH = thumbBitmap.height
@@ -348,8 +360,14 @@ object LocalExifExtractor {
                     thumbBitmap.recycle()
                 }
 
-                // 2. Generate 2048px Medium JPEG
-                val medBitmap = decodeSampledBitmap(context, uri, origW, origH, 2048, orientation)
+                // 2. Generate 2048px Medium JPEG (`resJPEGMedRes`).
+                //
+                // Matches the measured size of Apple's own medium derivative for a 4000x3000
+                // capture (1536x2048). Do not exceed 2048: this field is also what the full-screen
+                // viewer and the system picker fall back to.
+                val medBitmap = decodeSampledBitmap(
+                    context, uri, origW, origH, MED_MAX_DIM, orientation
+                )
                 if (medBitmap != null) {
                     val medFile = java.io.File(outDir, "med_${System.currentTimeMillis()}_${java.util.UUID.randomUUID()}.jpg")
                     java.io.FileOutputStream(medFile).use { out ->
@@ -723,19 +741,21 @@ object LocalExifExtractor {
 
             val outDir = java.io.File(context.cacheDir, "upload_derivatives").apply { mkdirs() }
 
-            val thumb = scaleDown(upright, 320)
+            // Same long edge and quality as the photo thumbnail: a poster frame is a poster
+            // frame, and Apple paints both in the same grid at the same size.
+            val thumb = scaleDown(upright, THUMB_MAX_DIM)
             val thumbFile = java.io.File(
                 outDir,
                 "vthumb_${System.currentTimeMillis()}_${java.util.UUID.randomUUID()}.jpg"
             )
             java.io.FileOutputStream(thumbFile).use {
-                thumb.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, it)
+                thumb.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, it)
             }
             val thumbW = thumb.width
             val thumbH = thumb.height
             if (thumb !== upright) thumb.recycle()
 
-            val med = scaleDown(upright, 2048)
+            val med = scaleDown(upright, MED_MAX_DIM)
             val medFile = java.io.File(
                 outDir,
                 "vmed_${System.currentTimeMillis()}_${java.util.UUID.randomUUID()}.jpg"
@@ -772,6 +792,28 @@ object LocalExifExtractor {
         val h = Math.max(1, Math.round(source.height * scale))
         return android.graphics.Bitmap.createScaledBitmap(source, w, h, true)
     }
+
+    /**
+     * Long edge of the JPEG thumbnail uploaded as `resJPEGThumbRes`.
+     *
+     * This is the frame every Apple client paints in its grid, so it is the only derivative whose
+     * sharpness a user actually sees. Apple's own records carry ~311x553 (a video poster frame) up
+     * to `384` (a photo) here; 320 - what we used to write - read as visibly soft beside them. 512
+     * stays inside the range iCloud accepts for this field while giving a 3x-density full-width
+     * tile enough pixels.
+     *
+     * Both photos and videos use it: a video's poster frame is the same image pipeline.
+     */
+    const val THUMB_MAX_DIM = 512
+
+    /**
+     * Long edge of the JPEG medium derivative uploaded as `resJPEGMedRes`.
+     *
+     * Matches Apple's own medium derivative, measured at 1536x2048 for a 4000x3000 capture with
+     * `orientation = 6`. Do not raise this: it is also what the full-screen viewer and the system
+     * picker fall back to, so every extra pixel is a multiplied transfer cost.
+     */
+    const val MED_MAX_DIM = 2048
 
     /** Maps a movie rotation hint (degrees) onto an EXIF orientation value. */
     private fun rotationToOrientation(rotation: Int): Int = when (rotation) {

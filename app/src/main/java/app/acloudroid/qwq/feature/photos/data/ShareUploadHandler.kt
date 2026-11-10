@@ -163,73 +163,100 @@ object ShareUploadHandler {
     }
 
     /**
+     * Result of [enqueueShareItems].
+     *
+     * [unreadable] is not decoration: a share URI whose bytes could not be copied must **not**
+     * become a queue row. Doing so produced a row that the worker could never read (the transient
+     * grant dies with the share Activity), so it cycled `PENDING -> fail -> PENDING` forever and the
+     * backup sheet showed it as permanently "uploading" while nothing was uploading.
+     */
+    data class EnqueueResult(
+        val enqueued: Int,
+        val skippedAlreadyQueued: Int,
+        val unreadable: List<String>
+    )
+
+    /**
      * Enqueues resolved share items into database and triggers background worker.
      *
      * Transitive/external content URIs are copied into local cache directory to ensure
      * background WorkManager tasks retain read permissions even after the share Activity finishes.
+     * An item that cannot be copied is reported in [EnqueueResult.unreadable] and **dropped**.
      */
     suspend fun enqueueShareItems(
         context: Context,
         uploadQueueDao: UploadQueueDao,
         items: List<ShareItem>
-    ): Int = withContext(Dispatchers.IO) {
-        if (items.isEmpty()) return@withContext 0
+    ): EnqueueResult = withContext(Dispatchers.IO) {
+        if (items.isEmpty()) return@withContext EnqueueResult(0, 0, emptyList())
 
         val now = System.currentTimeMillis()
         val entities = mutableListOf<UploadQueueEntity>()
         val cacheDir = File(context.cacheDir, CACHE_DIR_NAME).apply { if (!exists()) mkdirs() }
 
         var newlyAdded = 0
+        var skipped = 0
+        val unreadable = mutableListOf<String>()
+
         for (item in items) {
-            // Copy all content:// URIs to app private cache directory.
-            // This ensures background WorkManager tasks can read shared files without requiring system
-            // READ_MEDIA_IMAGES / READ_MEDIA_VIDEO permissions, leveraging the transient read permission
-            // granted by the Share Sheet Intent while ShareUploadActivity is active.
+            // Copy every content:// URI into the app's private cache. The share intent's read
+            // grant is tied to this Activity, so a URI queued as-is would be unreadable by the
+            // worker a few milliseconds later.
             val targetUriString = if (item.uri.scheme == ContentResolver.SCHEME_FILE) {
                 item.uri.toString()
             } else {
                 val copiedFile = copyStreamToCache(context, item.uri, cacheDir, item.displayName)
-                if (copiedFile != null) {
-                    Uri.fromFile(copiedFile).toString()
-                } else {
-                    item.uri.toString()
+                if (copiedFile == null) {
+                    // Deliberately NOT falling back to `item.uri.toString()`. Queuing an URI we
+                    // already know is unreadable only moves the failure into the worker, where it
+                    // surfaces as an item stuck on "uploading" instead of an honest error.
+                    Log.w(
+                        TAG,
+                        "Dropping shared item ${item.displayName}: bytes could not be copied"
+                    )
+                    unreadable.add(item.displayName)
+                    continue
                 }
+                Uri.fromFile(copiedFile).toString()
             }
 
             val existing = uploadQueueDao.findByUri(targetUriString)
-            if (existing == null) {
-                val motionInfo = if (item.mimeType.startsWith("image/")) {
-                    MotionPhotoDetector.detect(context, Uri.parse(targetUriString), item.fileSize)
-                } else {
-                    MotionPhotoInfo()
-                }
-
-                entities.add(
-                    UploadQueueEntity(
-                        mediaStoreUri = targetUriString,
-                        filename = item.displayName,
-                        mimeType = item.mimeType,
-                        fileSize = item.fileSize,
-                        localSha256 = "",
-                        status = "PENDING",
-                        isMotionPhoto = motionInfo.isMotionPhoto,
-                        videoOffset = motionInfo.videoOffset,
-                        videoSize = motionInfo.videoSize,
-                        createdAt = now,
-                        updatedAt = now
-                    )
-                )
-                newlyAdded++
+            if (existing != null) {
+                skipped++
+                continue
             }
+
+            val motionInfo = if (item.mimeType.startsWith("image/")) {
+                MotionPhotoDetector.detect(context, Uri.parse(targetUriString), item.fileSize)
+            } else {
+                MotionPhotoInfo()
+            }
+
+            entities.add(
+                UploadQueueEntity(
+                    mediaStoreUri = targetUriString,
+                    filename = item.displayName,
+                    mimeType = item.mimeType,
+                    fileSize = item.fileSize,
+                    localSha256 = "",
+                    status = "PENDING",
+                    isMotionPhoto = motionInfo.isMotionPhoto,
+                    videoOffset = motionInfo.videoOffset,
+                    videoSize = motionInfo.videoSize,
+                    createdAt = now,
+                    updatedAt = now
+                )
+            )
+            newlyAdded++
         }
 
         if (entities.isNotEmpty()) {
             uploadQueueDao.insertAll(entities)
-            Log.i(TAG, "Enqueued $newlyAdded shared items into upload_queue")
+            Log.i(TAG, "Enqueued $newlyAdded shared items into upload_queue (skipped=$skipped)")
             PhotoBackupWorker.scheduleBackup(context)
         }
 
-        newlyAdded
+        EnqueueResult(newlyAdded, skipped, unreadable)
     }
 
     private fun isMediaStoreOrLocalFileUri(uri: Uri): Boolean {
@@ -241,6 +268,28 @@ object ShareUploadHandler {
         return false
     }
 
+    /**
+     * Copies a (possibly transient) share URI into the app's private cache so the background
+     * worker can still read it after the share Activity is gone.
+     *
+     * ## Why `setRequireOriginal` is gated on the authority
+     *
+     * `requireOriginal` un-redacts GPS, so it looks like it should always be added. It must not
+     * be: `setRequireOriginal` rewrites the URI to `...?requireOriginal=1`, and a third-party
+     * provider treats that as a *different, un-granted* URI. Samsung's Gallery provider rejects it
+     * outright:
+     *
+     * ```
+     * Permission Denial: reading com.samsung.android.gallery.app.provider.GalleryFileProvider
+     *   uri content://com.sec.android.gallery3d.fileprovider/...?requireOriginal=1
+     *   requires the provider be exported, or grantUriPermission()
+     * ```
+     *
+     * The share intent grants read access to the URI it handed us, not to a rewritten variant of
+     * it. Only MediaStore's own `content://media/...` URIs understand the parameter, so only those
+     * get it. The second attempt below retries the untouched URI, which keeps a provider that
+     * rejects even the plain form from silently losing the file.
+     */
     private fun copyStreamToCache(
         context: Context,
         sourceUri: Uri,
@@ -250,33 +299,76 @@ object ShareUploadHandler {
         val safeName = "${UUID.randomUUID()}_${displayName.replace("[^a-zA-Z0-9._-]".toRegex(), "_")}"
         val targetFile = File(cacheDir, safeName)
 
-        val readUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && sourceUri.scheme == ContentResolver.SCHEME_CONTENT) {
-            try {
-                if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_MEDIA_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                    MediaStore.setRequireOriginal(sourceUri)
-                } else {
-                    sourceUri
-                }
-            } catch (e: Exception) {
+        val canUnredact = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            looksLikeMediaStoreUri(sourceUri) &&
+            ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_MEDIA_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+
+        // First attempt keeps GPS; second attempt drops it so the file still gets uploaded.
+        // Losing the location of a shared photo is a far smaller loss than failing the upload.
+        val candidates = if (canUnredact) {
+            listOf(
+                runCatching { MediaStore.setRequireOriginal(sourceUri) }.getOrDefault(sourceUri),
                 sourceUri
-            }
+            )
         } else {
-            sourceUri
+            listOf(sourceUri)
         }
 
-        return try {
-            context.contentResolver.openInputStream(readUri)?.use { input ->
-                FileOutputStream(targetFile).use { output ->
-                    input.copyTo(output)
+        for (uri in candidates.distinct()) {
+            try {
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    FileOutputStream(targetFile).use { output ->
+                        input.copyTo(output)
+                    }
                 }
+                Log.d(
+                    TAG,
+                    "Copied transient share URI $sourceUri to ${targetFile.absolutePath} " +
+                        "(${targetFile.length()}B, unredacted=${uri !== sourceUri})"
+                )
+                return targetFile
+            } catch (e: Exception) {
+                Log.w(
+                    TAG,
+                    "Copy attempt failed for $sourceUri " +
+                        "(unredacted=${uri !== sourceUri}): ${e.javaClass.simpleName}: ${e.message}"
+                )
+                if (targetFile.exists()) targetFile.delete()
             }
-            Log.d(TAG, "Copied transient share URI $sourceUri to ${targetFile.absolutePath}")
-            targetFile
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to copy transient share stream for $sourceUri", e)
-            if (targetFile.exists()) targetFile.delete()
-            null
         }
+
+        Log.e(TAG, "Failed to copy transient share stream for $sourceUri (all attempts exhausted)")
+        return null
+    }
+
+    /**
+     * Whether [uri] is served by MediaProvider itself.
+     *
+     * Deliberately a whitelist of the two authorities MediaStore uses (`media` and the SAF
+     * document provider) rather than a blacklist: any other content provider is a third-party
+     * `FileProvider` and must be read through the exact URI we were granted.
+     */
+    internal fun looksLikeMediaStoreUri(uri: Uri): Boolean {
+        if (uri.scheme != ContentResolver.SCHEME_CONTENT) return false
+        return isMediaStoreAuthority(uri.authority)
+    }
+
+    /**
+     * Authority half of [looksLikeMediaStoreUri], split out so it is testable without an Android
+     * `Uri` (the project's unit tests are plain JVM - no Robolectric).
+     *
+     * `endsWith(".media")` covers vendor packages that embed MediaProvider
+     * (`com.google.android.providers.media.module.media`, `com.samsung.android.providers.media.media`),
+     * which do honour `requireOriginal`. A *substring* match would be wrong: a hypothetical
+     * `com.some.mediabrowser.provider` is a different provider.
+     */
+    internal fun isMediaStoreAuthority(authority: String?): Boolean {
+        if (authority.isNullOrBlank()) return false
+        return authority == "media" ||
+            authority == "com.android.providers.media.documents" ||
+            authority.endsWith(".media")
     }
 
     private fun String?.isNull_or_blank(): Boolean = this == null || this.isBlank()

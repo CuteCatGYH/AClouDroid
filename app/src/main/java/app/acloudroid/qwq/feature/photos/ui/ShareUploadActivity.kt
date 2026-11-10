@@ -125,13 +125,37 @@ class ShareUploadActivity : ComponentActivity() {
                         uris = incomingUris,
                         onConfirmUpload = { items ->
                             coroutineScope.launch {
-                                val count = ShareUploadHandler.enqueueShareItems(
+                                val result = ShareUploadHandler.enqueueShareItems(
                                     context = applicationContext,
                                     uploadQueueDao = container.photoDatabase.uploadQueueDao(),
                                     items = items
                                 )
-                                val msg = getString(R.string.share_upload_enqueued) + if (count > 0) " ($count)" else ""
-                                Toast.makeText(applicationContext, msg, Toast.LENGTH_SHORT).show()
+                                // An item whose bytes could not be copied is reported instead of
+                                // being queued as an unreadable row. Saying "已加入上传队列" for
+                                // something we already know cannot be uploaded is worse than
+                                // failing loudly: the user sees a phantom "uploading" row forever.
+                                val msg = when {
+                                    result.unreadable.isNotEmpty() && result.enqueued == 0 ->
+                                        getString(
+                                            R.string.share_upload_unreadable,
+                                            result.unreadable.first()
+                                        )
+                                    result.unreadable.isNotEmpty() ->
+                                        getString(R.string.share_upload_enqueued) +
+                                            " (${result.enqueued})\n" +
+                                            getString(
+                                                R.string.share_upload_unreadable,
+                                                result.unreadable.first()
+                                            )
+                                    else ->
+                                        getString(R.string.share_upload_enqueued) +
+                                            if (result.enqueued > 0) " (${result.enqueued})" else ""
+                                }
+                                Toast.makeText(
+                                    applicationContext,
+                                    msg,
+                                    Toast.LENGTH_LONG
+                                ).show()
                                 finish()
                             }
                         },

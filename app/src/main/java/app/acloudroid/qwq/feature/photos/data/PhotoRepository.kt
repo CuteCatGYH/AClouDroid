@@ -1978,8 +1978,25 @@ class PhotoRepository(
             // even on a device that already had the permission.
             var contentUri = uri
 
+            // Whether the bytes are *permanently* unreadable, as opposed to a transient failure.
+            // A `SecurityException` here means the read grant is gone (the share Activity that
+            // held it was destroyed) or the provider never granted access to this process at all.
+            // Neither condition can be fixed by trying again, so retrying only burns work cycles
+            // and -- because the failure path used to write `PENDING` back -- let a second worker
+            // coroutine pick the row up in the same batch, so `retryCount` never accumulated and
+            // the row stayed on "uploading" forever. `PhotoRepository` logging showed exactly that:
+            // two "Processing upload for: <file> (id=N)" lines inside 50 ms, both failing.
+            var permanentlyUnreadable = false
+
             val pfd = try {
-                val requireOriginalUri = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                // `requireOriginal` is only meaningful for MediaProvider's own URIs. Adding it to a
+                // third-party `FileProvider` URI rewrites it into one the share grant does not
+                // cover, which the provider then rejects.
+                val requireOriginalUri = if (
+                    android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q &&
+                    app.acloudroid.qwq.feature.photos.data.ShareUploadHandler
+                        .looksLikeMediaStoreUri(uri)
+                ) {
                     try {
                         android.provider.MediaStore.setRequireOriginal(uri)
                     } catch (e: Exception) {
@@ -1996,6 +2013,21 @@ class PhotoRepository(
                         contentUri = requireOriginalUri
                     }
                     fd
+                } catch (e: SecurityException) {
+                    // The un-granted case. Retrying the redacted URI is still worth one attempt
+                    // (some providers grant the base URI but reject the rewritten one), but if
+                    // that fails too the row is finished - no amount of retries will help.
+                    Log.w(
+                        TAG,
+                        "Original stream denied for $uri (${e.message}); retrying the plain uri"
+                    )
+                    try {
+                        context.contentResolver.openFileDescriptor(uri, "r")
+                    } catch (second: Exception) {
+                        Log.e(TAG, "FileDescriptor denied for $uri as well", second)
+                        permanentlyUnreadable = true
+                        null
+                    }
                 } catch (e: Exception) {
                     // `UnsupportedOperationException: Caller must hold ACCESS_MEDIA_LOCATION
                     // permission to access original` lands here. The retry below keeps the upload
@@ -2005,17 +2037,35 @@ class PhotoRepository(
                         "Original stream unavailable for $uri (${e.javaClass.simpleName}: ${e.message}); " +
                             "falling back to the redacted stream - GPS will be dropped"
                     )
-                    context.contentResolver.openFileDescriptor(uri, "r")
+                    try {
+                        context.contentResolver.openFileDescriptor(uri, "r")
+                    } catch (second: Exception) {
+                        if (second is SecurityException) permanentlyUnreadable = true
+                        throw second
+                    }
                 }
             } catch (e: Exception) {
+                if (e is SecurityException) permanentlyUnreadable = true
                 Log.e(TAG, "Failed to open FileDescriptor for $uri", e)
                 null
             }
 
             if (pfd == null) {
                 val nextRetry = queueItem.retryCount + 1
-                val nextStatus = if (nextRetry <= MAX_AUTO_RETRIES) "PENDING" else "FAILED"
-                val errorMsg = "Unable to open FileDescriptor" + if (nextStatus == "PENDING") " (自动重试 $nextRetry/$MAX_AUTO_RETRIES)" else ""
+                // A permanently unreadable file must land on `FAILED` immediately. Leaving it on
+                // `PENDING` is what produced the phantom "uploading" row: the same batch re-read
+                // it in the next iteration and it never reached MAX_AUTO_RETRIES.
+                val nextStatus = if (!permanentlyUnreadable && nextRetry <= MAX_AUTO_RETRIES) {
+                    "PENDING"
+                } else {
+                    "FAILED"
+                }
+                val errorMsg = if (permanentlyUnreadable) {
+                    "无法读取文件（授权已失效），请重新分享"
+                } else {
+                    "Unable to open FileDescriptor" +
+                        if (nextStatus == "PENDING") " (自动重试 $nextRetry/$MAX_AUTO_RETRIES)" else ""
+                }
 
                 database.uploadQueueDao().update(
                     queueItem.copy(
@@ -2025,7 +2075,7 @@ class PhotoRepository(
                         updatedAt = System.currentTimeMillis()
                     )
                 )
-                return@withContext Result.failure(Exception("无法打开文件描述符"))
+                return@withContext Result.failure(Exception(errorMsg))
             }
 
             val itemType = when {
