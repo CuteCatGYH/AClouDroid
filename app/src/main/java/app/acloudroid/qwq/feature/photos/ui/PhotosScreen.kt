@@ -24,6 +24,8 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.GridView
@@ -33,6 +35,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -51,6 +56,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -271,7 +277,75 @@ fun PhotosScreen(
                 }
             }
 
-            Box(modifier = Modifier.fillMaxSize()) {
+            val pullToRefreshState = rememberPullToRefreshState()
+            val density = LocalDensity.current
+            val thresholdPx = with(density) { PullToRefreshDefaults.PositionalThreshold.toPx() }
+
+            PullToRefreshBox(
+                isRefreshing = isSyncing,
+                onRefresh = {
+                    if (!isViewerOpen && !scanProgress.isScanning) {
+                        viewModel.syncPhotos()
+                    }
+                },
+                state = pullToRefreshState,
+                modifier = Modifier.fillMaxSize(),
+                indicator = {}
+            ) {
+                // 1. Revealed indicator at the top behind the photo stream
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .height(PullToRefreshDefaults.PositionalThreshold)
+                        .graphicsLayer {
+                            val fraction = pullToRefreshState.distanceFraction
+                            // Subtle parallax downward motion as the stream pulls away
+                            translationY = (fraction * thresholdPx - thresholdPx) * 0.45f
+                            alpha = (fraction * 1.5f).coerceIn(0f, 1f)
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        if (isSyncing) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(22.dp),
+                                strokeWidth = 2.4.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        } else {
+                            CircularProgressIndicator(
+                                progress = { pullToRefreshState.distanceFraction.coerceIn(0f, 1f) },
+                                modifier = Modifier.size(22.dp),
+                                strokeWidth = 2.4.dp,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = when {
+                                isSyncing -> "正在同步..."
+                                pullToRefreshState.distanceFraction >= 1f -> "释放立即同步"
+                                else -> "下拉同步"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+
+                // 2. Main content (photo stream and jump bar), translated downward following the pull gesture
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            translationY = pullToRefreshState.distanceFraction * thresholdPx
+                        }
+                ) {
                 LazyColumn(
                     state = listState,
                     modifier = Modifier.fillMaxSize(),
@@ -380,6 +454,7 @@ fun PhotosScreen(
                         coverRowsOf = if (monthCoverEnabled) viewModel::coverRows else null
                     )
                 }
+            }
             }
         }
     }
@@ -563,6 +638,7 @@ private fun EmptyStateOverlay(content: @Composable () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .background(MaterialTheme.colorScheme.surface),
         contentAlignment = Alignment.Center
     ) {
