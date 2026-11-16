@@ -108,6 +108,7 @@ import kotlin.math.abs
  *     worth exactly one re-mint. A decoder failure returns the same broken bytes however many new
  *     URLs are minted, so it must NOT burn a lookup (that was P2-011).
  */
+@OptIn(UnstableApi::class)
 @Composable
 fun ImageViewerPage(
     photo: PhotoAssetEntity,
@@ -142,7 +143,9 @@ fun ImageViewerPage(
      *   removes the conflict between `calculatePan` and `VelocityTracker`, which report opposite
      *   signs.
      */
-    onHorizontalDragEnd: (totalDragX: Float, velocityMagnitude: Float) -> Unit = { _, _ -> }
+    onHorizontalDragEnd: (totalDragX: Float, velocityMagnitude: Float) -> Unit = { _, _ -> },
+    /** Reports Live Photo state and provides a toggle action to the parent top bar. */
+    onLiveStateReport: (isLivePlaying: Boolean, togglePlay: () -> Unit) -> Unit = { _, _ -> }
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -160,6 +163,30 @@ fun ImageViewerPage(
     val isLivePhoto = photo.mediaType == "LIVE_PHOTO" || (photo.mediaType != "VIDEO" && !photo.videoComplUrl.isNullOrBlank())
     var liveVideoUrl by remember(photo.id) { mutableStateOf(photo.videoComplUrl) }
     var isLivePlaying by remember(photo.id) { mutableStateOf(false) }
+
+    val toggleLivePlay: () -> Unit = remember(photo.id, photo.masterId, liveVideoUrl, isLivePhoto) {
+        {
+            if (isLivePhoto) {
+                if (liveVideoUrl.isNullOrBlank()) {
+                    scope.launch {
+                        val refreshed = repository.refreshUrlsForMaster(photo.masterId, force = true).getOrNull()
+                        if (!refreshed?.videoComplUrl.isNullOrBlank()) {
+                            liveVideoUrl = refreshed.videoComplUrl
+                            isLivePlaying = !isLivePlaying
+                        }
+                    }
+                } else {
+                    isLivePlaying = !isLivePlaying
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(isActive, isLivePlaying, toggleLivePlay) {
+        if (isActive) {
+            onLiveStateReport(isLivePlaying, toggleLivePlay)
+        }
+    }
 
     val livePlayer = remember(liveVideoUrl, isLivePlaying, isActive) {
         val url = liveVideoUrl
@@ -418,19 +445,7 @@ fun ImageViewerPage(
                     },
                     onTap = { onToggleChrome() },
                     onLongPress = {
-                        if (isLivePhoto) {
-                            if (liveVideoUrl.isNullOrBlank()) {
-                                scope.launch {
-                                    val refreshed = repository.refreshUrlsForMaster(photo.masterId, force = true).getOrNull()
-                                    if (!refreshed?.videoComplUrl.isNullOrBlank()) {
-                                        liveVideoUrl = refreshed?.videoComplUrl
-                                        isLivePlaying = true
-                                    }
-                                }
-                            } else {
-                                isLivePlaying = true
-                            }
-                        }
+                        toggleLivePlay()
                     }
                 )
             },
@@ -572,7 +587,9 @@ fun ImageViewerPage(
         if (isLivePlaying && livePlayer != null) {
             AndroidView(
                 factory = { ctx ->
-                    PlayerView(ctx).apply {
+                    (android.view.LayoutInflater.from(ctx).inflate(
+                        app.acloudroid.qwq.R.layout.view_texture_player, null, false
+                    ) as PlayerView).apply {
                         player = livePlayer
                         useController = false
                         layoutParams = FrameLayout.LayoutParams(
@@ -591,48 +608,6 @@ fun ImageViewerPage(
             Box(modifier = Modifier.fillMaxSize().background(Color.Black))
         }
         } // end transform container
-
-        if (isLivePhoto) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(top = 16.dp, start = 16.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color.Black.copy(alpha = 0.65f))
-                    .clickable {
-                        if (liveVideoUrl.isNullOrBlank()) {
-                            scope.launch {
-                                val refreshed = repository.refreshUrlsForMaster(photo.masterId, force = true).getOrNull()
-                                if (!refreshed?.videoComplUrl.isNullOrBlank()) {
-                                    liveVideoUrl = refreshed?.videoComplUrl
-                                    isLivePlaying = !isLivePlaying
-                                }
-                            }
-                        } else {
-                            isLivePlaying = !isLivePlaying
-                        }
-                    }
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "Live Photo",
-                        tint = Color.White,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Text(
-                        text = if (isLivePlaying) "LIVE 播放中" else "LIVE (点击/长按播放)",
-                        color = Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
     }
 }
 
@@ -758,7 +733,9 @@ fun VideoViewerPage(
     } else {
         AndroidView(
             factory = { ctx ->
-                PlayerView(ctx).apply {
+                (android.view.LayoutInflater.from(ctx).inflate(
+                    app.acloudroid.qwq.R.layout.view_texture_player, null, false
+                ) as PlayerView).apply {
                     player = exoPlayer
                     layoutParams = FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,

@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.pager.HorizontalPager
@@ -32,6 +33,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -62,10 +64,12 @@ import androidx.compose.ui.layout.onSizeChanged
 
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.acloudroid.qwq.BuildConfig
 import app.acloudroid.qwq.feature.photos.data.PhotoRepository
 import app.acloudroid.qwq.feature.photos.data.db.PhotoAssetEntity
@@ -236,6 +240,9 @@ fun PhotoViewerScreen(
     val current = photos[currentPage]
 
     val currentPhotoId = current.id
+    var isCurrentLivePlaying by remember(currentPhotoId) { mutableStateOf(false) }
+    var currentLiveToggle by remember(currentPhotoId) { mutableStateOf<(() -> Unit)?>(null) }
+
     val currentAnchor = remember(currentPhotoId, anchorBounds, boundsTracker) {
         currentPhotoId.let { boundsTracker?.boundsOf(it) } ?: anchorBounds
     }
@@ -477,6 +484,12 @@ fun PhotoViewerScreen(
                             if (!chromeVisible) showInfo = false
                         }
                     },
+                    onLiveStateReport = { playing, toggle ->
+                        if (page == pagerState.settledPage) {
+                            isCurrentLivePlaying = playing
+                            currentLiveToggle = toggle
+                        }
+                    },
                     // Vertical drag: the page's detector owns the pointer, so it reports the
                     // travel and we decide what it means.
                     onVerticalDrag = { travel ->
@@ -624,6 +637,37 @@ fun PhotoViewerScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = Color.White.copy(alpha = 0.7f)
                     )
+                    val isLivePhoto = current.mediaType == "LIVE_PHOTO" || (current.mediaType != "VIDEO" && !current.videoComplUrl.isNullOrBlank())
+                    if (isLivePhoto) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color.Black.copy(alpha = 0.65f))
+                                .clickable {
+                                    currentLiveToggle?.invoke()
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PlayArrow,
+                                    contentDescription = "Live Photo",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = if (isCurrentLivePlaying) "LIVE 播放中" else "LIVE (点击/长按播放)",
+                                    color = Color.White,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

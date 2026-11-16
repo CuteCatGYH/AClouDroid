@@ -226,7 +226,9 @@ private fun DriveVideoPlayer(uri: Uri) {
 
     AndroidView(
         factory = { ctx ->
-            PlayerView(ctx).apply {
+            (android.view.LayoutInflater.from(ctx).inflate(
+                app.acloudroid.qwq.R.layout.view_texture_player, null, false
+            ) as PlayerView).apply {
                 player = exoPlayer
                 useController = true
             }
