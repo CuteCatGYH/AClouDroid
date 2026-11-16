@@ -5,7 +5,7 @@
 <h1 align="center">AClouDroid</h1>
 
 <p align="center">
-  <b>在 Android 上访问你的 iCloud —— 照片、视频、云盘！不需要 iPhone ，不需要 iPad ，也不需要开电脑</b>
+  <b>在 Android 上直接访问你的 iCloud ！不需要 iPhone ，不需要 iPad ，也不需要开电脑</b>
 </p>
 
 <p align="center">
