@@ -2,8 +2,11 @@ package app.acloudroid.qwq.ui.settings
 
 import android.content.Intent
 import android.os.Build
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -28,8 +31,12 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
@@ -47,7 +54,14 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import app.acloudroid.qwq.feature.photos.data.LibraryEstimate
+import app.acloudroid.qwq.feature.photos.data.db.BatchDownloadStatus
+import app.acloudroid.qwq.feature.photos.data.db.BatchDownloadTaskEntity
+import kotlinx.coroutines.delay
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -105,8 +119,17 @@ fun SettingsScreen(
     val periodicBackupInterval by settings.periodicBackupInterval.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
+    val batchDownloadManager = remember(context) {
+        (context.applicationContext as IClouDroidApp).container.batchDownloadManager
+    }
+    val activeDownloadTask by batchDownloadManager.observeActiveTask().collectAsStateWithLifecycle(initialValue = null)
+
     var showScanWarning by remember { mutableStateOf(false) }
+    var showDownloadDialog by remember { mutableStateOf(false) }
+    var showCancelDownloadDialog by remember { mutableStateOf(false) }
+    var libraryEstimate by remember { mutableStateOf<LibraryEstimate?>(null) }
     var showAboutScreen by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     Box(modifier = modifier.fillMaxSize()) {
         Scaffold(
@@ -143,6 +166,21 @@ fun SettingsScreen(
                     .padding(horizontal = 16.dp)
             ) {
                 Spacer(Modifier.height(8.dp))
+
+                // Ongoing batch download progress banner
+                activeDownloadTask?.takeIf {
+                    it.status == BatchDownloadStatus.DOWNLOADING ||
+                    it.status == BatchDownloadStatus.PAUSED ||
+                    it.status == BatchDownloadStatus.PREPARING
+                }?.let { task ->
+                    BatchDownloadProgressCard(
+                        task = task,
+                        onPause = { scope.launch { batchDownloadManager.pause(task.batchId) } },
+                        onResume = { scope.launch { batchDownloadManager.startOrResume(task.batchId) } },
+                        onCancel = { showCancelDownloadDialog = true }
+                    )
+                    Spacer(Modifier.height(12.dp))
+                }
 
                 SettingsCatalog.groups.forEach { group ->
                     Text(
@@ -202,7 +240,19 @@ fun SettingsScreen(
                                     frequency = frequency,
                                     customDays = customDays,
                                     isFullScanRunning = isFullScanRunning,
+                                    activeDownloadTask = activeDownloadTask,
                                     onRequestFullScan = { showScanWarning = true },
+                                    onRequestDownloadAll = {
+                                        val cur = activeDownloadTask
+                                        if (cur != null && (cur.status == BatchDownloadStatus.DOWNLOADING || cur.status == BatchDownloadStatus.PAUSED)) {
+                                            showCancelDownloadDialog = true
+                                        } else {
+                                            scope.launch {
+                                                libraryEstimate = batchDownloadManager.estimateLibrary()
+                                                showDownloadDialog = true
+                                            }
+                                        }
+                                    },
                                     onFrequencyChanged = onFrequencyChanged,
                                     onCustomIntervalChanged = onCustomIntervalChanged,
                                     onOpenAbout = { showAboutScreen = true }
@@ -240,6 +290,40 @@ fun SettingsScreen(
                         onStartFullScan()
                     },
                     onDismiss = { showScanWarning = false }
+                )
+            }
+
+            if (showDownloadDialog) {
+                BatchDownloadPrecheckDialog(
+                    estimate = libraryEstimate,
+                    onConfirm = { chosenPath ->
+                        showDownloadDialog = false
+                        scope.launch {
+                            batchDownloadManager.prepareAndStartBatch(chosenPath)
+                        }
+                    },
+                    onDismiss = { showDownloadDialog = false }
+                )
+            }
+
+            if (showCancelDownloadDialog) {
+                val currentTask = activeDownloadTask
+                BatchDownloadCancelDialog(
+                    completedCount = currentTask?.successCount ?: 0,
+                    targetPath = currentTask?.targetRelativePath ?: "DCIM/Camera",
+                    onKeepAndCancel = {
+                        showCancelDownloadDialog = false
+                        currentTask?.let { t ->
+                            scope.launch { batchDownloadManager.cancelAndRollback(t.batchId, deleteDownloaded = false) }
+                        }
+                    },
+                    onDeleteAndCancel = {
+                        showCancelDownloadDialog = false
+                        currentTask?.let { t ->
+                            scope.launch { batchDownloadManager.cancelAndRollback(t.batchId, deleteDownloaded = true) }
+                        }
+                    },
+                    onDismiss = { showCancelDownloadDialog = false }
                 )
             }
         }
@@ -310,7 +394,9 @@ private fun SettingsRow(
     frequency: ScanFrequency,
     customDays: Int,
     isFullScanRunning: Boolean,
+    activeDownloadTask: BatchDownloadTaskEntity?,
     onRequestFullScan: () -> Unit,
+    onRequestDownloadAll: () -> Unit,
     onFrequencyChanged: (ScanFrequency) -> Unit,
     onCustomIntervalChanged: (Int) -> Unit,
     onOpenAbout: () -> Unit
@@ -818,6 +904,34 @@ private fun SettingsRow(
             },
             onClick = onRequestFullScan
         )
+
+        SettingsItem.DOWNLOAD_ALL -> {
+            val isDownloading = activeDownloadTask?.status == BatchDownloadStatus.DOWNLOADING
+            val isPaused = activeDownloadTask?.status == BatchDownloadStatus.PAUSED
+            val isPreparing = activeDownloadTask?.status == BatchDownloadStatus.PREPARING
+
+            ActionRow(
+                title = "下载所有照片和视频",
+                subtitle = when {
+                    isPreparing -> "正在准备下载队列…"
+                    isDownloading && activeDownloadTask != null -> "正在保存到 ${activeDownloadTask.targetRelativePath} (${activeDownloadTask.successCount}/${activeDownloadTask.totalCount})"
+                    isPaused && activeDownloadTask != null -> "已暂停 (${activeDownloadTask.successCount}/${activeDownloadTask.totalCount} 项)"
+                    else -> "保存云端所有内容至本地相册 (默认 DCIM/Camera)"
+                },
+                enabled = true,
+                trailing = {
+                    if (isDownloading || isPreparing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp
+                        )
+                    } else {
+                        Icon(Icons.Default.ChevronRight, contentDescription = null)
+                    }
+                },
+                onClick = onRequestDownloadAll
+            )
+        }
 
         SettingsItem.SCAN_FREQUENCY -> DropdownRow(
             title = "自动扫描频率",
@@ -1563,7 +1677,7 @@ private fun AboutSubScreen(
             Spacer(Modifier.height(32.dp))
 
             Text(
-                text = "iClouDroid • CuteCatGYH",
+                text = "AClouDroid • CuteCatGYH",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.outline
             )
@@ -1582,3 +1696,421 @@ private fun AboutSubScreen(
         )
     }
 }
+
+@Composable
+private fun BatchDownloadProgressCard(
+    task: BatchDownloadTaskEntity,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onCancel: () -> Unit
+) {
+    val isPaused = task.status == BatchDownloadStatus.PAUSED
+    val isPreparing = task.status == BatchDownloadStatus.PREPARING
+    val progress = if (task.totalCount > 0) {
+        task.successCount.toFloat() / task.totalCount.toFloat()
+    } else {
+        0f
+    }
+    val percent = (progress * 100).toInt().coerceIn(0, 100)
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.FileDownload,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = if (isPreparing) "准备全量下载队列…" else if (isPaused) "全量下载已暂停" else "全量下载中 ($percent%)",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                text = "保存位置: ${task.targetRelativePath} · 已完成 ${task.successCount} / ${task.totalCount} 项" +
+                    (if (task.failedCount > 0) " (${task.failedCount} 项失败)" else ""),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            if (isPreparing) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            } else {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (!isPreparing) {
+                    if (isPaused) {
+                        TextButton(onClick = onResume) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("继续下载")
+                        }
+                    } else {
+                        TextButton(onClick = onPause) {
+                            Icon(Icons.Default.Pause, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("暂停")
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
+                }
+
+                TextButton(
+                    onClick = onCancel,
+                    colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("终止任务")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BatchDownloadPrecheckDialog(
+    estimate: LibraryEstimate?,
+    onConfirm: (selectedPath: String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var selectedPathOption by remember { mutableStateOf("DCIM/Camera") }
+    var customPickedPath by remember { mutableStateOf<String?>(null) }
+    var isCustomSelected by remember { mutableStateOf(false) }
+
+    val folderPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { treeUri ->
+        if (treeUri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    treeUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                )
+            }
+            val docId = DocumentsContract.getTreeDocumentId(treeUri)
+            val extractedPath = if (docId != null && docId.startsWith("primary:")) {
+                docId.removePrefix("primary:")
+            } else {
+                treeUri.lastPathSegment?.substringAfterLast(":")
+            }?.trim()?.trim('/')
+
+            if (!extractedPath.isNullOrBlank()) {
+                customPickedPath = extractedPath
+                isCustomSelected = true
+            }
+        }
+    }
+
+    var countdownSeconds by remember { mutableStateOf(5) }
+
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        while (countdownSeconds > 0) {
+            delay(1000L)
+            countdownSeconds -= 1
+        }
+    }
+
+    val finalPath = if (isCustomSelected && !customPickedPath.isNullOrBlank()) {
+        customPickedPath!!
+    } else {
+        selectedPathOption
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("全量下载所有照片和视频", fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                if (estimate != null) {
+                    Text(
+                        text = "• 云端媒体数：${estimate.totalCount} 项 (约 ${formatDownloadSize(estimate.totalBytes)})",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "• 本地剩余空间：${formatDownloadSize(estimate.availableBytes)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (estimate.availableBytes < estimate.totalBytes) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
+                    )
+                    if (estimate.availableBytes < estimate.totalBytes) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "⚠️ 手机可用空间低于预估总量，建议先清理部分空间再开始下载。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                } else {
+                    Text("正在统计云端照片数量...", style = MaterialTheme.typography.bodySmall)
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                Text(
+                    text = "保存位置选择",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+
+                Spacer(Modifier.height(4.dp))
+
+                // Option 1: DCIM/Camera (Default)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            isCustomSelected = false
+                            selectedPathOption = "DCIM/Camera"
+                        }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = !isCustomSelected && selectedPathOption == "DCIM/Camera",
+                        onClick = {
+                            isCustomSelected = false
+                            selectedPathOption = "DCIM/Camera"
+                        }
+                    )
+                    Column(modifier = Modifier.padding(start = 8.dp)) {
+                        Text("DCIM/Camera (默认推荐)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        Text("直接进入系统相机胶卷，与原生照片无缝合并", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+
+                // Option 2: DCIM/iCloud
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            isCustomSelected = false
+                            selectedPathOption = "DCIM/iCloud"
+                        }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = !isCustomSelected && selectedPathOption == "DCIM/iCloud",
+                        onClick = {
+                            isCustomSelected = false
+                            selectedPathOption = "DCIM/iCloud"
+                        }
+                    )
+                    Column(modifier = Modifier.padding(start = 8.dp)) {
+                        Text("DCIM/iCloud", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        Text("在相册中建立独立的「iCloud」相册文件夹", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+
+                // Option 3: Pictures/iCloud
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            isCustomSelected = false
+                            selectedPathOption = "Pictures/iCloud"
+                        }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = !isCustomSelected && selectedPathOption == "Pictures/iCloud",
+                        onClick = {
+                            isCustomSelected = false
+                            selectedPathOption = "Pictures/iCloud"
+                        }
+                    )
+                    Column(modifier = Modifier.padding(start = 8.dp)) {
+                        Text("Pictures/iCloud", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        Text("保存至标准图片目录下独立相册", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+
+                // Option 4: Pick via system file picker
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            if (customPickedPath.isNullOrBlank()) {
+                                folderPickerLauncher.launch(null)
+                            } else {
+                                isCustomSelected = true
+                            }
+                        }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    RadioButton(
+                        selected = isCustomSelected && !customPickedPath.isNullOrBlank(),
+                        onClick = {
+                            if (customPickedPath.isNullOrBlank()) {
+                                folderPickerLauncher.launch(null)
+                            } else {
+                                isCustomSelected = true
+                            }
+                        }
+                    )
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 8.dp)
+                    ) {
+                        Text(
+                            text = if (customPickedPath.isNullOrBlank()) "自定义导出位置..." else "已选: $customPickedPath",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (isCustomSelected && !customPickedPath.isNullOrBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = if (customPickedPath.isNullOrBlank()) "打开系统文件选择器挑选任意自定义相册或文件夹" else "点击右侧「更改」可重新挑选文件夹",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    if (!customPickedPath.isNullOrBlank()) {
+                        TextButton(onClick = { folderPickerLauncher.launch(null) }) {
+                            Text("更改")
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                Text(
+                    text = "• 元数据保留：照片与视频的原始拍摄时间、EXIF 与 GPS 位置将完整保留，严格保证相册时间轴准确对齐。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "• 建议在连接 Wi-Fi 与充电器时进行长时间全量下载。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                enabled = countdownSeconds == 0 && (estimate == null || estimate.totalCount > 0) && (!isCustomSelected || !customPickedPath.isNullOrBlank()),
+                onClick = { onConfirm(finalPath) }
+            ) {
+                Text(
+                    if (countdownSeconds > 0) "开始下载 (${countdownSeconds}s)" else "开始下载"
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
+}
+
+@Composable
+private fun BatchDownloadCancelDialog(
+    completedCount: Int,
+    targetPath: String,
+    onKeepAndCancel: () -> Unit,
+    onDeleteAndCancel: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("终止全量下载？", fontWeight = FontWeight.Bold)
+        },
+        text = {
+            Column {
+                Text(
+                    text = "当前已成功下载并保存了 $completedCount 项内容到「$targetPath」。请选择如何处理本次已下载的文件：",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(Modifier.height(16.dp))
+
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onKeepAndCancel() },
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("仅终止下载 (保留已下载文件)", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                        Text("停止后续下载，已保存到本地相册的文件将完整保留。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onDeleteAndCancel() },
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("终止并删除本次已下载内容", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                        Text("停止任务，并从相册中精准撤销移除本次下载的 $completedCount 项内容。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("返回继续下载")
+            }
+        }
+    )
+}
+
+private fun formatDownloadSize(bytes: Long): String {
+    if (bytes <= 0) return "0 B"
+    val kb = bytes / 1024.0
+    if (kb < 1024) return String.format(java.util.Locale.getDefault(), "%.1f KB", kb)
+    val mb = kb / 1024.0
+    if (mb < 1024) return String.format(java.util.Locale.getDefault(), "%.1f MB", mb)
+    val gb = mb / 1024.0
+    return String.format(java.util.Locale.getDefault(), "%.2f GB", gb)
+}
+

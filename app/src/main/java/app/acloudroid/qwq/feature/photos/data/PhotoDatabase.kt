@@ -17,6 +17,9 @@ import app.acloudroid.qwq.feature.photos.data.db.ScanSeenIdEntity
 import app.acloudroid.qwq.feature.photos.data.db.ScanStateDao
 import app.acloudroid.qwq.feature.photos.data.db.ScanStateEntity
 import app.acloudroid.qwq.feature.photos.data.db.SyncStateDao
+import app.acloudroid.qwq.feature.photos.data.db.BatchDownloadDao
+import app.acloudroid.qwq.feature.photos.data.db.BatchDownloadItemEntity
+import app.acloudroid.qwq.feature.photos.data.db.BatchDownloadTaskEntity
 import app.acloudroid.qwq.feature.photos.data.db.SyncStateEntity
 import app.acloudroid.qwq.feature.photos.data.db.UploadQueueDao
 import app.acloudroid.qwq.feature.photos.data.db.UploadQueueEntity
@@ -39,9 +42,11 @@ import app.acloudroid.qwq.feature.photos.data.db.UploadedFingerprintEntity
         ScanSeenIdEntity::class,
         PurgedIdEntity::class,
         UploadQueueEntity::class,
-        UploadedFingerprintEntity::class
+        UploadedFingerprintEntity::class,
+        BatchDownloadTaskEntity::class,
+        BatchDownloadItemEntity::class
     ],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 abstract class PhotoDatabase : RoomDatabase() {
@@ -54,6 +59,7 @@ abstract class PhotoDatabase : RoomDatabase() {
     abstract fun purgedIdDao(): PurgedIdDao
     abstract fun uploadQueueDao(): UploadQueueDao
     abstract fun uploadedFingerprintDao(): UploadedFingerprintDao
+    abstract fun batchDownloadDao(): BatchDownloadDao
 
     companion object {
         /**
@@ -281,6 +287,57 @@ abstract class PhotoDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v11 → v12: batch download queue and task tracking.
+         *
+         * Purely additive. Tracks full-library downloads, progress, selected target directory,
+         * and written MediaStore URIs for rollback support.
+         */
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `batch_download_tasks` (
+                        `batchId` TEXT NOT NULL,
+                        `status` TEXT NOT NULL,
+                        `targetRelativePath` TEXT NOT NULL,
+                        `totalCount` INTEGER NOT NULL,
+                        `successCount` INTEGER NOT NULL,
+                        `failedCount` INTEGER NOT NULL,
+                        `skippedCount` INTEGER NOT NULL,
+                        `totalBytes` INTEGER NOT NULL,
+                        `downloadedBytes` INTEGER NOT NULL,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`batchId`)
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `batch_download_items` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `batchId` TEXT NOT NULL,
+                        `assetId` TEXT NOT NULL,
+                        `masterId` TEXT NOT NULL,
+                        `filename` TEXT NOT NULL,
+                        `mediaType` TEXT NOT NULL,
+                        `sizeBytes` INTEGER NOT NULL,
+                        `assetDate` INTEGER NOT NULL,
+                        `status` TEXT NOT NULL,
+                        `mediaStoreUri` TEXT,
+                        `errorMessage` TEXT,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_batch_download_items_batchId` ON `batch_download_items` (`batchId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_batch_download_items_assetId` ON `batch_download_items` (`assetId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_batch_download_items_status` ON `batch_download_items` (`status`)")
+            }
+        }
+
         @Volatile
         private var INSTANCE: PhotoDatabase? = null
 
@@ -308,7 +365,8 @@ abstract class PhotoDatabase : RoomDatabase() {
                         MIGRATION_7_8,
                         MIGRATION_8_9,
                         MIGRATION_9_10,
-                        MIGRATION_10_11
+                        MIGRATION_10_11,
+                        MIGRATION_11_12
                     )
                     .build()
                 INSTANCE = instance

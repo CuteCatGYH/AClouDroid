@@ -1,7 +1,8 @@
 # AGENTS.md - AI Agent 协助开发规范指南
 
 本文档为参与 **iClouDroid** 项目协同开发的 AI Agent 提供架构导引、编码约定与编译调试规范。
-
+Avoid unnecessary secondary labels anddescriptions. Let the layout do the explaining.避免不必要的辅助标签与说明。让布局本身发挥解释
+作用。
 > [!IMPORTANT]
 > **新接手请先阅读第 5、6、7、9 节**（会话生命周期 / URL 生命周期 / 错误判定 / 验证纪律）。
 > 这四节集中了本项目踩过的所有重大坑，违反任意一条都会导致难排查的诡异问题。

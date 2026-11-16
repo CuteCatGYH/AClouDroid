@@ -2543,13 +2543,8 @@ class PhotoRepository(
             photoMonthIndexDao.clearAll()
             photoDao.clearAll()
             database.uploadQueueDao().clearAll()
-
-            // Upload fingerprints are account-scoped: each `masterId` is a CloudKit record name
-            // owned by the Apple ID that uploaded it. Leaving them behind would make the next
-            // account treat its own (different) photos as already backed up whenever a name/size
-            // /mtime happens to collide -- and those collisions are not hypothetical for camera
-            // roll files copied wholesale from one phone to another (AGENTS.md §5.5).
             database.uploadedFingerprintDao().clearAll()
+            database.batchDownloadDao().clearAll()
 
             // In-memory refresh bookkeeping refers to masters that no longer exist.
             refreshMutex.withLock {

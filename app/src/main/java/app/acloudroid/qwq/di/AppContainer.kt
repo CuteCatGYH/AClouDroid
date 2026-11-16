@@ -86,6 +86,14 @@ class AppContainer(private val appContext: Context) {
         app.acloudroid.qwq.feature.update.data.UpdateRepository(appSettings, appContext)
     }
 
+    val batchDownloadManager: app.acloudroid.qwq.feature.photos.data.BatchDownloadManager by lazy {
+        app.acloudroid.qwq.feature.photos.data.BatchDownloadManager(
+            appContext,
+            photoDatabase.batchDownloadDao(),
+            photoDatabase.photoDao()
+        )
+    }
+
     // Future features plug in here:
     // val notesRepository: NotesRepository by lazy { NotesRepository(...) }
 }

@@ -100,6 +100,17 @@
             </intent-filter>
         </receiver>
 
+        <!-- Batch photo download notification receiver (pause/resume/cancel) -->
+        <receiver
+            android:name=".feature.photos.work.BatchDownloadReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="app.acloudroid.qwq.ACTION_BATCH_DOWNLOAD_PAUSE" />
+                <action android:name="app.acloudroid.qwq.ACTION_BATCH_DOWNLOAD_RESUME" />
+                <action android:name="app.acloudroid.qwq.ACTION_BATCH_DOWNLOAD_CANCEL" />
+            </intent-filter>
+        </receiver>
+
         <!-- AlarmManager Receiver for Doze penetrating photo backup -->
         <receiver
             android:name=".feature.photos.work.BackupAlarmReceiver"

@@ -24,6 +24,9 @@ enum class SettingsItem {
     /** Long-running: walks the whole cloud library. Shows a warning before starting. */
     FULL_SCAN,
 
+    /** Downloads all photos and videos from iCloud to local media store. */
+    DOWNLOAD_ALL,
+
     /**
      * Whether the month jump panel shows a thumbnail per month.
      *
@@ -149,6 +152,11 @@ object SettingsCatalog {
                 SettingsItem.DRIVE_SORT_FIELD,
                 SettingsItem.DRIVE_SORT_ORDER
             )
+        ),
+        SettingsGroup(
+            title = "高级功能",
+            description = "全量数据导出与深度系统迁移等进阶功能。",
+            items = listOf(SettingsItem.DOWNLOAD_ALL)
         ),
         SettingsGroup(
             title = "关于",

@@ -322,7 +322,26 @@ interface PhotoDao {
      */
     @Query("SELECT * FROM photo_assets WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): PhotoAssetEntity?
+
+    @Query("SELECT COUNT(*) FROM photo_assets WHERE isHidden = 0")
+    suspend fun countActivePhotos(): Int
+
+    @Query("SELECT COALESCE(SUM(size), 0) FROM photo_assets WHERE isHidden = 0")
+    suspend fun sumActivePhotosSize(): Long
+
+    @Query("SELECT id, masterId, filename, mediaType, size, assetDate FROM photo_assets WHERE isHidden = 0 ORDER BY assetDate DESC, id ASC LIMIT :limit OFFSET :offset")
+    suspend fun getDownloadCandidatesPage(limit: Int, offset: Int): List<PhotoDownloadCandidate>
 }
+
+/** Projection for batch download candidate ingestion. */
+data class PhotoDownloadCandidate(
+    val id: String,
+    val masterId: String,
+    val filename: String,
+    val mediaType: String,
+    val size: Long,
+    val assetDate: Long
+)
 
 /** Projection for [PhotoDao.monthAggregate]. */
 data class MonthAggregate(
@@ -342,3 +361,4 @@ data class PhotoIdentity(
     val id: String,
     val masterId: String
 )
+

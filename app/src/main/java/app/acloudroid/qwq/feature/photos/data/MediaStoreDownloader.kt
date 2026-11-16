@@ -28,26 +28,32 @@ object MediaStoreDownloader {
         context: Context,
         photo: PhotoAssetEntity,
         repository: PhotoRepository,
+        customRelativePath: String? = null,
+        showNotification: Boolean = true,
         onProgress: ((progressPercent: Int, downloadedBytes: Long) -> Unit)? = null
     ): Result<Uri> = withContext(Dispatchers.IO) {
         val notificationId = photo.id.hashCode()
-        app.acloudroid.qwq.feature.photos.work.DownloadNotificationHelper.showProgress(
-            context,
-            notificationId,
-            photo.filename,
-            -1,
-            0L
-        )
-
-        val progressHandler: (Int, Long) -> Unit = { percent, bytes ->
-            onProgress?.invoke(percent, bytes)
+        if (showNotification) {
             app.acloudroid.qwq.feature.photos.work.DownloadNotificationHelper.showProgress(
                 context,
                 notificationId,
                 photo.filename,
-                percent,
-                bytes
+                -1,
+                0L
             )
+        }
+
+        val progressHandler: (Int, Long) -> Unit = { percent, bytes ->
+            onProgress?.invoke(percent, bytes)
+            if (showNotification) {
+                app.acloudroid.qwq.feature.photos.work.DownloadNotificationHelper.showProgress(
+                    context,
+                    notificationId,
+                    photo.filename,
+                    percent,
+                    bytes
+                )
+            }
         }
 
         try {
@@ -106,16 +112,19 @@ object MediaStoreDownloader {
                     videoUrl = videoComplUrl,
                     photo = photo,
                     repository = repository,
+                    customRelativePath = customRelativePath,
                     onProgress = progressHandler
                 )
                 if (motionResult.isSuccess) {
                     val uri = motionResult.getOrThrow()
-                    app.acloudroid.qwq.feature.photos.work.DownloadNotificationHelper.showFinished(
-                        context,
-                        notificationId,
-                        photo.filename,
-                        uri
-                    )
+                    if (showNotification) {
+                        app.acloudroid.qwq.feature.photos.work.DownloadNotificationHelper.showFinished(
+                            context,
+                            notificationId,
+                            photo.filename,
+                            uri
+                        )
+                    }
                     return@withContext motionResult
                 } else {
                     Log.w(TAG, "Motion photo packing failed, falling back to static photo download", motionResult.exceptionOrNull())
@@ -129,7 +138,13 @@ object MediaStoreDownloader {
                 else -> "image/jpeg"
             }
 
-            val relativePhotoPath = if (isVideo) {
+            val relativePhotoPath = if (!customRelativePath.isNullOrBlank()) {
+                if (isVideo && customRelativePath.startsWith(Environment.DIRECTORY_PICTURES)) {
+                    customRelativePath.replaceFirst(Environment.DIRECTORY_PICTURES, Environment.DIRECTORY_MOVIES)
+                } else {
+                    customRelativePath
+                }
+            } else if (isVideo) {
                 Environment.DIRECTORY_MOVIES + "/iClouDroid"
             } else {
                 Environment.DIRECTORY_PICTURES + "/iClouDroid"
@@ -151,13 +166,15 @@ object MediaStoreDownloader {
 
             if (downloadResult.isSuccess) {
                 val uri = downloadResult.getOrThrow()
-                app.acloudroid.qwq.feature.photos.work.DownloadNotificationHelper.showFinished(
-                    context,
-                    notificationId,
-                    photo.filename,
-                    uri
-                )
-            } else {
+                if (showNotification) {
+                    app.acloudroid.qwq.feature.photos.work.DownloadNotificationHelper.showFinished(
+                        context,
+                        notificationId,
+                        photo.filename,
+                        uri
+                    )
+                }
+            } else if (showNotification) {
                 app.acloudroid.qwq.feature.photos.work.DownloadNotificationHelper.showFailed(
                     context,
                     notificationId,
@@ -169,12 +186,14 @@ object MediaStoreDownloader {
             downloadResult
         } catch (e: Exception) {
             Log.e(TAG, "Failed to download asset", e)
-            app.acloudroid.qwq.feature.photos.work.DownloadNotificationHelper.showFailed(
-                context,
-                notificationId,
-                photo.filename,
-                e.message
-            )
+            if (showNotification) {
+                app.acloudroid.qwq.feature.photos.work.DownloadNotificationHelper.showFailed(
+                    context,
+                    notificationId,
+                    photo.filename,
+                    e.message
+                )
+            }
             Result.failure(e)
         }
     }
@@ -185,6 +204,7 @@ object MediaStoreDownloader {
         videoUrl: String,
         photo: PhotoAssetEntity,
         repository: PhotoRepository,
+        customRelativePath: String? = null,
         onProgress: ((progressPercent: Int, downloadedBytes: Long) -> Unit)? = null
     ): Result<Uri> {
         val photoBytes = fetchUrlBytes(
@@ -251,7 +271,8 @@ object MediaStoreDownloader {
 
         val baseName = photo.filename.substringBeforeLast('.')
         val motionFilename = "$baseName.jpg"
-        val relativePath = Environment.DIRECTORY_PICTURES + "/iClouDroid"
+        val relativePath = customRelativePath?.takeIf { it.isNotBlank() }
+            ?: (Environment.DIRECTORY_PICTURES + "/iClouDroid")
 
         val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
@@ -267,6 +288,7 @@ object MediaStoreDownloader {
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
             if (photo.assetDate > 0) {
+                put(MediaStore.MediaColumns.DATE_TAKEN, photo.assetDate)
                 put(MediaStore.MediaColumns.DATE_ADDED, photo.assetDate / 1000)
                 put(MediaStore.MediaColumns.DATE_MODIFIED, photo.assetDate / 1000)
             }
@@ -547,6 +569,7 @@ object MediaStoreDownloader {
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
             if (assetDate > 0) {
+                put(MediaStore.MediaColumns.DATE_TAKEN, assetDate)
                 put(MediaStore.MediaColumns.DATE_ADDED, assetDate / 1000)
                 put(MediaStore.MediaColumns.DATE_MODIFIED, assetDate / 1000)
             }
