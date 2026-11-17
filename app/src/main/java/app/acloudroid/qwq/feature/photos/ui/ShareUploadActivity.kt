@@ -386,9 +386,9 @@ private fun ShareUploadBottomSheet(
                     if (!isLoading) {
                         val totalSize = resolvedItems.sumOf { it.fileSize }
                         val sizeText = if (totalSize > 0) " (${formatFileSize(totalSize)})" else ""
-                        val itemTypeHint = if (isAllMedia) "照片/视频" else "文件"
+                        val itemTypeHint = if (isAllMedia) stringResource(R.string.share_item_type_media) else stringResource(R.string.share_item_type_files)
                         Text(
-                            text = "准备发送 ${resolvedItems.size} 项$itemTypeHint$sizeText",
+                            text = stringResource(R.string.share_prep_sending, resolvedItems.size, itemTypeHint, sizeText),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -445,7 +445,7 @@ private fun ShareUploadBottomSheet(
                     ) {
                         Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
                             Text(
-                                text = "授予『照片和视频』权限",
+                                text = stringResource(R.string.share_grant_photos_perm),
                                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -504,7 +504,7 @@ private fun ShareUploadBottomSheet(
                             icon = Icons.Default.Photo,
                             iconTint = MaterialTheme.colorScheme.primary,
                             title = stringResource(R.string.share_option_icloud_photo),
-                            subtitle = "保存至 iCloud 照片图库",
+                            subtitle = stringResource(R.string.share_photos_subtitle),
                             enabled = !isLoading && resolvedItems.isNotEmpty(),
                             onClick = { onConfirmUploadPhoto(resolvedItems) }
                         )
@@ -515,7 +515,7 @@ private fun ShareUploadBottomSheet(
                         icon = Icons.Default.CloudUpload,
                         iconTint = MaterialTheme.colorScheme.tertiary,
                         title = stringResource(R.string.share_option_icloud_drive),
-                        subtitle = "选择目录并保存至 iCloud 云盘",
+                        subtitle = stringResource(R.string.share_drive_subtitle),
                         enabled = !isLoading && resolvedItems.isNotEmpty(),
                         onClick = {
                             coroutineScope.launch {
@@ -712,7 +712,7 @@ private fun HierarchicalFolderPickerDialog(
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "返回上级",
+                                contentDescription = stringResource(R.string.share_cd_parent_dir),
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -760,7 +760,7 @@ private fun HierarchicalFolderPickerDialog(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "当前选定: $currentFolderName",
+                                text = stringResource(R.string.share_selected_dir, currentFolderName),
                                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 maxLines = 1,
@@ -777,7 +777,7 @@ private fun HierarchicalFolderPickerDialog(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "此目录下无子文件夹",
+                                text = stringResource(R.string.share_no_subdirs),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -819,7 +819,7 @@ private fun HierarchicalFolderPickerDialog(
                                     }
                                     Icon(
                                         imageVector = Icons.Default.ChevronRight,
-                                        contentDescription = "进入子目录",
+                                        contentDescription = stringResource(R.string.share_cd_sub_dir),
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(20.dp)
                                     )

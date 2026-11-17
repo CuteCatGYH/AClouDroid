@@ -270,7 +270,7 @@ fun LocalAlbumsScreen(
                         )
                         Spacer(Modifier.height(12.dp))
                         Text(
-                            text = "未发现本地相册或媒体文件夹",
+                            text = stringResource(R.string.backup_empty),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -359,13 +359,9 @@ fun LocalAlbumsScreen(
                         pendingBatteryBucket?.let { viewModel.toggleAlbumBackup(it, true) }
                         pendingBatteryBucket = null
                     },
-                    title = { Text("提示: 开启常驻后台更稳定") },
+                    title = { Text(stringResource(R.string.backup_perm_bg_title)) },
                     text = {
-                        Text(
-                            "我们检测到您正在开启自动备份。\n\n" +
-                            "为了确保照片能及时、稳定地在后台实时上传，是否允许 iClouDroid 忽略电池优化，保持常驻后台运行？\n\n" +
-                            "如果不开启，系统可能会在息屏后暂停备份，需要重新打开应用才会继续。"
-                        )
+                        Text(stringResource(R.string.backup_perm_bg_desc))
                     },
                     confirmButton = {
                         androidx.compose.material3.TextButton(
@@ -377,13 +373,13 @@ fun LocalAlbumsScreen(
                                     context.startActivity(intent)
                                 } catch (e: Exception) {
                                     android.util.Log.e("LocalAlbumsScreen", "Failed to launch battery optimization intent", e)
-                                    android.widget.Toast.makeText(context, "设备不支持直接跳转，请到系统设置中手动开启", android.widget.Toast.LENGTH_SHORT).show()
+                                    android.widget.Toast.makeText(context, context.getString(R.string.backup_perm_bg_toast_unsupported), android.widget.Toast.LENGTH_SHORT).show()
                                 }
                                 showBatteryOptimizationPrompt = false
                                 pendingBatteryBucket?.let { viewModel.toggleAlbumBackup(it, true) }
                                 pendingBatteryBucket = null
                             }
-                        ) { Text("去开启") }
+                        ) { Text(stringResource(R.string.backup_perm_bg_btn_enable)) }
                     },
                     dismissButton = {
                         androidx.compose.material3.TextButton(
@@ -392,7 +388,7 @@ fun LocalAlbumsScreen(
                                 pendingBatteryBucket?.let { viewModel.toggleAlbumBackup(it, true) }
                                 pendingBatteryBucket = null
                             }
-                        ) { Text("暂不需要") }
+                        ) { Text(stringResource(R.string.backup_perm_bg_btn_skip)) }
                     }
                 )
             }
@@ -604,23 +600,23 @@ private fun PermissionRequestBanner(
                 )
                 Spacer(Modifier.height(14.dp))
                 Text(
-                    text = "管理本地媒体文件夹",
+                    text = stringResource(R.string.backup_perm_media_title),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "浏览各相册（如相机、微信、截屏、下载等）需要获取设备媒体文件的读取权限。后续可为您开启特定文件夹的自动增量云备份。",
+                    text = stringResource(R.string.backup_perm_media_desc),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(20.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(onClick = onRequestPermission) {
-                        Text("允许媒体访问")
+                        Text(stringResource(R.string.backup_perm_media_btn_allow))
                     }
                     OutlinedButton(onClick = onOpenSettings) {
-                        Text("权限设置")
+                        Text(stringResource(R.string.backup_perm_media_btn_settings))
                     }
                 }
             }
@@ -648,35 +644,34 @@ private fun LocationPermissionDialog(
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Default.LocationOff, contentDescription = null) },
-        title = { Text("备份时包含照片位置？") },
+        title = { Text(stringResource(R.string.backup_perm_location_title)) },
         text = {
             Column {
                 Text(
-                    "开启备份需要「读取媒体位置」权限。它不会获取你的实时位置，" +
-                        "只能读出照片/视频拍摄时已记录的坐标。",
+                    stringResource(R.string.backup_perm_location_desc_1),
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "允许后：云端照片和视频会带有拍摄地点，在 iPhone、Mac 上能看到地图。",
+                    stringResource(R.string.backup_perm_location_desc_2),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "不允许：备份照常进行，只是不包含位置。",
+                    stringResource(R.string.backup_perm_location_desc_3),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = onAllow) { Text("允许") }
+            TextButton(onClick = onAllow) { Text(stringResource(R.string.backup_perm_location_btn_allow)) }
         },
         dismissButton = {
             Row {
-                TextButton(onClick = onAllowWithout) { Text("不带位置备份") }
-                TextButton(onClick = onDismiss) { Text("取消") }
+                TextButton(onClick = onAllowWithout) { Text(stringResource(R.string.backup_perm_location_btn_without)) }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.backup_perm_location_btn_cancel)) }
             }
         }
     )
@@ -693,16 +688,14 @@ private fun LocationPermissionDialog(
 private fun LocationPermanentlyDeniedDialog(onDismiss: () -> Unit) {
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("位置权限已被拒绝") },
+        title = { Text(stringResource(R.string.backup_perm_location_denied_title)) },
         text = {
             Text(
-                "这个权限不会出现在系统设置里，App 也无法再次弹窗申请。" +
-                    "如果确实需要备份位置，只能卸载重装后再授权。\n\n" +
-                    "备份本身不受影响，目前只缺少照片和视频的拍摄地点。",
+                stringResource(R.string.backup_perm_location_denied_desc),
                 style = MaterialTheme.typography.bodyMedium
             )
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("知道了") } }
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.backup_perm_location_denied_confirm)) } }
     )
 }
 
@@ -736,13 +729,13 @@ private fun LocationPermissionHint(
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                text = "未授予定位信息权限，备份将丢失 GPS",
+                text = stringResource(R.string.backup_perm_location_banner),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onTertiaryContainer,
                 modifier = Modifier.weight(1f)
             )
             Spacer(Modifier.width(8.dp))
-            TextButton(onClick = onRequest) { Text("授权") }
+            TextButton(onClick = onRequest) { Text(stringResource(R.string.backup_perm_location_banner_btn)) }
         }
     }
 }

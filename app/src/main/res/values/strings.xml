@@ -590,4 +590,38 @@
     <string name="viewer_title_play_failed">在线播放失败</string>
     <string name="viewer_action_retry">重试</string>
     <string name="viewer_err_video_refresh_failed">视频链接刷新失败，请检查网络后重试</string>
+
+    <!-- Update Dialog -->
+    <string name="update_dialog_title">发现新版本 %1$s</string>
+    <string name="update_dialog_published_at">发布时间: %1$s</string>
+    <string name="update_dialog_release_notes">更新说明：</string>
+    <string name="update_dialog_no_notes">暂无详细更新说明</string>
+    <string name="update_dialog_btn_confirm">前往 GitHub 更新</string>
+    <string name="update_dialog_btn_dismiss">暂不更新</string>
+
+    <!-- Local Albums Permission Dialogs -->
+    <string name="backup_perm_bg_title">提示: 开启常驻后台更稳定</string>
+    <string name="backup_perm_bg_desc">我们检测到您正在开启自动备份。\n\n为了确保照片能及时、稳定地在后台实时上传，是否允许 iClouDroid 忽略电池优化，保持常驻后台运行？\n\n如果不开启，系统可能会在息屏后暂停备份，需要重新打开应用才会继续。</string>
+    <string name="backup_perm_bg_toast_unsupported">设备不支持直接跳转，请到系统设置中手动开启</string>
+    <string name="backup_perm_bg_btn_enable">去开启</string>
+    <string name="backup_perm_bg_btn_skip">暂不需要</string>
+
+    <string name="backup_perm_media_title">管理本地媒体文件夹</string>
+    <string name="backup_perm_media_desc">浏览各相册（如相机、微信、截屏、下载等）需要获取设备媒体文件的读取权限。后续可为您开启特定文件夹的自动增量云备份。</string>
+    <string name="backup_perm_media_btn_allow">允许媒体访问</string>
+    <string name="backup_perm_media_btn_settings">权限设置</string>
+
+    <string name="backup_perm_location_title">备份时包含照片位置？</string>
+    <string name="backup_perm_location_desc_1">开启备份需要「读取媒体位置」权限。它不会获取你的实时位置，只能读出照片/视频拍摄时已记录的坐标。</string>
+    <string name="backup_perm_location_desc_2">允许后：云端照片和视频会带有拍摄地点，在 iPhone、Mac 上能看到地图。</string>
+    <string name="backup_perm_location_desc_3">不允许：备份照常进行，只是不包含位置。</string>
+    <string name="backup_perm_location_btn_allow">允许</string>
+    <string name="backup_perm_location_btn_without">不带位置备份</string>
+    <string name="backup_perm_location_btn_cancel">取消</string>
+
+    <string name="backup_perm_location_denied_title">位置权限已被拒绝</string>
+    <string name="backup_perm_location_denied_desc">这个权限不会出现在系统设置里，App 也无法再次弹窗申请。如果确实需要备份位置，只能卸载重装后再授权。\n\n备份本身不受影响，目前只缺少照片和视频的拍摄地点。</string>
+    <string name="backup_perm_location_denied_confirm">知道了</string>
+    <string name="backup_perm_location_banner">未授予定位信息权限，备份将丢失 GPS</string>
+    <string name="backup_perm_location_banner_btn">授权</string>
 </resources>

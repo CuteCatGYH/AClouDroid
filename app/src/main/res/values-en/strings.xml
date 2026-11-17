@@ -588,4 +588,38 @@
     <string name="viewer_title_play_failed">Online playback failed</string>
     <string name="viewer_action_retry">Retry</string>
     <string name="viewer_err_video_refresh_failed">Failed to refresh video link. Please check your network and try again</string>
+
+    <!-- Update Dialog -->
+    <string name="update_dialog_title">New version available: %1$s</string>
+    <string name="update_dialog_published_at">Published at: %1$s</string>
+    <string name="update_dialog_release_notes">Release notes:</string>
+    <string name="update_dialog_no_notes">No release notes available</string>
+    <string name="update_dialog_btn_confirm">Update on GitHub</string>
+    <string name="update_dialog_btn_dismiss">Not Now</string>
+
+    <!-- Local Albums Permission Dialogs -->
+    <string name="backup_perm_bg_title">Tip: Enable background activity for better stability</string>
+    <string name="backup_perm_bg_desc">We detected that you are enabling auto-backup.\n\nTo ensure photos upload promptly and reliably in the background, allow iClouDroid to ignore battery optimizations and keep running in the background?\n\nIf not enabled, the system may pause backups when the screen is off, requiring you to reopen the app to resume.</string>
+    <string name="backup_perm_bg_toast_unsupported">Your device does not support direct navigation. Please enable it manually in system settings.</string>
+    <string name="backup_perm_bg_btn_enable">Enable</string>
+    <string name="backup_perm_bg_btn_skip">Not Now</string>
+
+    <string name="backup_perm_media_title">Manage Local Media Folders</string>
+    <string name="backup_perm_media_desc">Browsing albums (such as Camera, WeChat, Screenshots, Downloads) requires permission to read media files on your device. You can then enable automatic incremental cloud backup for specific folders.</string>
+    <string name="backup_perm_media_btn_allow">Allow Media Access</string>
+    <string name="backup_perm_media_btn_settings">Permission Settings</string>
+
+    <string name="backup_perm_location_title">Include photo locations in backup?</string>
+    <string name="backup_perm_location_desc_1">Backing up requires \"Access Media Location\" permission. It does not track your real-time location—it only reads the coordinates recorded when photos/videos were taken.</string>
+    <string name="backup_perm_location_desc_2">If allowed: Photos and videos on iCloud will include shooting locations, visible on maps across iPhone and Mac.</string>
+    <string name="backup_perm_location_desc_3">If not allowed: Backup proceeds normally, but without location data.</string>
+    <string name="backup_perm_location_btn_allow">Allow</string>
+    <string name="backup_perm_location_btn_without">Backup Without Location</string>
+    <string name="backup_perm_location_btn_cancel">Cancel</string>
+
+    <string name="backup_perm_location_denied_title">Location Permission Denied</string>
+    <string name="backup_perm_location_denied_desc">This permission does not appear in System Settings, nor can the app request it again via popup. If you really need location backups, you must reinstall the app to grant it.\n\nBackups themselves are unaffected; only shooting locations for photos and videos will be missing.</string>
+    <string name="backup_perm_location_denied_confirm">Got It</string>
+    <string name="backup_perm_location_banner">Location permission not granted; backups will lose GPS metadata</string>
+    <string name="backup_perm_location_banner_btn">Grant</string>
 </resources>

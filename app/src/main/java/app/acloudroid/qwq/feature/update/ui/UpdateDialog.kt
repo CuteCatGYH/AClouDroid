@@ -1,5 +1,7 @@
 package app.acloudroid.qwq.feature.update.ui
 
+import app.acloudroid.qwq.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -37,17 +39,17 @@ fun UpdateDialog(
                     onDismiss()
                 }
             ) {
-                Text("前往 GitHub 更新")
+                Text(stringResource(R.string.update_dialog_btn_confirm))
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("暂不更新")
+                Text(stringResource(R.string.update_dialog_btn_dismiss))
             }
         },
         title = {
             Text(
-                text = "发现新版本 ${releaseInfo.tagName}",
+                text = stringResource(R.string.update_dialog_title, releaseInfo.tagName),
                 fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.titleLarge
             )
@@ -61,21 +63,21 @@ fun UpdateDialog(
             ) {
                 if (releaseInfo.publishedAt.isNotBlank()) {
                     Text(
-                        text = "发布时间: ${releaseInfo.publishedAt.take(10)}",
+                        text = stringResource(R.string.update_dialog_published_at, releaseInfo.publishedAt.take(10)),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                 }
                 Text(
-                    text = "更新说明：",
+                    text = stringResource(R.string.update_dialog_release_notes),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = releaseInfo.releaseNotes.ifBlank { "暂无详细更新说明" },
+                    text = releaseInfo.releaseNotes.ifBlank { stringResource(R.string.update_dialog_no_notes) },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
