@@ -7,6 +7,11 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -32,6 +37,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.VerticalAlignTop
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,6 +48,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -56,7 +63,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -112,6 +124,10 @@ fun PhotosScreen(
 
     val currentMonth by remember(listState, monthKeys) {
         derivedStateOf { monthKeyAt(listState, monthKeys) }
+    }
+
+    val showScrollToTop by remember(listState) {
+        derivedStateOf { listState.firstVisibleItemIndex > 3 }
     }
 
     LaunchedEffect(monthKeys) {
@@ -457,6 +473,35 @@ fun PhotosScreen(
                         coverRowsOf = if (monthCoverEnabled) viewModel::coverRows else null
                     )
                 }
+
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = showScrollToTop,
+                    enter = fadeIn(animationSpec = tween(durationMillis = 180)) + scaleIn(
+                        initialScale = 0.7f,
+                        animationSpec = tween(durationMillis = 200)
+                    ),
+                    exit = fadeOut(animationSpec = tween(durationMillis = 150)) + scaleOut(
+                        targetScale = 0.7f,
+                        animationSpec = tween(durationMillis = 150)
+                    ),
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 16.dp, bottom = 24.dp)
+                ) {
+                    SmallFloatingActionButton(
+                        onClick = {
+                            scope.launch { listState.animateScrollToItem(0) }
+                        },
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        shape = CircleShape
+                    ) {
+                        Icon(
+                            imageVector = ScrollToTopIcon,
+                            contentDescription = stringResource(R.string.photos_action_scroll_to_top)
+                        )
+                    }
+                }
             }
             }
         }
@@ -654,3 +699,40 @@ private fun EmptyStateOverlay(content: @Composable () -> Unit) {
         }
     }
 }
+
+private var _scrollToTopIcon: ImageVector? = null
+
+private val ScrollToTopIcon: ImageVector
+    get() {
+        if (_scrollToTopIcon != null) return _scrollToTopIcon!!
+        _scrollToTopIcon = ImageVector.Builder(
+            name = "ScrollToTop",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f
+        ).apply {
+            // Horizontal bar on top
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 3.2f,
+                strokeLineCap = StrokeCap.Round
+            ) {
+                moveTo(6.5f, 7.5f)
+                lineTo(17.5f, 7.5f)
+            }
+            // Upward chevron without stem
+            path(
+                stroke = SolidColor(Color.Black),
+                strokeLineWidth = 2.8f,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round
+            ) {
+                moveTo(7.5f, 15f)
+                lineTo(12f, 10.5f)
+                lineTo(16.5f, 15f)
+            }
+        }.build()
+        return _scrollToTopIcon!!
+    }
+

@@ -285,6 +285,7 @@
     <string name="photos_title_syncing">正在同步圖庫…</string>
     <string name="photos_action_sync">增量同步</string>
     <string name="photos_action_account">帳號資訊</string>
+    <string name="photos_action_scroll_to_top">回到頂部</string>
     <string name="photos_ptr_syncing">正在同步...</string>
     <string name="photos_ptr_release">釋放立即同步</string>
     <string name="photos_ptr_pull">下拉同步</string>

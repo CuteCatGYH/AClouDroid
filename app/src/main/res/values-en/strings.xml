@@ -285,6 +285,7 @@
     <string name="photos_title_syncing">Syncing library…</string>
     <string name="photos_action_sync">Incremental Sync</string>
     <string name="photos_action_account">Account Info</string>
+    <string name="photos_action_scroll_to_top">Scroll to top</string>
     <string name="photos_ptr_syncing">Syncing...</string>
     <string name="photos_ptr_release">Release to sync</string>
     <string name="photos_ptr_pull">Pull to sync</string>
