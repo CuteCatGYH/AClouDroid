@@ -662,15 +662,17 @@ private fun monthKeyAt(state: LazyListState, monthKeys: List<Int>): Int? {
     if (monthKeys.isEmpty()) return null
 
     val layout = state.layoutInfo
-    val firstVisible = layout.visibleItemsInfo.firstOrNull()
-        ?: return monthKeys.firstOrNull()
+    if (layout.visibleItemsInfo.isEmpty()) return monthKeys.firstOrNull()
 
-    val pinnedHeader = layout.visibleItemsInfo.firstOrNull { info ->
-        val k = info.key.toString()
-        (k.startsWith("h_") || k.startsWith("dh_")) && info.offset <= 0
-    }
+    // Find the first item that actually occupies >= 24px of viewport height,
+    // ignoring boundary slivers and off-screen items scrolled above the top edge.
+    val firstVisible = layout.visibleItemsInfo.firstOrNull { info ->
+        val top = maxOf(info.offset, layout.viewportStartOffset)
+        val bottom = minOf(info.offset + info.size, layout.viewportEndOffset)
+        bottom - top >= 24
+    } ?: return monthKeys.firstOrNull()
 
-    val key = (pinnedHeader ?: firstVisible).key.toString()
+    val key = firstVisible.key.toString()
     val raw = when {
         key.startsWith("h_") -> key.removePrefix("h_")
         key.startsWith("r_") -> key.removePrefix("r_").substringBefore('_')

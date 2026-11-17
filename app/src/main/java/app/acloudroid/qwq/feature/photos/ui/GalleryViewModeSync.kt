@@ -95,8 +95,11 @@ object GalleryViewModeSync {
     ): VisibleAnchor {
         val fallbackYearMonth = months.firstOrNull()?.yearMonth ?: 0
         val layout = state.layoutInfo
-        val firstVisible = layout.visibleItemsInfo.firstOrNull()
-            ?: return VisibleAnchor(yearMonth = fallbackYearMonth)
+        val firstVisible = layout.visibleItemsInfo.firstOrNull { info ->
+            val top = maxOf(info.offset, layout.viewportStartOffset)
+            val bottom = minOf(info.offset + info.size, layout.viewportEndOffset)
+            bottom - top >= 24
+        } ?: return VisibleAnchor(yearMonth = fallbackYearMonth)
 
         val key = firstVisible.key.toString()
 
