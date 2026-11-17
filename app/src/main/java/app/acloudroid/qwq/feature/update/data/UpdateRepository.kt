@@ -108,7 +108,7 @@ class UpdateRepository(
                         Result.success(null)
                     }
                 } else if (conn.responseCode == HttpURLConnection.HTTP_FORBIDDEN || conn.responseCode == 429) {
-                    val msg = "GitHub API 请求过于频繁，请稍后再试"
+                    val msg = appContext.getString(app.acloudroid.qwq.R.string.err_github_rate_limit)
                     _updateState.value = UpdateState.Error(msg)
                     Result.failure(Exception(msg))
                 } else {

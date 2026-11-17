@@ -1,5 +1,8 @@
 package app.acloudroid.qwq.feature.photos.ui
 
+import app.acloudroid.qwq.R
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -40,7 +43,7 @@ fun MonthHeader(
             color = MaterialTheme.colorScheme.onSurface
         )
         Text(
-            text = if (isComplete) "$itemCount 项" else "$itemCount 项 · 扫描中",
+            text = if (isComplete) stringResource(R.string.month_header_count_complete, itemCount) else stringResource(R.string.month_header_count_scanning, itemCount),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )

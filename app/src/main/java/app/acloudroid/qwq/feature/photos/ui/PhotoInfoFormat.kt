@@ -1,5 +1,7 @@
 package app.acloudroid.qwq.feature.photos.ui
 
+import android.content.Context
+import app.acloudroid.qwq.R
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -7,9 +9,8 @@ import kotlin.math.roundToInt
 /**
  * Number formatting for the info panel.
  *
- * Kept as pure functions (no Android types, no Locale-dependent behaviour beyond grouping) so the
- * formatting rules can be unit tested directly — these strings are the part of the feature most
- * likely to be subtly wrong, and a device is not needed to prove it.
+ * Kept as pure functions so the formatting rules can be unit tested directly — these strings are
+ * the part of the feature most likely to be subtly wrong, and a device is not needed to prove it.
  */
 object PhotoInfoFormat {
 
@@ -44,13 +45,13 @@ object PhotoInfoFormat {
     }
 
     /** Focal length as `6.76 mm`, with the 35mm equivalent appended when it differs. */
-    fun focalLength(focalLength: Double?, focalLength35: Int?): String? {
+    fun focalLength(focalLength: Double?, focalLength35: Int?, context: Context? = null): String? {
         val fl = focalLength
         val eq = focalLength35?.takeIf { it > 0 }
         return when {
-            fl != null && fl > 0 && eq != null -> "${fmtMm(fl)} mm · ${eq} mm 等效"
+            fl != null && fl > 0 && eq != null -> context?.getString(R.string.photo_info_focal_both, fmtMm(fl), eq) ?: "${fmtMm(fl)} mm · ${eq} mm 等效"
             fl != null && fl > 0 -> "${fmtMm(fl)} mm"
-            eq != null -> "${eq} mm 等效"
+            eq != null -> context?.getString(R.string.photo_info_focal_eq, eq) ?: "${eq} mm 等效"
             else -> null
         }
     }
@@ -86,20 +87,16 @@ object PhotoInfoFormat {
     }
 
     /** Compass heading as `273° 西` — a bare number is not meaningful to most readers. */
-    fun direction(degrees: Double?): String? {
+    fun direction(degrees: Double?, context: Context? = null): String? {
         val v = degrees ?: return null
         val normalized = ((v % 360) + 360) % 360
-        return "${normalized.roundToInt()}° ${compassLabel(normalized)}"
+        return "${normalized.roundToInt()}° ${compassLabel(normalized, context)}"
     }
 
     /**
-     * Converts Apple's EXIF date (`"2026:10:21 11:03:54"`) to `"2026年10月21日 11:03:54"`.
-     *
-     * The EXIF separator style (colons in the date part) is an EXIF artefact, not something to
-     * show a user. Returns the input unchanged if it does not match the expected shape, so an
-     * unusual value is displayed rather than silently dropped.
+     * Converts Apple's EXIF date (`"2026:10:21 11:03:54"`) to formatted date time.
      */
-    fun exifDateTime(raw: String?): String? {
+    fun exifDateTime(raw: String?, context: Context? = null): String? {
         val s = raw?.trim().orEmpty()
         if (s.isEmpty()) return null
         // "YYYY:MM:DD HH:MM:SS"
@@ -113,7 +110,7 @@ object PhotoInfoFormat {
         val mi = m.toIntOrNull() ?: return s
         val di = d.toIntOrNull() ?: return s
         if (mi !in 1..12 || di !in 1..31) return s
-        return "${yi}年${mi}月${di}日 $time"
+        return context?.getString(R.string.photo_info_datetime_format_zh, yi, mi, di, time) ?: "${yi}年${mi}月${di}日 $time"
     }
 
     private fun fmtMm(v: Double): String = trimZeros(String.format(Locale.US, "%.2f", v))
@@ -122,8 +119,17 @@ object PhotoInfoFormat {
     private fun trimZeros(s: String): String =
         if (!s.contains('.')) s else s.trimEnd('0').trimEnd('.')
 
-    private fun compassLabel(degrees: Double): String {
-        val labels = listOf("北", "东北", "东", "东南", "南", "西南", "西", "西北")
+    private fun compassLabel(degrees: Double, context: Context? = null): String {
+        val labels = listOf(
+            context?.getString(R.string.photo_info_compass_n) ?: "北",
+            context?.getString(R.string.photo_info_compass_ne) ?: "东北",
+            context?.getString(R.string.photo_info_compass_e) ?: "东",
+            context?.getString(R.string.photo_info_compass_se) ?: "东南",
+            context?.getString(R.string.photo_info_compass_s) ?: "南",
+            context?.getString(R.string.photo_info_compass_sw) ?: "西南",
+            context?.getString(R.string.photo_info_compass_w) ?: "西",
+            context?.getString(R.string.photo_info_compass_nw) ?: "西北"
+        )
         val idx = ((degrees + 22.5) / 45.0).toInt() % 8
         return labels[idx]
     }

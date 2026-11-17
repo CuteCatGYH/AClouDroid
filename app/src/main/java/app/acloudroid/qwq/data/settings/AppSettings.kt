@@ -2,7 +2,9 @@ package app.acloudroid.qwq.data.settings
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.annotation.StringRes
 import androidx.core.content.edit
+import app.acloudroid.qwq.R
 import app.acloudroid.qwq.ui.theme.ThemeMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -11,69 +13,50 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * View layout modes for the photo gallery.
  */
-enum class GalleryViewMode(val label: String) {
-    DAY("日"),
-    MONTH("月")
+enum class GalleryViewMode(@StringRes val labelRes: Int) {
+    DAY(R.string.enum_unit_day),
+    MONTH(R.string.enum_unit_month)
 }
 
 /**
  * View display modes for iCloud Drive items.
  */
-enum class DriveDisplayMode(val label: String) {
-    LIST("列表"),
-    GRID("大图标")
+enum class DriveDisplayMode(@StringRes val labelRes: Int) {
+    LIST(R.string.enum_view_list),
+    GRID(R.string.enum_view_grid)
 }
 
 /**
  * Sorting field options for iCloud Drive items.
  */
-enum class DriveSortField(val label: String) {
-    NAME("名称"),
-    DATE_MODIFIED("修改日期"),
-    SIZE("大小"),
-    TYPE("类型")
+enum class DriveSortField(@StringRes val labelRes: Int) {
+    NAME(R.string.enum_sort_name),
+    DATE_MODIFIED(R.string.enum_sort_date),
+    SIZE(R.string.enum_sort_size),
+    TYPE(R.string.enum_sort_type)
 }
 
 /**
  * Sorting direction for iCloud Drive items.
  */
-enum class DriveSortOrder(val label: String) {
-    ASCENDING("正序"),
-    DESCENDING("倒序")
+enum class DriveSortOrder(@StringRes val labelRes: Int) {
+    ASCENDING(R.string.enum_order_asc),
+    DESCENDING(R.string.enum_order_desc)
 }
 
 /**
  * Schedule for the periodic full-library reconciliation walk.
- *
- * ## Why these units
- *
- * The walk is the only thing that can remove photos deleted on other devices (ISS-031), and it
- * costs a few hundred CloudKit round trips. That makes it the wrong thing to run on every launch,
- * but also the wrong thing to never run — so the cadence is a user choice, not a constant.
- *
- * [OFF] is the default: a fresh install should never start a long network walk on its own without
- * the user having been told what it does.
  */
-enum class ScanFrequency(val label: String) {
-    OFF("关闭"),
-    DAILY("每天"),
-    WEEKLY("每周"),
-    MONTHLY("每月"),
-    CUSTOM("自定义")
+enum class ScanFrequency(@StringRes val labelRes: Int) {
+    OFF(R.string.enum_freq_off),
+    DAILY(R.string.enum_freq_daily),
+    WEEKLY(R.string.enum_freq_weekly),
+    MONTHLY(R.string.enum_freq_monthly),
+    CUSTOM(R.string.enum_freq_custom)
 }
 
 /**
  * App-wide user preferences.
- *
- * Deliberately a plain `SharedPreferences` + `StateFlow` object rather than DataStore: the set is
- * small, read once at startup, and WorkManager needs a synchronous read when scheduling.
- *
- * ## Adding a setting
- *
- * Each setting is one property with a private key, a getter that publishes the current value on a
- * `StateFlow`, and a setter that persists and republishes. Nothing else in the app reads the
- * preference directly — see [app.acloudroid.qwq.ui.settings.SettingsScreen], whose rows are
- * declared in a catalog so a new item is one entry plus one composable.
  */
 class AppSettings(context: Context) {
 
@@ -154,11 +137,6 @@ class AppSettings(context: Context) {
         _scanFrequency.value = value
     }
 
-    /**
-     * Days between walks for [ScanFrequency.CUSTOM].
-     *
-     * Clamped to at least 1: a zero interval would create a self-retriggering work request.
-     */
     private val _customIntervalDays = MutableStateFlow(
         prefs.getInt(KEY_CUSTOM_INTERVAL_DAYS, DEFAULT_CUSTOM_DAYS).coerceIn(MIN_CUSTOM_DAYS, MAX_CUSTOM_DAYS)
     )
@@ -174,22 +152,6 @@ class AppSettings(context: Context) {
     // Month cover previews (jump panel)
     // ---------------------------------------------------------------------------------------
 
-    /**
-     * Whether the gallery's jump card shows a thumbnail for each month.
-     *
-     * ## This is not a display-only switch
-     *
-     * It is the single source of truth for both halves of the feature, and all three consumers
-     * read it:
-     *
-     *  - `PhotoRepository.rebuildMonthIndexFor` — skips the `coverAssetId` backfill when off
-     *  - `PhotoRepository.prefetchMonthCovers` — returns immediately when off
-     *  - `MonthIndexBar` — falls back to the plain text grid when off
-     *
-     * Hiding the images while still downloading them would be the worst of both outcomes: the user
-     * would save neither disk space nor scan time. Anything added later that touches covers must
-     * consult this flag too.
-     */
     private val _monthCoverEnabled = MutableStateFlow(
         prefs.getBoolean(KEY_MONTH_COVER_ENABLED, true)
     )
@@ -271,7 +233,7 @@ class AppSettings(context: Context) {
     fun setMaxConcurrentUploads(value: Int) {
         val clamped = value.coerceIn(1, 3)
         prefs.edit { putInt(KEY_MAX_CONCURRENT_UPLOADS, clamped) }
-        _maxConcurrentUploads.value = clamped
+        _maxConcurrentUploads.value = value
     }
 
     private val _showBackupNotification = MutableStateFlow(

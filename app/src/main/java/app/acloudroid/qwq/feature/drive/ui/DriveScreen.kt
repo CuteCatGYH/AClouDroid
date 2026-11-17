@@ -1,5 +1,8 @@
 package app.acloudroid.qwq.feature.drive.ui
 
+import app.acloudroid.qwq.R
+import androidx.compose.ui.res.stringResource
+
 import android.content.Context
 import android.util.Log
 import androidx.activity.compose.BackHandler
@@ -251,14 +254,14 @@ fun DriveScreen(
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
-                                text = "此文件夹为空",
+                                text = stringResource(R.string.drive_empty_folder),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             if (state.isRefreshing) {
                                 Spacer(Modifier.height(6.dp))
                                 Text(
-                                    text = "正在重新检查…",
+                                    text = stringResource(R.string.drive_rechecking),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.outline
                                 )
@@ -370,7 +373,7 @@ fun DriveScreen(
         ) {
             Icon(
                 imageVector = Icons.Default.Add,
-                contentDescription = "上传文件"
+                contentDescription = stringResource(R.string.drive_action_upload)
             )
         }
 
@@ -510,21 +513,21 @@ private fun DriveHeader(
             ) {
                 Icon(
                     imageVector = if (state.displayMode == DriveDisplayMode.LIST) Icons.Default.GridView else Icons.Default.ViewList,
-                    contentDescription = "切换显示视图"
+                    contentDescription = stringResource(R.string.drive_action_switch_view)
                 )
             }
 
             // Sort Menu Button
             Box {
                 IconButton(onClick = { sortMenuExpanded = true }) {
-                    Icon(Icons.Default.Sort, contentDescription = "排序方式")
+                    Icon(Icons.Default.Sort, contentDescription = stringResource(R.string.drive_action_sort))
                 }
                 DropdownMenu(
                     expanded = sortMenuExpanded,
                     onDismissRequest = { sortMenuExpanded = false }
                 ) {
                     Text(
-                        text = "排序维度",
+                        text = stringResource(R.string.drive_sort_field),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
@@ -533,7 +536,7 @@ private fun DriveHeader(
                         DropdownMenuItem(
                             text = {
                                 Text(
-                                    text = field.label,
+                                    text = stringResource(field.labelRes),
                                     color = if (state.sortField == field) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                                 )
                             },
@@ -547,7 +550,7 @@ private fun DriveHeader(
                     DropdownMenuItem(
                         text = {
                             Text(
-                                text = "顺序: ${if (state.sortOrder == DriveSortOrder.ASCENDING) "正序 (A-Z)" else "倒序 (Z-A)"}"
+                                text = stringResource(R.string.drive_sort_order_format, if (state.sortOrder == DriveSortOrder.ASCENDING) stringResource(R.string.drive_sort_order_asc) else stringResource(R.string.drive_sort_order_desc))
                             )
                         },
                         leadingIcon = {
@@ -565,20 +568,20 @@ private fun DriveHeader(
             }
 
             IconButton(onClick = onCreateFolderClick) {
-                Icon(Icons.Default.CreateNewFolder, contentDescription = "新建文件夹")
+                Icon(Icons.Default.CreateNewFolder, contentDescription = stringResource(R.string.drive_action_new_folder))
             }
 
             // More Actions Overflow Menu
             Box {
                 IconButton(onClick = { moreMenuExpanded = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "更多操作")
+                    Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.drive_action_more))
                 }
                 DropdownMenu(
                     expanded = moreMenuExpanded,
                     onDismissRequest = { moreMenuExpanded = false }
                 ) {
                     DropdownMenuItem(
-                        text = { Text("增量同步") },
+                        text = { Text(stringResource(R.string.drive_action_sync)) },
                         leadingIcon = { Icon(Icons.Default.Sync, contentDescription = null) },
                         onClick = {
                             moreMenuExpanded = false
@@ -587,7 +590,7 @@ private fun DriveHeader(
                         enabled = !state.isSyncing
                     )
                     DropdownMenuItem(
-                        text = { Text("全量刷新") },
+                        text = { Text(stringResource(R.string.drive_action_refresh_all)) },
                         leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
                         onClick = {
                             moreMenuExpanded = false
@@ -597,7 +600,7 @@ private fun DriveHeader(
                     )
                     HorizontalDivider()
                     DropdownMenuItem(
-                        text = { Text("最近删除 (网页端)") },
+                        text = { Text(stringResource(R.string.drive_action_trash)) },
                         leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
                         onClick = {
                             moreMenuExpanded = false
@@ -704,7 +707,7 @@ private fun DriveItemRow(
                 IconButton(onClick = onCancelClick) {
                     Icon(
                         imageVector = Icons.Default.Close,
-                        contentDescription = "取消下载",
+                        contentDescription = stringResource(R.string.drive_action_cancel_dl),
                         tint = MaterialTheme.colorScheme.error
                     )
                 }
@@ -714,7 +717,7 @@ private fun DriveItemRow(
                     IconButton(onClick = onDownloadClick) {
                         Icon(
                             imageVector = Icons.Default.Download,
-                            contentDescription = "下载文件",
+                            contentDescription = stringResource(R.string.drive_action_dl_item),
                             tint = MaterialTheme.colorScheme.primary
                         )
                     }
@@ -723,7 +726,7 @@ private fun DriveItemRow(
                     IconButton(onClick = { menuExpanded = true }) {
                         Icon(
                             Icons.Default.MoreVert,
-                            contentDescription = "更多操作",
+                            contentDescription = stringResource(R.string.drive_action_more),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -733,7 +736,7 @@ private fun DriveItemRow(
                     ) {
                         if (item.isDownloadable) {
                             DropdownMenuItem(
-                                text = { Text("预览") },
+                                text = { Text(stringResource(R.string.drive_action_preview)) },
                                 leadingIcon = { Icon(Icons.Default.Visibility, contentDescription = null) },
                                 onClick = {
                                     menuExpanded = false
@@ -741,7 +744,7 @@ private fun DriveItemRow(
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("下载") },
+                                text = { Text(stringResource(R.string.drive_action_download)) },
                                 leadingIcon = { Icon(Icons.Default.Download, contentDescription = null) },
                                 onClick = {
                                     menuExpanded = false
@@ -749,7 +752,7 @@ private fun DriveItemRow(
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("分享") },
+                                text = { Text(stringResource(R.string.drive_action_share)) },
                                 leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
                                 onClick = {
                                     menuExpanded = false
@@ -758,7 +761,7 @@ private fun DriveItemRow(
                             )
                             if (onIWorkWebClick != null) {
                                 DropdownMenuItem(
-                                    text = { Text("网页版 iWork 打开") },
+                                    text = { Text(stringResource(R.string.drive_action_iwork)) },
                                     leadingIcon = { Icon(Icons.Default.Language, contentDescription = null) },
                                     onClick = {
                                         menuExpanded = false
@@ -769,7 +772,7 @@ private fun DriveItemRow(
                             HorizontalDivider()
                         }
                         DropdownMenuItem(
-                            text = { Text("重命名") },
+                            text = { Text(stringResource(R.string.drive_action_rename)) },
                             leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
                             onClick = {
                                 menuExpanded = false
@@ -777,7 +780,7 @@ private fun DriveItemRow(
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("移动") },
+                            text = { Text(stringResource(R.string.drive_action_move)) },
                             leadingIcon = { Icon(Icons.Default.DriveFileMove, contentDescription = null) },
                             onClick = {
                                 menuExpanded = false
@@ -785,7 +788,7 @@ private fun DriveItemRow(
                             }
                         )
                         DropdownMenuItem(
-                            text = { Text("移入最近删除") },
+                            text = { Text(stringResource(R.string.drive_action_move_to_trash)) },
                             leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
                             onClick = {
                                 menuExpanded = false
@@ -878,7 +881,7 @@ private fun DriveGridItem(
                     IconButton(onClick = onCancelClick, modifier = Modifier.size(32.dp)) {
                         Icon(
                             imageVector = Icons.Default.Close,
-                            contentDescription = "取消下载",
+                            contentDescription = stringResource(R.string.drive_action_cancel_dl),
                             tint = MaterialTheme.colorScheme.error,
                             modifier = Modifier.size(18.dp)
                         )
@@ -889,7 +892,7 @@ private fun DriveGridItem(
                         IconButton(onClick = onDownloadClick, modifier = Modifier.size(32.dp)) {
                             Icon(
                                 imageVector = Icons.Default.Download,
-                                contentDescription = "下载文件",
+                                contentDescription = stringResource(R.string.drive_action_dl_item),
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -899,7 +902,7 @@ private fun DriveGridItem(
                         IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(32.dp)) {
                             Icon(
                                 Icons.Default.MoreVert,
-                                contentDescription = "更多操作",
+                                contentDescription = stringResource(R.string.drive_action_more),
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -910,7 +913,7 @@ private fun DriveGridItem(
                         ) {
                             if (item.isDownloadable) {
                                 DropdownMenuItem(
-                                    text = { Text("预览") },
+                                    text = { Text(stringResource(R.string.drive_action_preview)) },
                                     leadingIcon = { Icon(Icons.Default.Visibility, contentDescription = null) },
                                     onClick = {
                                         menuExpanded = false
@@ -918,7 +921,7 @@ private fun DriveGridItem(
                                     }
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("下载") },
+                                    text = { Text(stringResource(R.string.drive_action_download)) },
                                     leadingIcon = { Icon(Icons.Default.Download, contentDescription = null) },
                                     onClick = {
                                         menuExpanded = false
@@ -926,7 +929,7 @@ private fun DriveGridItem(
                                     }
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("分享") },
+                                    text = { Text(stringResource(R.string.drive_action_share)) },
                                     leadingIcon = { Icon(Icons.Default.Share, contentDescription = null) },
                                     onClick = {
                                         menuExpanded = false
@@ -935,7 +938,7 @@ private fun DriveGridItem(
                                 )
                                 if (onIWorkWebClick != null) {
                                     DropdownMenuItem(
-                                        text = { Text("网页版 iWork 打开") },
+                                        text = { Text(stringResource(R.string.drive_action_iwork)) },
                                         leadingIcon = { Icon(Icons.Default.Language, contentDescription = null) },
                                         onClick = {
                                             menuExpanded = false
@@ -946,7 +949,7 @@ private fun DriveGridItem(
                                 HorizontalDivider()
                             }
                             DropdownMenuItem(
-                                text = { Text("重命名") },
+                                text = { Text(stringResource(R.string.drive_action_rename)) },
                                 leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
                                 onClick = {
                                     menuExpanded = false
@@ -954,7 +957,7 @@ private fun DriveGridItem(
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("移动") },
+                                text = { Text(stringResource(R.string.drive_action_move)) },
                                 leadingIcon = { Icon(Icons.Default.DriveFileMove, contentDescription = null) },
                                 onClick = {
                                     menuExpanded = false
@@ -962,7 +965,7 @@ private fun DriveGridItem(
                                 }
                             )
                             DropdownMenuItem(
-                                text = { Text("移入最近删除") },
+                                text = { Text(stringResource(R.string.drive_action_move_to_trash)) },
                                 leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
                                 onClick = {
                                     menuExpanded = false
@@ -1068,7 +1071,7 @@ private fun DriveItemIcon(
         item.isContainer -> {
             Icon(
                 imageVector = Icons.Default.Folder,
-                contentDescription = "文件夹",
+                contentDescription = stringResource(R.string.drive_icon_folder),
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = modifier
             )
@@ -1090,7 +1093,7 @@ private fun DriveItemIcon(
         ext in setOf("jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "bmp") -> {
             Icon(
                 imageVector = Icons.Default.Image,
-                contentDescription = "图片",
+                contentDescription = stringResource(R.string.drive_icon_image),
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = modifier
             )
@@ -1099,7 +1102,7 @@ private fun DriveItemIcon(
         ext in setOf("mp4", "mov", "m4v", "avi", "mkv") -> {
             Icon(
                 imageVector = Icons.Default.Movie,
-                contentDescription = "视频",
+                contentDescription = stringResource(R.string.drive_icon_video),
                 tint = MaterialTheme.colorScheme.tertiary,
                 modifier = modifier
             )
@@ -1108,7 +1111,7 @@ private fun DriveItemIcon(
         ext in setOf("mp3", "m4a", "wav", "flac", "aac") -> {
             Icon(
                 imageVector = Icons.Default.AudioFile,
-                contentDescription = "音频",
+                contentDescription = stringResource(R.string.drive_icon_audio),
                 tint = MaterialTheme.colorScheme.secondary,
                 modifier = modifier
             )
@@ -1126,7 +1129,7 @@ private fun DriveItemIcon(
         ext in setOf("zip", "tar", "gz", "rar", "7z") -> {
             Icon(
                 imageVector = Icons.Default.FolderZip,
-                contentDescription = "压缩包",
+                contentDescription = stringResource(R.string.drive_icon_archive),
                 tint = MaterialTheme.colorScheme.secondary,
                 modifier = modifier
             )
@@ -1135,7 +1138,7 @@ private fun DriveItemIcon(
         ext in setOf("pages", "numbers", "key", "keynote", "doc", "docx", "xls", "xlsx", "ppt", "pptx") -> {
             Icon(
                 imageVector = Icons.Default.Article,
-                contentDescription = "文档",
+                contentDescription = stringResource(R.string.drive_icon_doc),
                 tint = MaterialTheme.colorScheme.primary,
                 modifier = modifier
             )
@@ -1144,7 +1147,7 @@ private fun DriveItemIcon(
         ext in setOf("txt", "json", "xml", "html", "kt", "java", "py", "md", "c", "cpp") -> {
             Icon(
                 imageVector = Icons.Default.Description,
-                contentDescription = "文本",
+                contentDescription = stringResource(R.string.drive_icon_text),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = modifier
             )
@@ -1153,7 +1156,7 @@ private fun DriveItemIcon(
         else -> {
             Icon(
                 imageVector = Icons.Default.InsertDriveFile,
-                contentDescription = "文件",
+                contentDescription = stringResource(R.string.drive_icon_file),
                 tint = MaterialTheme.colorScheme.secondary,
                 modifier = modifier
             )
@@ -1173,7 +1176,7 @@ private fun formatSize(bytes: Long): String = when {
 private fun subtitleFor(item: DriveItemEntity): String {
     if (item.isContainer) {
         val count = item.directChildrenCount
-        val countText = if (count >= 0) "$count 项" else ""
+        val countText = if (count >= 0) stringResource(R.string.drive_item_count_suffix, count) else ""
         val modText = item.dateModified ?: ""
         return listOf(countText, modText).filter { it.isNotBlank() }.joinToString(" · ")
     }
@@ -1203,7 +1206,7 @@ private fun DriveErrorBanner(message: String, onDismiss: () -> Unit) {
                 modifier = Modifier.weight(1f)
             )
             IconButton(onClick = onDismiss) {
-                Icon(Icons.Default.Close, contentDescription = "关闭提示")
+                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.drive_action_close_hint))
             }
         }
     }
@@ -1229,7 +1232,7 @@ private fun DriveNoticeBanner(message: String, onDismiss: () -> Unit) {
                 modifier = Modifier.weight(1f)
             )
             IconButton(onClick = onDismiss) {
-                Icon(Icons.Default.Close, contentDescription = "关闭提示")
+                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.drive_action_close_hint))
             }
         }
     }
@@ -1252,13 +1255,13 @@ private fun DriveUploadBanner(
     val activeCount = queuedCount + uploadingList.size
     val headline = when {
         failedList.isNotEmpty() && activeCount > 0 ->
-            "正在上传 $activeCount 个文件 · ${failedList.size} 个失败"
+            stringResource(R.string.drive_upload_prog_mixed, activeCount, failedList.size)
         failedList.isNotEmpty() ->
-            "${failedList.size} 个上传失败"
+            stringResource(R.string.drive_upload_prog_failed, failedList.size)
         uploadingList.isNotEmpty() ->
-            "正在上传 ${uploadingList.size} 个文件" + if (queuedCount > 0) "（$queuedCount 排队中）" else ""
+            stringResource(R.string.drive_upload_prog_uploading, uploadingList.size) + if (queuedCount > 0) stringResource(R.string.drive_upload_prog_queued, queuedCount) else ""
         queuedCount > 0 ->
-            "$queuedCount 个文件排队上传中…"
+            stringResource(R.string.drive_upload_prog_only_queued, queuedCount)
         else -> ""
     }
 
@@ -1306,7 +1309,7 @@ private fun DriveUploadBanner(
                 )
                 Icon(
                     imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    contentDescription = if (isExpanded) "折叠详情" else "展开详情"
+                    contentDescription = if (isExpanded) stringResource(R.string.drive_upload_collapse) else stringResource(R.string.drive_upload_expand)
                 )
             }
 
@@ -1335,13 +1338,13 @@ private fun DriveUploadBanner(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 val statusText = when (item.status) {
-                                    DriveUploadStatus.QUEUED -> "排队中…"
+                                    DriveUploadStatus.QUEUED -> stringResource(R.string.drive_upload_status_queued)
                                     DriveUploadStatus.UPLOADING -> {
                                         val pct = if (item.filesize > 0) ((item.bytesUploaded * 100) / item.filesize).toInt().coerceIn(0, 100) else 0
-                                        "传输中 · $pct%"
+                                        stringResource(R.string.drive_upload_status_active, pct)
                                     }
-                                    DriveUploadStatus.FAILED -> "失败: ${item.errorMessage ?: "未知错误"}"
-                                    DriveUploadStatus.SUCCESS -> "成功"
+                                    DriveUploadStatus.FAILED -> stringResource(R.string.drive_upload_status_failed, item.errorMessage ?: stringResource(R.string.drive_upload_status_unknown_err))
+                                    DriveUploadStatus.SUCCESS -> stringResource(R.string.drive_upload_status_success)
                                     else -> item.status
                                 }
                                 Text(
@@ -1354,7 +1357,7 @@ private fun DriveUploadBanner(
                             }
                             if (item.status == DriveUploadStatus.FAILED) {
                                 TextButton(onClick = { onRetryUpload(item.id) }) {
-                                    Text("重试", color = contentColor)
+                                    Text(stringResource(R.string.drive_upload_retry), color = contentColor)
                                 }
                             }
                             IconButton(
@@ -1363,7 +1366,7 @@ private fun DriveUploadBanner(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Close,
-                                    contentDescription = "取消上传",
+                                    contentDescription = stringResource(R.string.drive_upload_cancel),
                                     tint = contentColor,
                                     modifier = Modifier.size(16.dp)
                                 )
@@ -1384,12 +1387,12 @@ private fun CreateFolderDialog(
     var folderName by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("新建文件夹") },
+        title = { Text(stringResource(R.string.drive_modal_new_folder_title)) },
         text = {
             OutlinedTextField(
                 value = folderName,
                 onValueChange = { folderName = it },
-                label = { Text("文件夹名称") },
+                label = { Text(stringResource(R.string.drive_modal_new_folder_label)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -1398,10 +1401,10 @@ private fun CreateFolderDialog(
             TextButton(
                 onClick = { onConfirm(folderName) },
                 enabled = folderName.isNotBlank()
-            ) { Text("新建") }
+            ) { Text(stringResource(R.string.drive_modal_new_folder_btn)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         }
     )
 }
@@ -1415,12 +1418,12 @@ private fun RenameDialog(
     var name by remember { mutableStateOf(item.name) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("重命名") },
+        title = { Text(stringResource(R.string.drive_action_rename)) },
         text = {
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
-                label = { Text("新名称") },
+                label = { Text(stringResource(R.string.drive_modal_rename_label)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )
@@ -1429,10 +1432,10 @@ private fun RenameDialog(
             TextButton(
                 onClick = { onConfirm(name) },
                 enabled = name.isNotBlank() && name != item.name
-            ) { Text("确定") }
+            ) { Text(stringResource(R.string.action_confirm)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         }
     )
 }
@@ -1528,7 +1531,7 @@ private fun HierarchicalFolderPickerDialog(
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "返回上级",
+                                contentDescription = stringResource(R.string.drive_modal_move_up),
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(18.dp)
                             )
@@ -1576,7 +1579,7 @@ private fun HierarchicalFolderPickerDialog(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "当前选定目录: $currentFolderName",
+                                text = stringResource(R.string.drive_modal_move_current, currentFolderName),
                                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 maxLines = 1,
@@ -1593,7 +1596,7 @@ private fun HierarchicalFolderPickerDialog(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "此目录下无子文件夹",
+                                text = stringResource(R.string.drive_modal_move_empty),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1635,7 +1638,7 @@ private fun HierarchicalFolderPickerDialog(
                                     }
                                     Icon(
                                         imageVector = Icons.Default.ChevronRight,
-                                        contentDescription = "进入子目录",
+                                        contentDescription = stringResource(R.string.drive_modal_move_enter),
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(20.dp)
                                     )
@@ -1656,7 +1659,7 @@ private fun HierarchicalFolderPickerDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("取消")
+                Text(stringResource(R.string.action_cancel))
             }
         }
     )
@@ -1671,8 +1674,8 @@ private fun MoveDialog(
     onConfirm: (String) -> Unit
 ) {
     HierarchicalFolderPickerDialog(
-        title = "移动「${item.displayName}」到",
-        confirmButtonText = "移动到此",
+        title = stringResource(R.string.drive_modal_move_title, item.displayName),
+        confirmButtonText = stringResource(R.string.drive_modal_move_btn),
         allContainers = allContainers,
         initialFolderId = currentFolderId,
         excludedFolderId = item.drivewsid,
@@ -1692,15 +1695,15 @@ private fun DeleteConfirmDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("移入最近删除") },
-        text = { Text("确定要将「${item.name}」移入最近删除吗？可在网页端恢复或彻底清除。") },
+        title = { Text(stringResource(R.string.drive_action_move_to_trash)) },
+        text = { Text(stringResource(R.string.drive_modal_trash_desc, item.name)) },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text("移入最近删除", color = MaterialTheme.colorScheme.error)
+                Text(stringResource(R.string.drive_modal_trash_btn), color = MaterialTheme.colorScheme.error)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         }
     )
 }
@@ -1725,7 +1728,7 @@ private fun DriveTrashWebDialog(
                     title = {
                         Column {
                             Text(
-                                text = "最近删除 (网页端)",
+                                text = stringResource(R.string.drive_action_trash),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
@@ -1740,7 +1743,7 @@ private fun DriveTrashWebDialog(
                         IconButton(onClick = onDismiss) {
                             Icon(
                                 imageVector = Icons.Default.Close,
-                                contentDescription = "关闭"
+                                contentDescription = stringResource(R.string.action_close)
                             )
                         }
                     },
@@ -1769,17 +1772,17 @@ private fun ChinaUploadNoticeDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("云上贵州账号上传限制说明") },
+        title = { Text(stringResource(R.string.drive_modal_gcz_limit_title)) },
         text = {
             Text(
-                "您的账号为云上贵州（中国大陆）节点。实测苹果服务端针对该区域单次文件上传请求限制为 1 GiB (~1073 MB)。\n\n超过 1 GiB 的文件上传将会被云端拒绝，本应用将在选文件后自动进行预检提示。"
+                stringResource(R.string.drive_modal_gcz_limit_desc)
             )
         },
         confirmButton = {
-            TextButton(onClick = onContinue) { Text("知道了并继续") }
+            TextButton(onClick = onContinue) { Text(stringResource(R.string.drive_modal_gcz_limit_btn)) }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("取消") }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         }
     )
 }

@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">AClouDroid</string>
     <string name="share_to_icloud_label">发送到 iCloud</string>
@@ -55,4 +56,538 @@
     <string name="action_back">返回</string>
     <string name="action_settings">设置</string>
     <string name="action_sign_out">退出登录</string>
+
+    <!-- Update Dialog / App Shell -->
+    <string name="update_banner_title">🎉 发现新版本 %1$s</string>
+    <string name="update_banner_desc">点击前往 GitHub 查看并更新</string>
+    <string name="update_banner_view">查看</string>
+    <string name="update_banner_ignore">忽略</string>
+
+    <!-- Settings Dialog -->
+    <string name="settings_title">设置</string>
+    <string name="settings_full_scan_dialog_title">开始全盘扫描？</string>
+    <string name="settings_full_scan_dialog_desc_1">全盘扫描会完整遍历云端照片库（发起数百次请求），并比对本地数据库以清理在其它设备上已删除的照片。</string>
+    <string name="settings_full_scan_dialog_desc_2_on">后台扫描已开启（%1$s 凌晨 3:00 自动执行），通常无需手动触发。</string>
+    <string name="settings_full_scan_dialog_desc_3">扫到一半退出不会损坏任何数据，下次会从断点继续。</string>
+    <string name="settings_full_scan_start">开始扫描</string>
+
+    <!-- Settings Items: Misc -->
+    <string name="settings_item_icloud_web">iCloud 网页版</string>
+    <string name="settings_item_nav_bar_items">导航栏显示项</string>
+    <string name="settings_item_nav_bar_items_desc">选择要在底部显示的标签</string>
+    <string name="settings_item_full_scan">全盘扫描与对账</string>
+    <string name="settings_item_full_scan_desc_complete">已同步</string>
+    <string name="settings_item_month_cover">年份网格封面</string>
+    <string name="settings_item_month_cover_desc">关闭可节省流量并提高列表滚动流畅度</string>
+    <string name="settings_item_download_all">全量下载照片原件</string>
+    <string name="settings_item_download_all_desc">将 iCloud 云端所有的原图打包下载到本地（不支持断点续传）</string>
+    
+    <!-- Settings Items: Scan Frequency -->
+    <string name="settings_item_scan_frequency">周期扫描频率</string>
+    <string name="settings_item_scan_frequency_desc">自动执行全盘扫描的时间间隔</string>
+    <string name="settings_scan_freq_off">关闭</string>
+    <string name="settings_scan_freq_daily">每天</string>
+    <string name="settings_scan_freq_weekly">每周</string>
+    <string name="settings_scan_freq_monthly">每月</string>
+    <string name="settings_scan_freq_custom">每 %1$d 天</string>
+    
+    <!-- Settings Items: Cloud Media Provider -->
+    <string name="settings_item_cloud_media">系统照片选择器接入</string>
+    <string name="settings_item_cloud_media_desc_on">已激活白名单，可在原生选取器看到 iCloud 照片</string>
+    <string name="settings_item_cloud_media_desc_off">点击通过 Shizuku 注入白名单</string>
+    <string name="settings_item_cloud_media_toast_manual">设备不支持直接跳转，请到系统设置中手动开启</string>
+    
+    <!-- Settings Items: Auto Backup -->
+    <string name="settings_item_battery_opt">常驻后台 (实时备份)</string>
+    <string name="settings_item_battery_opt_desc_on">已允许常驻后台，可提升实时备份概率</string>
+    <string name="settings_item_battery_opt_desc_off">忽略电池优化，防止应用在后台被系统杀死</string>
+    <string name="settings_item_battery_opt_help">若设置未生效，请参考 Don\'t kill my app!</string>
+    <string name="settings_item_keep_alive">显示常驻通知</string>
+    <string name="settings_item_keep_alive_desc_on">已开启常驻通知</string>
+    <string name="settings_item_keep_alive_desc_off">显示一条常驻通知，阻止应用被系统杀死</string>
+    <string name="settings_item_backup_interval">周期备份频率</string>
+    <string name="settings_item_backup_interval_desc_immediate">新增照片后立刻触发备份</string>
+    <string name="settings_item_backup_interval_desc">后台触发自动备份的最高频率</string>
+    <string name="settings_backup_interval_immediate">立即 (媒体监听)</string>
+    <string name="settings_backup_interval_immediate_short">立即</string>
+    <string name="settings_backup_interval_15m">15 分钟</string>
+    <string name="settings_backup_interval_30m">30 分钟</string>
+    <string name="settings_backup_interval_1h">1 小时</string>
+    <string name="settings_backup_interval_custom">自定义...</string>
+    <string name="settings_backup_interval_custom_val">%1$d 分钟</string>
+    <string name="settings_item_backup_cellular">允许使用移动数据</string>
+    <string name="settings_item_backup_cellular_desc_on">Wi-Fi 或移动数据下均可备份</string>
+    <string name="settings_item_backup_cellular_desc_off">仅在 Wi-Fi 连接时备份</string>
+    <string name="settings_item_backup_charging">仅在充电时备份</string>
+    <string name="settings_item_backup_charging_desc_on">连接电源时才进行备份</string>
+    <string name="settings_item_backup_charging_desc_off">不限制充电状态</string>
+    <string name="settings_item_backup_battery">电量充足时才备份</string>
+    <string name="settings_item_backup_battery_desc_on">电量低于 20% 时暂停备份</string>
+    <string name="settings_item_backup_battery_desc_off">不限制电池电量</string>
+    <string name="settings_item_backup_concurrent">最大并发上传数</string>
+    <string name="settings_item_backup_concurrent_desc">同时上传的文件数量: %1$d</string>
+    <string name="settings_item_backup_notification">显示后台进度通知</string>
+    <string name="settings_item_backup_notification_desc_on">自动备份时显示进度条通知</string>
+    <string name="settings_item_backup_notification_desc_off">静默在后台备份</string>
+    
+    <!-- Settings Items: Drive -->
+    <string name="settings_item_drive_mode">显示视图</string>
+    <string name="settings_item_drive_mode_desc_curr">当前: %1$s</string>
+    <string name="settings_item_drive_sort_field">排序维度</string>
+    <string name="settings_item_drive_sort_field_desc_curr">当前: %1$s</string>
+    <string name="settings_item_drive_sort_order">排序顺序</string>
+    <string name="settings_item_drive_sort_order_desc_asc">正序 (A-Z)</string>
+    <string name="settings_item_drive_sort_order_desc_desc">倒序 (Z-A)</string>
+    <string name="settings_item_drive_sort_order_desc_curr">顺序: %1$s</string>
+    
+    <!-- Settings Items: About -->
+    <string name="settings_item_auto_update">自动检查更新</string>
+    <string name="settings_item_auto_update_desc_on">启动时自动检查 GitHub 上的新版本</string>
+    <string name="settings_item_auto_update_desc_off">关闭自动更新检查</string>
+    <string name="settings_item_about">关于</string>
+    <string name="settings_item_about_desc_curr">当前版本: %1$s</string>
+    
+
+    <!-- Settings Screen Misc Remaining -->
+    <string name="settings_item_backup_concurrent_val">%1$d 项</string>
+    <string name="settings_item_backup_concurrent_val_1">(串行)</string>
+    <string name="settings_item_backup_concurrent_val_2">(推荐)</string>
+    <string name="settings_item_backup_concurrent_val_3">(并行)</string>
+    <string name="settings_item_backup_concurrent_val_1_full">1 项 (串行上传)</string>
+    <string name="settings_item_backup_concurrent_val_2_full">2 项 (均衡推荐)</string>
+    <string name="settings_item_backup_concurrent_val_3_full">3 项 (高速并行)</string>
+    <string name="settings_item_month_cover_desc_on">跳转面板显示每月照片封面；关闭后不再下载封面</string>
+    <string name="settings_item_month_cover_desc_off">已关闭，月份以纯文本显示且不占用存储</string>
+    <string name="settings_item_cloud_media_desc_shizuku">通过 Shizuku 一键激活或前往系统设置</string>
+    <string name="settings_item_cloud_media_desc_req">需要 Android 13 (API 33) 及以上系统支持</string>
+    <string name="settings_item_full_scan_desc_scanning">正在扫描…</string>
+    <string name="settings_item_full_scan_desc_idle">清理在其它设备上已删除的照片</string>
+    <string name="settings_item_download_all_desc_prep">正在准备下载队列…</string>
+    <string name="settings_item_download_all_desc_dl">正在保存到 %1$s (%2$d/%3$d)</string>
+    <string name="settings_item_download_all_desc_pause">已暂停 (%1$d/%2$d 项)</string>
+    <string name="settings_item_download_all_desc_idle">保存云端所有内容至本地相册 (默认 DCIM/Camera)</string>
+    <string name="settings_item_scan_freq_title_short">自动扫描频率</string>
+    <string name="settings_item_scan_freq_desc_off">关闭时常驻后台的自动扫描不会运行</string>
+    <string name="settings_item_custom_interval">自定义周期</string>
+    <string name="settings_item_custom_interval_desc_on">每 %1$d 天执行一次</string>
+    <string name="settings_item_custom_interval_desc_off">仅在频率选择「自定义」时生效</string>
+
+    <!-- Settings Screen Misc Remaining (Part 2) -->
+    <string name="settings_item_custom_interval_val">%1$d 天</string>
+    <string name="settings_item_drive_mode_title">云盘显示模式</string>
+    <string name="settings_item_drive_mode_desc">切换文件与文件夹在云盘中的显示样式</string>
+    <string name="settings_item_drive_sort_field_title">默认排序字段</string>
+    <string name="settings_item_drive_sort_field_desc">设置云盘文件与文件夹的默认排序依据</string>
+    <string name="settings_item_drive_sort_order_title">默认排序方向</string>
+    <string name="settings_item_drive_sort_order_desc">设置云盘文件与文件夹的默认排序升降序</string>
+    <string name="settings_item_auto_update_title">自动检查更新</string>
+    <string name="settings_item_auto_update_desc">应用启动时自动检测 GitHub Releases 最新版本</string>
+    <string name="settings_item_about_title">关于</string>
+    <string name="settings_item_about_desc">关于 AClouDroid</string>
+    <string name="settings_cloud_media_dialog_title">系统云端媒体设置</string>
+    <string name="settings_cloud_media_dialog_desc">Android 系统对云端媒体提供方开启了白名单保护。您可以通过以下方式之一完成激活：</string>
+    <string name="settings_cloud_media_shizuku_auth">✅ Shizuku 已连接并授权</string>
+    <string name="settings_cloud_media_shizuku_req">⚠️ Shizuku 已运行，点击可请求授权</string>
+    <string name="settings_cloud_media_shizuku_missing">ℹ️ 未检测到 Shizuku 运行。您也可通过电脑执行 ADB 命令完成激活。</string>
+    <string name="settings_cloud_media_adb_copied">已复制 ADB 命令到剪贴板</string>
+    <string name="settings_cloud_media_adb_copy_btn">复制电脑端 ADB 激活命令</string>
+    <string name="settings_cloud_media_writing">正在写入系统配置...</string>
+    <string name="settings_cloud_media_failed">失败: %1$s</string>
+    <string name="settings_cloud_media_req_btn">请求 Shizuku 授权</string>
+    <string name="settings_cloud_media_activate_btn">通过 Shizuku 一键激活</string>
+    <string name="settings_cloud_media_go_settings_btn">前往系统设置</string>
+    <string name="settings_icloud_web_title">iCloud 网页版</string>
+    <string name="settings_about_header">关于</string>
+    <string name="settings_about_slogan">在 Android 手机上直接浏览与同步你的 iCloud！</string>
+    <string name="settings_about_check_update">正在检查更新...</string>
+    <string name="settings_about_up_to_date">当前已是最新版本 (v%1$s)</string>
+    <string name="settings_about_update_failed">检查更新失败</string>
+
+    <!-- Settings Screen Misc Remaining (Part 3) -->
+    <string name="settings_about_version">版本号</string>
+    <string name="settings_about_check_btn">检查更新</string>
+    <string name="settings_about_repo_copied">已复制仓库地址到剪贴板</string>
+    <string name="settings_about_repo_failed">无法打开网址: %1$s</string>
+    <string name="settings_about_repo_btn">在 GitHub 上查看源代码</string>
+    <string name="settings_about_repo_icon">打开仓库</string>
+    <string name="settings_diag_title">故障调试与诊断</string>
+    <string name="settings_diag_export_failed">导出诊断日志失败: %1$s</string>
+    <string name="settings_diag_export_btn">导出诊断日志</string>
+    <string name="settings_diag_export_desc">打包导出 App 行为日志与 Logcat</string>
+    <string name="settings_diag_export_icon">导出诊断日志</string>
+    <string name="settings_diag_clear_toast">诊断日志已清空</string>
+    <string name="settings_diag_clear_btn">清空诊断日志</string>
+    <string name="settings_diag_clear_desc">清空本地保存的行为日志与 Logcat 缓冲区</string>
+    <string name="settings_diag_clear_icon">清空诊断日志</string>
+    
+    <!-- Download Dialog -->
+    <string name="settings_dl_progress_prep">准备全量下载队列…</string>
+    <string name="settings_dl_progress_pause">全量下载已暂停</string>
+    <string name="settings_dl_progress_active">全量下载中 (%1$d%%)</string>
+    <string name="settings_dl_progress_loc">保存位置: %1$s · 已完成 %2$d / %3$d 项</string>
+    <string name="settings_dl_progress_loc_failed"> (%1$d 项失败)</string>
+    <string name="settings_dl_resume">继续下载</string>
+    <string name="settings_dl_pause">暂停</string>
+    <string name="settings_dl_stop">终止任务</string>
+    <string name="settings_dl_title">全量下载所有照片和视频</string>
+    <string name="settings_dl_est_count">• 云端媒体数：%1$d 项 (约 %2$s)</string>
+    <string name="settings_dl_est_avail">• 本地剩余空间：%1$s</string>
+    <string name="settings_dl_est_warn">⚠️ 手机可用空间低于预估总量，建议先清理部分空间再开始下载。</string>
+    <string name="settings_dl_est_calc">正在统计云端照片数量...</string>
+    <string name="settings_dl_loc_title">保存位置选择</string>
+    <string name="settings_dl_loc_dcim_title">DCIM/Camera (默认推荐)</string>
+    <string name="settings_dl_loc_dcim_desc">直接进入系统相机胶卷，与原生照片无缝合并</string>
+    <string name="settings_dl_loc_pic_title">Pictures/iCloud</string>
+    <string name="settings_dl_loc_pic_desc">在相册中建立独立的「iCloud」相册文件夹</string>
+
+    <!-- Settings Screen Misc Remaining (Part 4) -->
+    <string name="settings_dl_loc_pic_desc_2">保存至标准图片目录下独立相册</string>
+    <string name="settings_dl_loc_custom_title_empty">自定义导出位置...</string>
+    <string name="settings_dl_loc_custom_title_picked">已选: %1$s</string>
+    <string name="settings_dl_loc_custom_desc_empty">打开系统文件选择器挑选任意自定义相册或文件夹</string>
+    <string name="settings_dl_loc_custom_desc_picked">点击右侧「更改」可重新挑选文件夹</string>
+    <string name="settings_dl_loc_custom_change">更改</string>
+    <string name="settings_dl_meta_note">• 元数据保留：照片与视频的原始拍摄时间、EXIF 与 GPS 位置将完整保留，严格保证相册时间轴准确对齐。</string>
+    <string name="settings_dl_wifi_note">• 建议在连接 Wi-Fi 与充电器时进行长时间全量下载。</string>
+    <string name="settings_dl_start_countdown">开始下载 (%1$ds)</string>
+    <string name="settings_dl_start">开始下载</string>
+    <string name="settings_dl_stop_title">终止全量下载？</string>
+    <string name="settings_dl_stop_desc">当前已成功下载并保存了 %1$d 项内容到「%2$s」。请选择如何处理本次已下载的文件：</string>
+    <string name="settings_dl_stop_keep_title">仅终止下载 (保留已下载文件)</string>
+    <string name="settings_dl_stop_keep_desc">停止后续下载，已保存到本地相册的文件将完整保留。</string>
+    <string name="settings_dl_stop_delete_title">终止并删除本次已下载内容</string>
+    <string name="settings_dl_stop_delete_desc">停止任务，并从相册中精准撤销移除本次下载的 %1$d 项内容。</string>
+    <string name="settings_dl_stop_back">返回继续下载</string>
+
+    <!-- Account Info Dialog -->
+    <string name="account_info_logged_in">已登录</string>
+    <string name="account_info_title">iCloud 账号信息</string>
+    <string name="account_info_node_label">服务节点</string>
+    <string name="account_info_node_cn">中国大陆 (云上贵州)</string>
+    <string name="account_info_node_intl">国际区 (icloud.com)</string>
+    <string name="account_info_dsid_label">账号 DSID</string>
+    <string name="account_info_ck_label">CloudKit 路由</string>
+    <string name="account_info_2fa_label">2FA HSA-TRUST 凭证</string>
+    <string name="account_info_2fa_yes">已捕获 (长效静默续期)</string>
+    <string name="account_info_2fa_no">未检测到</string>
+    <string name="account_info_sign_out_desc">退出登录并清除本地凭证</string>
+
+    <!-- Month Bucketing -->
+    <string name="month_unorganized">未分组</string>
+    <string name="month_label_zh">%1$d年%2$d月</string>
+    <string name="month_label_zh_short">%1$d月</string>
+
+    <!-- Month Header -->
+    <string name="month_header_count_complete">%1$d 项</string>
+    <string name="month_header_count_scanning">%1$d 项 · 扫描中</string>
+
+    <!-- Photos Screen -->
+    <string name="photos_title_scanning">扫描并对账中…</string>
+    <string name="photos_title_all">全部 iCloud 云端媒体</string>
+    <string name="photos_title_syncing">正在同步图库…</string>
+    <string name="photos_action_sync">增量同步</string>
+    <string name="photos_action_account">账号信息</string>
+    <string name="photos_ptr_syncing">正在同步...</string>
+    <string name="photos_ptr_release">释放立即同步</string>
+    <string name="photos_ptr_pull">下拉同步</string>
+    <string name="photos_empty_syncing">正在从 iCloud 拉取照片...</string>
+    <string name="photos_empty_title">暂无 iCloud 照片</string>
+    <string name="photos_empty_desc">请在「设置 → 全盘扫描照片库」中开始首次拉取</string>
+    <string name="photos_count_suffix">%1$d项</string>
+
+    <!-- EXIF Info / Photo Viewer -->
+    <string name="photo_info_err_fetch">获取照片信息失败</string>
+    <string name="photo_info_coords_label">坐标</string>
+    <string name="photo_info_coords_copied">坐标已复制</string>
+    <string name="photo_info_no_metadata">这张照片没有附带拍摄信息（可能是截图或由其他应用导入）</string>
+    <string name="photo_info_coords_copy_hint_1">%1$s · 点击复制坐标</string>
+    <string name="photo_info_coords_copy_hint_2">点击复制坐标</string>
+    <string name="photo_info_loading">正在读取拍摄信息…</string>
+    <string name="photo_info_retry">重试</string>
+    <string name="photo_info_unknown_date">未知日期</string>
+    <string name="photo_info_date_format_zh">yyyy年M月d日</string>
+    
+    <string name="photo_info_focal_both">%1$s mm · %2$s mm 等效</string>
+    <string name="photo_info_focal_eq">%1$s mm 等效</string>
+    <string name="photo_info_compass_n">北</string>
+    <string name="photo_info_compass_ne">东北</string>
+    <string name="photo_info_compass_e">东</string>
+    <string name="photo_info_compass_se">东南</string>
+    <string name="photo_info_compass_s">南</string>
+    <string name="photo_info_compass_sw">西南</string>
+    <string name="photo_info_compass_w">西</string>
+    <string name="photo_info_compass_nw">西北</string>
+    <string name="photo_info_datetime_format_zh">%1$s年%2$s月%3$s日 %4$s</string>
+    
+    <string name="viewer_live_playing">LIVE 播放中</string>
+    <string name="viewer_live_hint">LIVE (点击/长按播放)</string>
+    <string name="viewer_action_share_prep">准备中</string>
+    <string name="viewer_action_share">分享</string>
+    <string name="viewer_action_info">信息</string>
+    <string name="viewer_action_dl_active">下载中</string>
+    <string name="viewer_action_dl_done">已保存</string>
+    <string name="viewer_action_dl_idle">下载</string>
+
+    <!-- Drive Screen -->
+    <string name="drive_empty_folder">此文件夹为空</string>
+    <string name="drive_rechecking">正在重新检查…</string>
+    <string name="drive_action_upload">上传文件</string>
+    <string name="drive_action_switch_view">切换显示视图</string>
+    <string name="drive_action_sort">排序方式</string>
+    <string name="drive_sort_field">排序维度</string>
+    <string name="drive_sort_order_asc">正序 (A-Z)</string>
+    <string name="drive_sort_order_desc">倒序 (Z-A)</string>
+    <string name="drive_sort_order_format">顺序: %1$s</string>
+    <string name="drive_action_new_folder">新建文件夹</string>
+    <string name="drive_action_more">更多操作</string>
+    <string name="drive_action_sync">增量同步</string>
+    <string name="drive_action_refresh_all">全量刷新</string>
+    <string name="drive_action_trash">最近删除 (网页端)</string>
+    <string name="drive_action_cancel_dl">取消下载</string>
+    <string name="drive_action_download">下载</string>
+    <string name="drive_action_dl_item">下载文件</string>
+    <string name="drive_action_preview">预览</string>
+    <string name="drive_action_share">分享</string>
+    <string name="drive_action_iwork">网页版 iWork 打开</string>
+    <string name="drive_action_rename">重命名</string>
+    <string name="drive_action_move">移动</string>
+    <string name="drive_action_move_to_trash">移入最近删除</string>
+    <string name="drive_icon_folder">文件夹</string>
+    <string name="drive_icon_image">图片</string>
+    <string name="drive_icon_video">视频</string>
+    <string name="drive_icon_audio">音频</string>
+    <string name="drive_icon_archive">压缩包</string>
+    <string name="drive_icon_doc">文档</string>
+    <string name="drive_icon_text">文本</string>
+    <string name="drive_icon_file">文件</string>
+    <string name="drive_item_count_suffix">%1$d 项</string>
+    <string name="drive_action_close_hint">关闭提示</string>
+    
+    <!-- Drive Upload Progress -->
+    <string name="drive_upload_prog_mixed">正在上传 %1$d 个文件 · %2$d 个失败</string>
+    <string name="drive_upload_prog_failed">%1$d 个上传失败</string>
+    <string name="drive_upload_prog_queued">（%1$d 排队中）</string>
+    <string name="drive_upload_prog_uploading">正在上传 %1$d 个文件</string>
+    <string name="drive_upload_prog_only_queued">%1$d 个文件排队上传中…</string>
+    <string name="drive_upload_expand">展开详情</string>
+    <string name="drive_upload_collapse">折叠详情</string>
+    <string name="drive_upload_status_queued">排队中…</string>
+    <string name="drive_upload_status_active">传输中 · %1$d%%</string>
+    <string name="drive_upload_status_failed">失败: %1$s</string>
+    <string name="drive_upload_status_unknown_err">未知错误</string>
+    <string name="drive_upload_status_success">成功</string>
+    <string name="drive_upload_retry">重试</string>
+    <string name="drive_upload_cancel">取消上传</string>
+    
+    <!-- Drive Modals -->
+    <string name="drive_modal_new_folder_title">新建文件夹</string>
+    <string name="drive_modal_new_folder_label">文件夹名称</string>
+    <string name="drive_modal_new_folder_btn">新建</string>
+    <string name="drive_modal_rename_title">重命名</string>
+    <string name="drive_modal_rename_label">新名称</string>
+    <string name="drive_modal_move_up">返回上级</string>
+    <string name="drive_modal_move_current">当前选定目录: %1$s</string>
+    <string name="drive_modal_move_empty">此目录下无子文件夹</string>
+    <string name="drive_modal_move_enter">进入子目录</string>
+    <string name="drive_modal_move_title">移动「%1$s」到</string>
+    <string name="drive_modal_move_btn">移动到此</string>
+    <string name="drive_modal_trash_title">移入最近删除</string>
+    <string name="drive_modal_trash_desc">确定要将「%1$s」移入最近删除吗？可在网页端恢复或彻底清除。</string>
+    <string name="drive_modal_trash_btn">移入最近删除</string>
+    <string name="drive_modal_gcz_limit_title">云上贵州账号上传限制说明</string>
+    <string name="drive_modal_gcz_limit_desc">您的账号为云上贵州（中国大陆）节点。实测苹果服务端针对该区域单次文件上传请求限制为 1 GiB (~1073 MB)。\n\n超过 1 GiB 的文件上传将会被云端拒绝，本应用将在选文件后自动进行预检提示。</string>
+    <string name="drive_modal_gcz_limit_btn">知道了并继续</string>
+
+    <!-- Drive IWork & Media Viewer -->
+    <string name="drive_iwork_fallback_title">iCloud 云盘网页版</string>
+    <string name="drive_iwork_refresh">刷新页面</string>
+    <string name="drive_iwork_open_ext">在外部浏览器打开</string>
+    <string name="drive_media_err_fetch">抓取媒体预览失败</string>
+    <string name="drive_media_preparing">正在准备预览...</string>
+
+    <!-- Notifications -->
+    <string name="notif_channel_drive_dl_name">云盘文件下载</string>
+    <string name="notif_channel_drive_dl_desc">下载 iCloud 云盘文件时的进度与完成提示</string>
+    <string name="notif_drive_dl_prog_full">正在下载 %1$s (%2$d%% · %3$s)</string>
+    <string name="notif_drive_dl_prog_pct">正在下载 %1$s (%2$d%%)</string>
+    <string name="notif_drive_dl_prog_bytes">正在下载 %1$s (%2$s)</string>
+    <string name="notif_drive_dl_prog_unk">正在下载 %1$s...</string>
+    <string name="notif_drive_dl_title">iCloud 云盘下载</string>
+    <string name="notif_action_cancel">取消</string>
+    <string name="notif_drive_dl_done_title">文件下载完成</string>
+    <string name="notif_drive_dl_done_text">%1$s · 点击打开</string>
+    <string name="notif_drive_dl_fail_text">下载失败：%1$s</string>
+    <string name="notif_drive_dl_fail_title">下载失败</string>
+    
+    <string name="notif_channel_scan_name">照片扫描</string>
+    <string name="notif_channel_scan_desc">后台扫描 iCloud 照片库时的进度提示</string>
+    <string name="notif_scan_prog_full">已扫描 %1$s / %2$s 项%3$s</string>
+    <string name="notif_scan_prog_unk">已扫描 %1$s 项%2$s</string>
+    <string name="notif_scan_prog_title">正在后台静默扫描 iCloud 照片</string>
+    <string name="notif_scan_done_title">iCloud 照片扫描完成</string>
+    <string name="notif_scan_done_text">共整理 %1$s 项照片与视频</string>
+
+    <!-- Drive Download Errors -->
+    <string name="drive_err_dl_generic">下载失败</string>
+    <string name="drive_err_dl_iwork">该文件类型（如 iWork 包）暂不支持直接下载</string>
+    <string name="drive_err_dl_auth">iCloud 登录凭证已过期，请重新登录</string>
+    <string name="drive_err_dl_not_found">文件在云端不存在或已被删除</string>
+    <string name="drive_err_dl_service_unavailable">云端服务暂不可用，请稍后重试</string>
+
+    <!-- Day Bucketing -->
+    <string name="day_today">今天</string>
+    <string name="day_yesterday">昨天</string>
+    <string name="day_before_yesterday">前天</string>
+
+    <!-- Backup Screen -->
+    <string name="backup_title">本地相册备份</string>
+    <string name="backup_count_folder">共 %1$d 个本地相册文件夹</string>
+    <string name="backup_permission_waiting">等待授予本地媒体权限</string>
+    <string name="backup_empty">未发现本地相册或媒体文件夹</string>
+    <string name="backup_status_active_force">⚡ 立即上传（持续1小时）</string>
+    <string name="backup_status_active">自动备份进行中</string>
+    <string name="backup_status_synced">相册云端备份已同步</string>
+    <string name="backup_status_desc_active">剩余 %1$d 项待上传</string>
+    <string name="backup_status_desc_failed"> · %1$d 项失败</string>
+    <string name="backup_status_desc_synced">所有已勾选相册中的新照片已备份</string>
+    <string name="backup_action_manage">管理队列</string>
+    <string name="backup_album_enabled">已开启备份</string>
+    <string name="backup_album_disabled">未备份</string>
+    <string name="backup_count_items">%1$d 项</string>
+    <string name="backup_queue_title">备份队列管理</string>
+    <string name="backup_queue_summary">共 %1$d 项（待上传 %2$d / 上传中 %3$d / 失败 %4$d）</string>
+    <string name="backup_queue_btn_upload">立即上传</string>
+    <string name="backup_queue_btn_uploading">上传中</string>
+    <string name="backup_queue_btn_retry">重试失败</string>
+    <string name="backup_queue_btn_clear_done">清空完成</string>
+    <string name="backup_queue_btn_clear_all">全部清空</string>
+    <string name="backup_queue_empty">暂无备份任务，队列为空</string>
+    <string name="backup_queue_item_uploading">上传中</string>
+    <string name="backup_queue_item_done">已完成</string>
+    <string name="backup_queue_item_failed">失败</string>
+    <string name="backup_queue_item_pending">排队中</string>
+
+    <!-- Drive Sync Status -->
+    <string name="drive_walk_latest">已是最新（检查 %1$d 个文件夹）</string>
+    <string name="drive_walk_updated">已更新 %1$d 个文件夹（检查 %2$d 个）</string>
+    <string name="drive_walk_unfinished">未完成</string>
+    <string name="drive_walk_budget">本轮已达容器预算，下次继续</string>
+    <string name="drive_queue_deduped">%1$d 个文件已在队列中</string>
+    <string name="drive_queue_revived">%1$d 个失败任务已重新排队</string>
+    <string name="drive_queue_renamed">%1$d 个同名文件已改名为 %2$s 等</string>
+
+    <!-- Photos Sync Status -->
+    <string name="photos_sync_done_total">同步完成，共 %1$d 项</string>
+    <string name="photos_sync_done_changed">同步完成，变更 %1$d 项</string>
+
+    <!-- Settings Groups & Enums -->
+    <string name="settings_group_quick_access">快捷访问</string>
+    <string name="settings_group_quick_access_desc">在应用内快速访问 iCloud 官方网页版</string>
+    <string name="settings_group_navigation">导航栏</string>
+    <string name="settings_group_navigation_desc">自定义底部导航栏显示的模块</string>
+    <string name="settings_group_appearance">外观与个性化</string>
+    <string name="settings_group_appearance_desc">设置应用的深浅主题模式与 Android 12+ Monet 动态壁纸取色效果。</string>
+    <string name="settings_group_system_integration">系统整合</string>
+    <string name="settings_group_system_integration_desc">配置 iClouDroid 与 Android 系统的多媒体生态深度联动。</string>
+    <string name="settings_group_auto_backup">自动备份策略</string>
+    <string name="settings_group_auto_backup_desc">配置本地相册后台备份时的网络与电量运行约束条件。</string>
+    <string name="settings_group_photos_library">照片库</string>
+    <string name="settings_group_photos_library_desc">全盘扫描会遍历整个 iCloud 照片库，用于发现并清理在其它设备上已删除的照片。</string>
+    <string name="settings_group_auto_scan">自动扫描</string>
+    <string name="settings_group_auto_scan_desc">按设定周期在后台（凌晨 3 点）自动执行全盘扫描与增量同步。</string>
+    <string name="settings_group_drive">iCloud Drive 云盘</string>
+    <string name="settings_group_drive_desc">设置 iCloud Drive 云盘文件列表的默认显示方式与排序规则。</string>
+    <string name="settings_group_advanced">高级功能</string>
+    <string name="settings_group_advanced_desc">全量数据导出与深度系统迁移等进阶功能。</string>
+    <string name="settings_group_about">关于</string>
+    <string name="settings_group_about_desc">查看应用版本信息与开源仓库</string>
+
+    <string name="nav_item_photos">照片</string>
+    <string name="nav_item_backup">备份</string>
+    <string name="nav_item_drive">云盘</string>
+    <string name="nav_item_notes">备忘录</string>
+    <string name="nav_item_reminders">提醒</string>
+    <string name="nav_item_findmy">查找</string>
+
+    <string name="enum_unit_day">日</string>
+    <string name="enum_unit_month">月</string>
+    <string name="enum_view_list">列表</string>
+    <string name="enum_view_grid">大图标</string>
+    <string name="enum_sort_name">名称</string>
+    <string name="enum_sort_date">修改日期</string>
+    <string name="enum_sort_size">大小</string>
+    <string name="enum_sort_type">类型</string>
+    <string name="enum_order_asc">正序</string>
+    <string name="enum_order_desc">倒序</string>
+    <string name="enum_freq_off">关闭</string>
+    <string name="enum_freq_daily">每天</string>
+    <string name="enum_freq_weekly">每周</string>
+    <string name="enum_freq_monthly">每月</string>
+    <string name="enum_freq_custom">自定义</string>
+
+    <!-- Errors & Updates -->
+    <string name="err_github_rate_limit">GitHub API 请求过于频繁，请稍后再试</string>
+
+    <!-- Photos ViewModel Sync Messages -->
+    <string name="photos_msg_caching_covers">正在缓存月份封面…</string>
+    <string name="photos_msg_scan_done">全盘扫描完成，共 %1$d 项</string>
+    <string name="photos_msg_scanned_partial">已扫描 %1$d 项，稍后自动继续</string>
+    <string name="photos_msg_connecting">正在连接 iCloud 照片库...</string>
+    <string name="photos_msg_zone_not_ready">PrimarySync 分区未就绪</string>
+    <string name="photos_msg_err_prefix">错误: %1$s</string>
+    <string name="photos_msg_scanning">正在扫描照片库...</string>
+    <string name="photos_msg_syncing">正在同步最新照片变更...</string>
+    <string name="photos_msg_scan_failed">扫描失败: %1$s</string>
+    <string name="photos_msg_sync_failed">同步失败: %1$s</string>
+    <string name="photos_msg_checking_update">正在检查增量更新...</string>
+    <string name="photos_msg_sync_changed">同步完成，变更 %1$d 项</string>
+    <string name="photos_msg_already_latest">已是最新，没有新增照片</string>
+    <string name="photos_msg_scanning_progress">正在扫描 %1$d / %2$d 项%3$s</string>
+    <string name="photos_msg_scanning_progress_unk">正在扫描 · 已扫描 %1$d 项%2$s</string>
+    <string name="photos_toast_downloaded">已下载到相册: %1$s</string>
+    <string name="photos_toast_download_failed">下载失败: %1$s</string>
+    <string name="photos_toast_share_prep_failed">准备分享失败: %1$s</string>
+    <string name="photos_toast_share_err">分享出错: %1$s</string>
+    <string name="photos_share_chooser_title">分享照片或视频</string>
+    <string name="photos_toast_share_launch_failed">无法启动分享: %1$s</string>
+
+    <!-- Month Index Bar -->
+    <string name="month_jump_title">跳到月份</string>
+    <string name="month_prev">上一月</string>
+    <string name="month_next">下一月</string>
+
+    <!-- Photo Grid Items -->
+    <string name="photo_cd_video">视频</string>
+    <string name="photo_cd_favorite">收藏</string>
+
+    <!-- Scan Progress Bar -->
+    <string name="scan_progress_caching">正在缓存月份封面…</string>
+    <string name="scan_progress_items">%1$s / %2$s 项</string>
+    <string name="scan_progress_scanned">已扫描 %1$s 项</string>
+
+    <!-- Share Upload Sheet -->
+    <string name="share_item_type_media">照片/视频</string>
+    <string name="share_item_type_files">文件</string>
+    <string name="share_prep_sending">准备发送 %1$d 项%2$s%3$s</string>
+    <string name="share_grant_photos_perm">授予『照片和视频』权限</string>
+    <string name="share_photos_subtitle">保存至 iCloud 照片图库</string>
+    <string name="share_drive_subtitle">选择目录并保存至 iCloud 云盘</string>
+    <string name="share_cd_parent_dir">返回上级</string>
+    <string name="share_selected_dir">当前选定: %1$s</string>
+    <string name="share_no_subdirs">此目录下无子文件夹</string>
+    <string name="share_cd_sub_dir">进入子目录</string>
+
+    <!-- Photo Viewer Pages Errors -->
+    <string name="viewer_err_link_invalid">原图加载失败（链接已失效）</string>
+    <string name="viewer_err_hdr_degraded">该图片为 HDR 高动态范围格式，暂不支持预览\n可点击下方按钮下载原图</string>
+    <string name="viewer_err_decode_failed">原图无法解码（该格式暂不支持）</string>
+    <string name="viewer_err_no_video_link">无法播放：无有效视频播放链接</string>
+    <string name="viewer_err_video_expired">视频链接已过期 (HTTP %1$d)，多次刷新仍失败，请稍后重试</string>
+    <string name="viewer_err_video_refresh_failed_code">视频链接刷新失败 (HTTP %1$d)</string>
+    <string name="viewer_err_video_deleted">视频已从云端删除</string>
+    <string name="viewer_err_network_code">网络错误 (HTTP %1$d)</string>
+    <string name="viewer_err_play_failed">播放失败：%1$s</string>
+    <string name="viewer_title_play_failed">在线播放失败</string>
+    <string name="viewer_action_retry">重试</string>
+    <string name="viewer_err_video_refresh_failed">视频链接刷新失败，请检查网络后重试</string>
 </resources>

@@ -1,5 +1,8 @@
 package app.acloudroid.qwq.feature.photos.ui
 
+import app.acloudroid.qwq.R
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Spring
@@ -161,9 +164,9 @@ fun PhotosScreen(
                         }
                         Text(
                             text = when {
-                                totalCount > 0 && scanProgress.isScanning -> "扫描并对账中…"
-                                totalCount > 0 -> "全部 iCloud 云端媒体"
-                                else -> "正在同步图库…"
+                                totalCount > 0 && scanProgress.isScanning -> stringResource(R.string.photos_title_scanning)
+                                totalCount > 0 -> stringResource(R.string.photos_title_all)
+                                else -> stringResource(R.string.photos_title_syncing)
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -222,7 +225,7 @@ fun PhotosScreen(
                         } else {
                             Icon(
                                 imageVector = Icons.Default.Refresh,
-                                contentDescription = "增量同步",
+                                contentDescription = stringResource(R.string.photos_action_sync),
                                 tint = MaterialTheme.colorScheme.onSurface
                             )
                         }
@@ -231,7 +234,7 @@ fun PhotosScreen(
                     IconButton(onClick = onOpenAccountInfo) {
                         Icon(
                             imageVector = Icons.Default.AccountCircle,
-                            contentDescription = "账号信息",
+                            contentDescription = stringResource(R.string.photos_action_account),
                             tint = MaterialTheme.colorScheme.onSurface
                         )
                     }
@@ -327,9 +330,9 @@ fun PhotosScreen(
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
                             text = when {
-                                isSyncing -> "正在同步..."
-                                pullToRefreshState.distanceFraction >= 1f -> "释放立即同步"
-                                else -> "下拉同步"
+                                isSyncing -> stringResource(R.string.photos_ptr_syncing)
+                                pullToRefreshState.distanceFraction >= 1f -> stringResource(R.string.photos_ptr_release)
+                                else -> stringResource(R.string.photos_ptr_pull)
                             },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -409,17 +412,17 @@ fun PhotosScreen(
                         scanProgress.isScanning -> EmptyStateOverlay {
                             CircularProgressIndicator()
                             Spacer(Modifier.height(16.dp))
-                            Text("正在从 iCloud 拉取照片...")
+                            Text(stringResource(R.string.photos_empty_syncing))
                         }
                         else -> EmptyStateOverlay {
                             Text(
-                                text = "暂无 iCloud 照片",
+                                text = stringResource(R.string.photos_empty_title),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold
                             )
                             Spacer(Modifier.height(8.dp))
                             Text(
-                                text = "请在「设置 → 全盘扫描照片库」中开始首次拉取",
+                                text = stringResource(R.string.photos_empty_desc),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center
@@ -517,7 +520,7 @@ private fun ViewModeToggleCapsule(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = mode.label,
+                        text = stringResource(mode.labelRes),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                         color = textColor
@@ -552,7 +555,7 @@ fun DayHeader(
                 color = MaterialTheme.colorScheme.onSurface
             )
             Text(
-                text = "${itemCount}项",
+                text = stringResource(R.string.photos_count_suffix, itemCount),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

@@ -1,5 +1,7 @@
 package app.acloudroid.qwq.feature.local.ui
 
+import app.acloudroid.qwq.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -82,13 +84,13 @@ fun BackupQueueSheet(
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
-                    text = "备份队列管理",
+                    text = stringResource(R.string.backup_queue_title),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = "共 ${tasks.size} 项（待上传 $pendingCount / 上传中 $uploadingCount / 失败 $failedCount）",
+                    text = stringResource(R.string.backup_queue_summary, tasks.size, pendingCount, uploadingCount, failedCount),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -111,28 +113,28 @@ fun BackupQueueSheet(
                         ) {
                             Icon(Icons.Default.Bolt, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text(if (isForceActive) "上传中" else "立即上传")
+                            Text(if (isForceActive) stringResource(R.string.backup_queue_btn_uploading) else stringResource(R.string.backup_queue_btn_upload))
                         }
                     }
                     if (failedCount > 0) {
                         OutlinedButton(onClick = onRetryFailed) {
                             Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("重试失败")
+                            Text(stringResource(R.string.backup_queue_btn_retry))
                         }
                     }
                     if (successCount > 0) {
                         OutlinedButton(onClick = onClearCompleted) {
                             Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("清空完成")
+                            Text(stringResource(R.string.backup_queue_btn_clear_done))
                         }
                     }
                     if (tasks.isNotEmpty()) {
                         OutlinedButton(onClick = onClearAll) {
                             Icon(Icons.Default.DeleteForever, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("全部清空")
+                            Text(stringResource(R.string.backup_queue_btn_clear_all))
                         }
                     }
                 }
@@ -251,10 +253,10 @@ private fun StatusIcon(status: String) {
 @Composable
 private fun StatusChip(status: String) {
     val (label, containerColor, contentColor) = when (status) {
-        "UPLOADING" -> Triple("上传中", MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer)
-        "SUCCESS" -> Triple("已完成", MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer)
-        "FAILED" -> Triple("失败", MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
-        else -> Triple("排队中", MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.colorScheme.onSurfaceVariant)
+        "UPLOADING" -> Triple(stringResource(R.string.backup_queue_item_uploading), MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer)
+        "SUCCESS" -> Triple(stringResource(R.string.backup_queue_item_done), MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer)
+        "FAILED" -> Triple(stringResource(R.string.backup_queue_item_failed), MaterialTheme.colorScheme.errorContainer, MaterialTheme.colorScheme.onErrorContainer)
+        else -> Triple(stringResource(R.string.backup_queue_item_pending), MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.colorScheme.onSurfaceVariant)
     }
 
     Surface(

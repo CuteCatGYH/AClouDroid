@@ -1,5 +1,8 @@
 package app.acloudroid.qwq.feature.drive.ui
 
+import app.acloudroid.qwq.R
+import androidx.compose.ui.res.stringResource
+
 import android.annotation.SuppressLint
 import android.graphics.Bitmap
 import android.view.ViewGroup
@@ -59,6 +62,7 @@ fun resolveIWorkSuiteUrl(item: DriveItemEntity, isChinaMainland: Boolean = false
     }
 }
 
+@androidx.compose.runtime.Composable
 fun resolveIWorkSuiteTitle(item: DriveItemEntity): String {
     val ext = item.extension?.lowercase()?.trim() ?: ""
     val name = item.name.lowercase()
@@ -67,7 +71,7 @@ fun resolveIWorkSuiteTitle(item: DriveItemEntity): String {
         ext == "pages" || name.contains("pages") -> "iCloud Pages"
         ext == "numbers" || name.contains("numbers") -> "iCloud Numbers"
         ext == "key" || ext == "keynote" || name.contains("keynote") -> "iCloud Keynote"
-        else -> "iCloud 云盘网页版"
+        else -> stringResource(R.string.drive_iwork_fallback_title)
     }
 }
 
@@ -85,7 +89,7 @@ fun DriveIWorkWebDialog(
     val targetUrl = remember(item.drivewsid, isChinaMainland) {
         resolveIWorkSuiteUrl(item, isChinaMainland)
     }
-    val title = remember(item.drivewsid) { resolveIWorkSuiteTitle(item) }
+    val title = resolveIWorkSuiteTitle(item)
 
     var loadingProgress by remember { mutableFloatStateOf(0f) }
     var isLoading by remember { mutableStateOf(true) }
@@ -114,7 +118,7 @@ fun DriveIWorkWebDialog(
                     IconButton(onClick = onDismiss) {
                         Icon(
                             imageVector = Icons.Default.Close,
-                            contentDescription = "关闭",
+                            contentDescription = stringResource(R.string.action_close),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -143,7 +147,7 @@ fun DriveIWorkWebDialog(
                     IconButton(onClick = { webViewInstance?.reload() }) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
-                            contentDescription = "刷新页面",
+                            contentDescription = stringResource(R.string.drive_iwork_refresh),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -158,7 +162,7 @@ fun DriveIWorkWebDialog(
                     ) {
                         Icon(
                             imageVector = Icons.Default.OpenInNew,
-                            contentDescription = "在外部浏览器打开",
+                            contentDescription = stringResource(R.string.drive_iwork_open_ext),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }

@@ -1,6 +1,7 @@
 package app.acloudroid.qwq.feature.photos.ui
 
 import android.app.Application
+import app.acloudroid.qwq.R
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -172,17 +173,17 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
                     _syncMessage.value = buildProgressMessage(progress)
                     ScanNotificationHelper.showOngoing(context, progress)
                 } else if (progress.isCachingCovers) {
-                    _syncMessage.value = "正在缓存月份封面…"
+                    _syncMessage.value = context.getString(R.string.photos_msg_caching_covers)
                     ScanNotificationHelper.showOngoing(context, progress)
                 } else if (progress.isComplete) {
-                    _syncMessage.value = "全盘扫描完成，共 ${totalCount.value} 项"
+                    _syncMessage.value = context.getString(R.string.photos_msg_scan_done, totalCount.value)
                     if (progress.scanned > 0) {
                         ScanNotificationHelper.showFinished(context, progress.scanned)
                     } else {
                         ScanNotificationHelper.cancel(context)
                     }
                 } else if (progress.scanned > 0) {
-                    _syncMessage.value = "已扫描 ${progress.scanned} 项，稍后自动继续"
+                    _syncMessage.value = context.getString(R.string.photos_msg_scanned_partial, progress.scanned)
                     ScanNotificationHelper.cancel(context)
                 }
             }
@@ -392,38 +393,39 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
      * it stopped rather than starting over.
      */
     private fun startInitialLoad() {
+        val app = getApplication<Application>()
         if (_isSyncing.value) return
         _isSyncing.value = true
-        _syncMessage.value = "正在连接 iCloud 照片库..."
+        _syncMessage.value = app.getString(R.string.photos_msg_connecting)
 
         scanJob = viewModelScope.launch {
             try {
                 val zoneReady = repository.checkZoneReady()
                 if (zoneReady.isFailure) {
-                    val err = zoneReady.exceptionOrNull()?.message ?: "PrimarySync 分区未就绪"
-                    _syncMessage.value = "错误: $err"
+                    val err = zoneReady.exceptionOrNull()?.message ?: app.getString(R.string.photos_msg_zone_not_ready)
+                    _syncMessage.value = app.getString(R.string.photos_msg_err_prefix, err)
                     Log.w(TAG, "checkZoneReady failed: $err")
                     return@launch
                 }
 
-                _syncMessage.value = "正在扫描照片库..."
+                _syncMessage.value = app.getString(R.string.photos_msg_scanning)
 
                 val result = scanEngine.scanAll()
 
                 if (result.isSuccess) {
                     val progress = scanEngine.progress.value
                     if (progress.isComplete) {
-                        _syncMessage.value = "正在同步最新照片变更..."
+                        _syncMessage.value = app.getString(R.string.photos_msg_syncing)
                         repository.purgeRecentlyDeleted()
                         repository.syncIncremental(limit = 100)
-                        _syncMessage.value = "同步完成，共 ${totalCount.value} 项"
+                        _syncMessage.value = app.getString(R.string.photos_msg_scan_done, totalCount.value)
                     } else {
-                        _syncMessage.value = "已扫描 ${progress.scanned} 项，稍后自动继续"
+                        _syncMessage.value = app.getString(R.string.photos_msg_scanned_partial, progress.scanned)
                     }
                     Log.i(TAG, "Scan finished, complete=${progress.isComplete}, scanned=${progress.scanned}")
                 } else {
                     val err = result.exceptionOrNull()?.message ?: "扫描出现异常"
-                    _syncMessage.value = "扫描失败: $err"
+                    _syncMessage.value = app.getString(R.string.photos_msg_scan_failed, err)
                     Log.w(TAG, "scanAll failed: $err")
                 }
             } catch (e: Exception) {
@@ -448,38 +450,39 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
      * lives in Settings, behind an explicit warning. See [startFullScan].
      */
     fun syncPhotos() {
+        val app = getApplication<Application>()
         if (_isSyncing.value) return
         _isSyncing.value = true
-        _syncMessage.value = "正在检查增量更新..."
+        _syncMessage.value = app.getString(R.string.photos_msg_checking_update)
 
         viewModelScope.launch {
             try {
                 val zoneReady = repository.checkZoneReady()
                 if (zoneReady.isFailure) {
-                    val err = zoneReady.exceptionOrNull()?.message ?: "PrimarySync 分区未就绪"
-                    _syncMessage.value = "错误: $err"
+                    val err = zoneReady.exceptionOrNull()?.message ?: app.getString(R.string.photos_msg_zone_not_ready)
+                    _syncMessage.value = app.getString(R.string.photos_msg_err_prefix, err)
                     return@launch
                 }
 
-                _syncMessage.value = "正在同步最新变更..."
+                _syncMessage.value = app.getString(R.string.photos_msg_syncing)
                 repository.purgeRecentlyDeleted()
                 val result = repository.syncIncremental(limit = INCREMENTAL_PAGE_LIMIT)
 
                 if (result.isSuccess) {
                     val count = result.getOrDefault(0)
                     _syncMessage.value = if (count > 0) {
-                        "同步完成，变更 $count 项"
+                        app.getString(R.string.photos_msg_sync_changed, count)
                     } else {
-                        "已是最新，没有新增照片"
+                        app.getString(R.string.photos_msg_already_latest)
                     }
                     Log.i(TAG, "Incremental sync finished, count=$count")
                 } else {
                     val err = result.exceptionOrNull()?.message ?: "同步出现异常"
-                    _syncMessage.value = "同步失败: $err"
+                    _syncMessage.value = app.getString(R.string.photos_msg_sync_failed, err)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "syncPhotos exception", e)
-                _syncMessage.value = "异常: ${e.message}"
+                _syncMessage.value = app.getString(R.string.photos_msg_err_prefix, e.message)
             } finally {
                 _isSyncing.value = false
             }
@@ -536,13 +539,13 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
      * since CloudKit's cursor never reports a total.
      */
     private fun buildProgressMessage(progress: ScanProgress): String {
-        val monthLabel = app.acloudroid.qwq.feature.photos.data.MonthBucketing
-            .labelOf(progress.currentYearMonth)
+        val appCtx = getApplication<Application>()
+        val monthLabel = app.acloudroid.qwq.feature.photos.data.MonthBucketing.labelOf(appCtx, progress.currentYearMonth)
         val where = if (progress.currentYearMonth > 0) " · $monthLabel" else ""
         return if (progress.estimatedTotal > 0) {
-            "正在扫描 ${progress.scanned} / ${progress.estimatedTotal} 项$where"
+            appCtx.getString(R.string.photos_msg_scanning_progress, progress.scanned, progress.estimatedTotal, where)
         } else {
-            "正在扫描 · 已扫描 ${progress.scanned} 项$where"
+            appCtx.getString(R.string.photos_msg_scanning_progress_unk, progress.scanned, where)
         }
     }
 
@@ -556,13 +559,13 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
                 val uri = result.getOrThrow()
                 _downloadState.value = DownloadState.Success(uri, photo.filename)
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "已下载到相册: ${photo.filename}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.photos_toast_downloaded, photo.filename), Toast.LENGTH_SHORT).show()
                 }
             } else {
-                val err = result.exceptionOrNull()?.message ?: "下载失败"
+                val err = result.exceptionOrNull()?.message ?: context.getString(R.string.drive_err_dl_generic)
                 _downloadState.value = DownloadState.Error(err)
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "下载失败: $err", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, context.getString(R.string.photos_toast_download_failed, err), Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -581,14 +584,14 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
                         launchShareIntent(context, uri, photo)
                     }
                 } else {
-                    val err = result.exceptionOrNull()?.message ?: "下载文件失败"
+                    val err = result.exceptionOrNull()?.message ?: context.getString(R.string.drive_err_dl_generic)
                     withContext(Dispatchers.Main) {
-                        Toast.makeText(context, "准备分享失败: $err", Toast.LENGTH_LONG).show()
+                        Toast.makeText(context, context.getString(R.string.photos_toast_share_prep_failed, err), Toast.LENGTH_LONG).show()
                     }
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(context, "分享出错: ${e.message}", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, context.getString(R.string.photos_toast_share_err, e.message ?: ""), Toast.LENGTH_SHORT).show()
                 }
             } finally {
                 _isSharing.value = false
@@ -611,12 +614,12 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
 
-        val chooser = Intent.createChooser(shareIntent, "分享照片或视频")
+        val chooser = Intent.createChooser(shareIntent, context.getString(R.string.photos_share_chooser_title))
         chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
             context.startActivity(chooser)
         } catch (e: Exception) {
-            Toast.makeText(context, "无法启动分享: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.photos_toast_share_launch_failed, e.message ?: ""), Toast.LENGTH_SHORT).show()
         }
     }
 

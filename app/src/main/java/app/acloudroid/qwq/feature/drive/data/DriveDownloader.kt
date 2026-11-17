@@ -471,13 +471,13 @@ class DriveDownloader(
         }
 
         /** Maps technical error strings from Go / HTTP response to user-friendly messages. */
-        fun formatDownloadError(rawMsg: String?): String {
-            if (rawMsg.isNullOrBlank()) return "下载失败"
+        fun formatDownloadError(rawMsg: String?, context: android.content.Context? = null): String {
+            if (rawMsg.isNullOrBlank()) return context?.getString(app.acloudroid.qwq.R.string.drive_err_dl_generic) ?: "下载失败"
             return when {
-                rawMsg.contains("no data_token.url") -> "该文件类型（如 iWork 包）暂不支持直接下载"
-                rawMsg.contains("No active session") || rawMsg.contains("AUTH_EXPIRED") || rawMsg.contains("401") -> "iCloud 登录凭证已过期，请重新登录"
-                rawMsg.contains("NOT_FOUND") || rawMsg.contains("404") -> "文件在云端不存在或已被删除"
-                rawMsg.contains("503") || rawMsg.contains("Bad Gateway") -> "云端服务暂不可用，请稍后重试"
+                rawMsg.contains("no data_token.url") -> context?.getString(app.acloudroid.qwq.R.string.drive_err_dl_iwork) ?: "该文件类型（如 iWork 包）暂不支持直接下载"
+                rawMsg.contains("No active session") || rawMsg.contains("AUTH_EXPIRED") || rawMsg.contains("401") -> context?.getString(app.acloudroid.qwq.R.string.drive_err_dl_auth) ?: "iCloud 登录凭证已过期，请重新登录"
+                rawMsg.contains("NOT_FOUND") || rawMsg.contains("404") -> context?.getString(app.acloudroid.qwq.R.string.drive_err_dl_not_found) ?: "文件在云端不存在或已被删除"
+                rawMsg.contains("503") || rawMsg.contains("Bad Gateway") -> context?.getString(app.acloudroid.qwq.R.string.drive_err_dl_service_unavailable) ?: "云端服务暂不可用，请稍后重试"
                 else -> rawMsg
             }
         }

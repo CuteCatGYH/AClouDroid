@@ -1,5 +1,8 @@
 package app.acloudroid.qwq.feature.drive.ui
 
+import app.acloudroid.qwq.R
+import androidx.compose.ui.res.stringResource
+
 import android.net.Uri
 import android.util.Log
 import androidx.annotation.OptIn
@@ -113,7 +116,7 @@ fun DriveMediaViewer(
                 isLoading = false
             },
             onFailure = { err ->
-                errorMessage = err.message ?: "抓取媒体预览失败"
+                errorMessage = err.message ?: context.getString(R.string.drive_media_err_fetch)
                 isLoading = false
             }
         )
@@ -141,7 +144,7 @@ fun DriveMediaViewer(
             ) {
                 CircularProgressIndicator(color = Color.White)
                 Spacer(modifier = Modifier.size(12.dp))
-                Text(text = "正在准备预览...", color = Color.White)
+                Text(text = stringResource(R.string.drive_media_preparing), color = Color.White)
             }
         }
 
@@ -169,7 +172,7 @@ fun DriveMediaViewer(
             IconButton(onClick = onDismiss) {
                 Icon(
                     imageVector = Icons.Default.Close,
-                    contentDescription = "关闭",
+                    contentDescription = stringResource(R.string.action_close),
                     tint = Color.White
                 )
             }

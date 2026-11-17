@@ -1,5 +1,7 @@
 package app.acloudroid.qwq.feature.photos.ui
 
+import app.acloudroid.qwq.R
+import androidx.compose.ui.res.stringResource
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -341,7 +343,7 @@ private fun JumpCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "跳到月份",
+                    text = stringResource(R.string.month_jump_title),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 )
@@ -704,13 +706,13 @@ private fun MonthStepper(
     ) {
         StepperButton(
             icon = Icons.Default.KeyboardArrowUp,
-            description = "上一月",
+            description = stringResource(R.string.month_prev),
             enabled = newer != null,
             onClick = { newer?.let(onJumpToMonth) }
         )
         StepperButton(
             icon = Icons.Default.KeyboardArrowDown,
-            description = "下一月",
+            description = stringResource(R.string.month_next),
             enabled = older != null,
             onClick = { older?.let(onJumpToMonth) }
         )

@@ -6186,3 +6186,40 @@ enqueueUniquePeriodicWork(UNIQUE_WORK_NAME, UPDATE, PeriodicWork(...).setConstra
 
 
 
+
+
+## ISS-075：APP多语言（i18n）全面解耦与 Android 13+ 系统级语言偏好无缝接入
+
+**优先级**：🟠 P1
+**归属**：Android / i18n & UI — 全模块字符串解耦、`AppLocaleManager.kt`、`locales_config.xml`、`SettingsCatalog.kt`、`SettingsScreen.kt`、`MonthBucketing.kt`、`DayBucketing.kt`、`BackupQueueSheet.kt`、`LocalAlbumsScreen.kt`
+**发现时间**：2026-11 阶段功能
+
+### 现象
+1. 应用内大部分界面（如设置页、相册月/日吸顶 Header、月份跳转浮层卡片、本地相册备份页、队列管理弹窗、云盘状态栏等）硬编码了简体中文文本，在切换为英文（English）或繁体中文（繁體中文）时仍然大量显示中文。
+2. 切换应用语言时，设置项类别标题（如 `快捷访问`、`导航栏`、`外观与个性化`）、底部导航栏开关文本、相册 `今天` / `昨天` / `前天` 日分组 Header 无法动态重组。
+3. 未配置 Android 13+ 系统级 `locales_config.xml`，导致 AGP 自动扫描依赖库（如 Coil、Media3、Material）打包的数十种语言，使系统设置中的“应用程序语言”列表中充斥大量未翻译的语言。
+
+### 根因
+1. **硬编码与资源缺失**：`strings.xml` 仅包含少量文字，大部分 UI 字符串直接手写在 Composable 函数或 ViewModels/Repositories 中。
+2. **格式化逻辑绑定中文**：`MonthBucketing.kt` 与 `DayBucketing.kt` 中手写了 `${year}年${month}月` 与 `"今天"` / `"昨天"` / `"前天"` 字符串，缺少 `Locale` / `Context` 感知的格式化。
+3. **设置数据模型硬编码**：`SettingsGroup` 与 `AppSettings` enums 使用了硬编码 `val title: String` / `val label: String` 属性，导致 Compose 重构时无法获取当前 Context 对应的最新语言资源。
+
+### 修复方案
+1. **系统级配置与语言白名单 (`locales_config.xml` & `AppLocaleManager.kt`)**：
+   - 创建 `res/xml/locales_config.xml` 显式声明 `zh-Hans`、`zh-Hant`、`en` 语言白名单。
+   - Manifest 配置 `android:localeConfig="@xml/locales_config"` 并注册 `AppLocalesMetadataHolderService` 兼容 Android 10~12。
+   - 使用 `AppCompatDelegate.setApplicationLocales` 实现应用内语言选择与 Android 13+ 系统设置（Per-App Language Preferences）双向无缝联动。
+2. **分类与枚举重构 (`SettingsCatalog.kt` & `AppSettings.kt`)**：
+   - `SettingsGroup` 升级为 `@StringRes val titleRes: Int` 与 `@StringRes val descriptionRes: Int?`。
+   - `GalleryViewMode`, `DriveDisplayMode`, `DriveSortField`, `DriveSortOrder`, `ScanFrequency` 等枚举升级为 `@StringRes val labelRes: Int`。
+   - `SettingsScreen.kt` 中统一调用 `stringResource(...)` 动态渲染。
+3. **全模块字符串提取与多语言翻译 (Batched Localization)**：
+   - **设置与全局**：导航 Tab 标签、设置行与弹窗、账号节点信息。
+   - **相册与画廊**：月/日吸顶 Header (`DayBucketing.kt`)、月份跳转浮层卡片 (`MonthIndexBar.kt` `"跳到月份"`)、EXIF 卡片标签、大图预览错误提示。
+   - **备份与本地相册**：`LocalAlbumsScreen.kt` 与 `BackupQueueSheet.kt` 彻底解耦页面标题、状态 Banner、管理队列弹窗汇总与 Chip 标签。
+   - **云盘与通知**：`DriveScreen.kt` 状态栏、`DriveDownloadNotificationHelper.kt` 与 `ScanNotificationHelper.kt` 通知渠道与进度文案。
+   - 补充 `values-en/strings.xml` 与 `values-zh-rTW/strings.xml` 全部对应的地道翻译。
+
+### 验证
+- **单测**：`385 passed, 0 failed`。
+- **实机/模拟器**：在应用内切换语言（Follow System / 简体中文 / 繁體中文 / English）或在 Android 13+ 系统设置中切换 App Language，应用全界面（包含相册 Header、月份跳转浮层、备份队列弹窗、设置分类、导航栏开关、Toast）均瞬间、无缝重组为对应语言，且无会话重建（`ensureGoSession`）或图片缓存失效等副作用。

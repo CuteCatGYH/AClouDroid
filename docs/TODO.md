@@ -250,6 +250,13 @@
 | 主页刷新日志 | 仅 `Starting incremental sync`，无 `MonthScanEngine` 活动 ✅ |
 | 侧边手势拖满 / 拖一半取消 / 箭头 / 返回键 | 全部正确，`topResumedActivity` 始终 MainActivity ✅ |
 
+#### 全模块多语言支持与国际化 (i18n) ✅
+
+- [x] **全模块字符串解耦与多语言支持（i18n）**（详见 [ISS-075](CHANGELOG_ISSUES.md#iss-075app多语言i18n全面解耦与-android-13-系统级语言偏好无缝接入)）
+  - [x] 配置 `res/xml/locales_config.xml` 白名单（`zh-Hans`, `zh-Hant`, `en`），与 Android 13+ 系统级设置（Per-App Language Preferences）双向无缝联动
+  - [x] 全界面解耦：设置页分组与枚举选项、底部导航栏开关、相册月/日吸顶 Header、月份跳转浮层卡片、本地相册备份与队列管理 Sheet、EXIF 信息卡片、云盘状态栏与通知
+  - [x] 提供完整的英文（`values-en`）与繁体中文（`values-zh-rTW`）地道翻译
+
 
 ### Phase 3: Android 本地相册自动备份 (增量上传) 🟡 (底层已打通，UI 与控制策略开发中)
 

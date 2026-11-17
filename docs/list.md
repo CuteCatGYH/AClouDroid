@@ -2,7 +2,7 @@
 
 > 本文件只保留**尚未修复**的问题与持续性工程注意事项。
 >
-> 已修复案例请见 [CHANGELOG_ISSUES.md](CHANGELOG_ISSUES.md)（ISS-001 ~ ISS-038）。
+> 已修复案例请见 [CHANGELOG_ISSUES.md](CHANGELOG_ISSUES.md)（ISS-001 ~ ISS-075）。
 >
 > 相关文档：[TODO.md](TODO.md)（路线图）、[CHANGELOG_ISSUES.md](CHANGELOG_ISSUES.md)（已修复归档）
 
@@ -11,7 +11,7 @@
 ## 索引
 
 > [!NOTE]
-> 当前**没有未修复项**。修完的问题一律按 [AGENTS.md §11](AGENTS.md#11-问题归档与文档维护) 迁入
+> 当前**暂无未修复项**。修完的问题一律按 [AGENTS.md §11](AGENTS.md#11-问题归档与文档维护) 迁入
 > [CHANGELOG_ISSUES.md](CHANGELOG_ISSUES.md)，本表只登记「尚未修复」的条目。
 
 | 编号 | 标题 | 优先级 | 归属 | 状态 |
@@ -22,6 +22,7 @@
 
 | 原编号 | 归档位置 |
 | --- | --- |
+| P1 APP 多语言支持评估与全面解耦 | [ISS-075](CHANGELOG_ISSUES.md#iss-075app多语言i18n全面解耦与-android-13-系统级语言偏好无缝接入) |
 | P2-001 `isAuthError` 误判 | [ISS-015](CHANGELOG_ISSUES.md#iss-015) |
 | P2-002 / P2-004 / P2-007 URL 重取链路 | [ISS-017](CHANGELOG_ISSUES.md#iss-017) |
 | P2-003 / P2-006 / P2-009 滚动状态与日志治理 | [ISS-018](CHANGELOG_ISSUES.md#iss-018) |

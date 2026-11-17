@@ -41,10 +41,10 @@ object ScanNotificationHelper {
             val manager = context.getSystemService(NotificationManager::class.java) ?: return
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "照片扫描",
+                context.getString(R.string.notif_channel_scan_name),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "后台扫描 iCloud 照片库时的进度提示"
+                description = context.getString(R.string.notif_channel_scan_desc)
                 setShowBadge(false)
             }
             manager.createNotificationChannel(channel)
@@ -63,15 +63,15 @@ object ScanNotificationHelper {
 
         val fraction = progress.fraction
         val text = if (progress.estimatedTotal > 0) {
-            "已扫描 ${format(progress.scanned)} / ${format(progress.estimatedTotal)} 项" +
+            context.getString(R.string.notif_scan_prog_full, format(progress.scanned), format(progress.estimatedTotal), monthSuffix(progress.currentYearMonth))
                 monthSuffix(progress.currentYearMonth)
         } else {
-            "已扫描 ${format(progress.scanned)} 项" + monthSuffix(progress.currentYearMonth)
+            context.getString(R.string.notif_scan_prog_unk, format(progress.scanned), monthSuffix(progress.currentYearMonth))
         }
 
         return NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("正在后台静默扫描 iCloud 照片")
+            .setContentTitle(context.getString(R.string.notif_scan_prog_title))
             .setContentText(text)
             .setOngoing(true)
             .setSilent(true)
@@ -96,8 +96,8 @@ object ScanNotificationHelper {
         ensureChannel(context)
         return NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("iCloud 照片扫描完成")
-            .setContentText("共整理 ${format(scanned)} 项照片与视频")
+            .setContentTitle(context.getString(R.string.notif_scan_done_title))
+            .setContentText(context.getString(R.string.notif_scan_done_text, format(scanned)))
             .setOngoing(false)
             .setAutoCancel(true)
             .setSilent(true)

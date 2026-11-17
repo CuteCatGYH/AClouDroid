@@ -1,5 +1,7 @@
 package app.acloudroid.qwq.feature.photos.ui
 
+import app.acloudroid.qwq.R
+import androidx.compose.ui.res.stringResource
 import android.util.Log
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -572,9 +574,9 @@ fun ImageViewerPage(
                 if (!baseReady && !isDegrading) {
                     ViewerErrorPanel(
                         message = when {
-                            isUrlIssue -> "原图加载失败（链接已失效）"
-                            degradedToMedium -> "该图片为 HDR 高动态范围格式，暂不支持预览\n可点击下方按钮下载原图"
-                            else -> "原图无法解码（该格式暂不支持）"
+                            isUrlIssue -> stringResource(R.string.viewer_err_link_invalid)
+                            degradedToMedium -> stringResource(R.string.viewer_err_hdr_degraded)
+                            else -> stringResource(R.string.viewer_err_decode_failed)
                         }
                     )
                 }
@@ -640,7 +642,7 @@ fun VideoViewerPage(
     var lastPosition by remember(photo.id) { mutableLongStateOf(0L) }
 
     if (currentUrl.isNullOrBlank()) {
-        ViewerErrorPanel(message = "无法播放：无有效视频播放链接")
+        ViewerErrorPanel(message = stringResource(R.string.viewer_err_no_video_link))
         return
     }
 
@@ -663,7 +665,7 @@ fun VideoViewerPage(
 
     fun handleExpiredUrl(code: Int) {
         if (retryCount >= MAX_VIDEO_RETRY) {
-            playerError = "视频链接已过期 (HTTP $code)，多次刷新仍失败，请稍后重试"
+            playerError = context.getString(R.string.viewer_err_video_expired, code)
             return
         }
         retryCount++
@@ -678,7 +680,7 @@ fun VideoViewerPage(
                 currentUrl = newUrl
                 playerError = null
             } else {
-                playerError = "视频链接刷新失败 (HTTP $code)"
+                playerError = context.getString(R.string.viewer_err_video_refresh_failed_code, code)
             }
         }
     }
@@ -699,9 +701,9 @@ fun VideoViewerPage(
 
                     when {
                         code == 410 || code == 403 -> handleExpiredUrl(code)
-                        code == 404 -> playerError = "视频已从云端删除"
-                        code != null -> playerError = "网络错误 (HTTP $code)"
-                        else -> playerError = "播放失败：${error.errorCodeName}"
+                        code == 404 -> playerError = context.getString(R.string.viewer_err_video_deleted)
+                        code != null -> playerError = context.getString(R.string.viewer_err_network_code, code)
+                        else -> playerError = context.getString(R.string.viewer_err_play_failed, error.errorCodeName)
                     }
                 }
             })
@@ -714,9 +716,9 @@ fun VideoViewerPage(
 
     if (playerError != null) {
         ViewerErrorPanel(
-            title = "在线播放失败",
+            title = stringResource(R.string.viewer_title_play_failed),
             message = playerError ?: "",
-            actionLabel = "重试"
+            actionLabel = stringResource(R.string.viewer_action_retry)
         ) {
             retryCount = 0
             playerError = null
@@ -726,7 +728,7 @@ fun VideoViewerPage(
                 if (!newUrl.isNullOrBlank()) {
                     currentUrl = newUrl
                 } else {
-                    playerError = "视频链接刷新失败，请检查网络后重试"
+                    playerError = context.getString(R.string.viewer_err_video_refresh_failed)
                 }
             }
         }

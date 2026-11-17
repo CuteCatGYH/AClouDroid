@@ -1,5 +1,7 @@
 package app.acloudroid.qwq.feature.local.ui
 
+import app.acloudroid.qwq.R
+import androidx.compose.ui.res.stringResource
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -159,12 +161,12 @@ fun LocalAlbumsScreen(
                 title = {
                     Column {
                         Text(
-                            text = "本地相册备份",
+                            text = stringResource(R.string.backup_title),
                             fontWeight = FontWeight.Bold,
                             style = MaterialTheme.typography.headlineMedium
                         )
                         Text(
-                            text = if (hasMediaPermission) "共 ${albums.size} 个本地相册文件夹" else "等待授予本地媒体权限",
+                            text = if (hasMediaPermission) stringResource(R.string.backup_count_folder, albums.size) else stringResource(R.string.backup_permission_waiting),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -442,16 +444,16 @@ private fun BackupStatusCard(
 
                 Column {
                     Text(
-                        text = if (isForceActive) "⚡ 立即上传（持续1小时）" else if (activeCount > 0) "自动备份进行中" else "相册云端备份已同步",
+                        text = if (isForceActive) stringResource(R.string.backup_status_active_force) else if (activeCount > 0) stringResource(R.string.backup_status_active) else stringResource(R.string.backup_status_synced),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                     Text(
                         text = if (activeCount > 0) {
-                            "剩余 $activeCount 项待上传" + if (failedCount > 0) " · $failedCount 项失败" else ""
+                            stringResource(R.string.backup_status_desc_active, activeCount) + if (failedCount > 0) stringResource(R.string.backup_status_desc_failed, failedCount) else ""
                         } else {
-                            "所有已勾选相册中的新照片已备份"
+                            stringResource(R.string.backup_status_desc_synced)
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
@@ -467,7 +469,7 @@ private fun BackupStatusCard(
                     containerColor = MaterialTheme.colorScheme.primary
                 )
             ) {
-                Text("管理队列")
+                Text(stringResource(R.string.backup_action_manage))
             }
         }
     }
@@ -534,7 +536,7 @@ private fun AlbumCard(
                     )
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        text = if (album.isBackupEnabled) "已开启备份" else "未备份",
+                        text = if (album.isBackupEnabled) stringResource(R.string.backup_album_enabled) else stringResource(R.string.backup_album_disabled),
                         style = MaterialTheme.typography.labelSmall,
                         color = if (album.isBackupEnabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -559,7 +561,7 @@ private fun AlbumCard(
                 )
 
                 Text(
-                    text = "${album.itemCount} 项",
+                    text = stringResource(R.string.backup_count_items, album.itemCount),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

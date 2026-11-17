@@ -17,27 +17,15 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import app.acloudroid.qwq.R
 import app.acloudroid.qwq.feature.photos.data.MonthBucketing
 import app.acloudroid.qwq.feature.photos.data.ScanProgress
 
 /**
  * Scanning indicator for the gallery (P2-016).
- *
- * ## Two modes, chosen by data availability
- *
- * CloudKit's cursor API never reports a total. The only source for a denominator is the iCloud web
- * page, scraped at login time — and that scrape can legitimately fail at any time (Apple changes
- * the copy, the user restored a session instead of logging in). So:
- *
- *  - **total known** → determinate bar, `3,847 / 16,116 项 · 2026年8月`
- *  - **total unknown** → indeterminate spinner, `已扫描 3,847 项 · 2026年8月`
- *
- * The item count and the current month are shown in both modes, because they are what actually
- * tells the user how far along the scan is. A percentage alone would be meaningless when the
- * denominator is a guess.
- *
- * The bar disappears entirely once the scan finishes — no "100%" lingering.
  */
 @Composable
 fun ScanProgressBar(
@@ -64,9 +52,6 @@ fun ScanProgressBar(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // The cover pass gets its own spinner and its own sentence. Left as the normal
-                    // progress line it would read as "3,847 / 3,847 项 · 100%" for several minutes,
-                    // which looks exactly like a hang.
                     val indeterminate = progress.isCachingCovers || progress.estimatedTotal <= 0
                     if (indeterminate) {
                         CircularProgressIndicator(
@@ -77,7 +62,7 @@ fun ScanProgressBar(
                     }
                     Text(
                         text = if (progress.isCachingCovers) {
-                            "正在缓存月份封面…"
+                            stringResource(R.string.scan_progress_caching)
                         } else {
                             progressText(progress)
                         },
@@ -99,25 +84,20 @@ fun ScanProgressBar(
     }
 }
 
-/**
- * `3,847 / 16,116 项 · 2026年8月` when the total is known, otherwise
- * `已扫描 3,847 项 · 2026年8月`.
- *
- * The month suffix is omitted before the first batch, when it would read as a placeholder.
- */
+@Composable
 private fun progressText(progress: ScanProgress): String {
+    val context = LocalContext.current
     val position = if (progress.estimatedTotal > 0) {
-        "${formatCount(progress.scanned)} / ${formatCount(progress.estimatedTotal)} 项"
+        stringResource(R.string.scan_progress_items, formatCount(progress.scanned), formatCount(progress.estimatedTotal))
     } else {
-        "已扫描 ${formatCount(progress.scanned)} 项"
+        stringResource(R.string.scan_progress_scanned, formatCount(progress.scanned))
     }
     val month = if (progress.currentYearMonth > 0) {
-        " · ${MonthBucketing.labelOf(progress.currentYearMonth)}"
+        " · ${MonthBucketing.labelOf(context, progress.currentYearMonth)}"
     } else {
         ""
     }
     return position + month
 }
 
-/** Thousands separators, matching how the iCloud web page presents its own counts. */
 private fun formatCount(value: Int): String = "%,d".format(value)

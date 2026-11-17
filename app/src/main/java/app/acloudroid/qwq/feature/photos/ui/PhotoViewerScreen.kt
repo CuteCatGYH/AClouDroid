@@ -1,5 +1,8 @@
 package app.acloudroid.qwq.feature.photos.ui
 
+import app.acloudroid.qwq.R
+import androidx.compose.ui.res.stringResource
+
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -618,7 +621,7 @@ fun PhotoViewerScreen(
                 IconButton(onClick = dismissWithAnimation) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "返回",
+                        contentDescription = stringResource(R.string.action_back),
                         tint = Color.White
                     )
                 }
@@ -660,7 +663,7 @@ fun PhotoViewerScreen(
                                     modifier = Modifier.size(14.dp)
                                 )
                                 Text(
-                                    text = if (isCurrentLivePlaying) "LIVE 播放中" else "LIVE (点击/长按播放)",
+                                    text = if (isCurrentLivePlaying) stringResource(R.string.viewer_live_playing) else stringResource(R.string.viewer_live_hint),
                                     color = Color.White,
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold
@@ -693,7 +696,7 @@ fun PhotoViewerScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 ViewerAction(
-                    label = if (isSharing) "准备中" else "分享",
+                    label = if (isSharing) stringResource(R.string.viewer_action_share_prep) else stringResource(R.string.viewer_action_share),
                     icon = {
                         if (isSharing) {
                             CircularProgressIndicator(
@@ -704,7 +707,7 @@ fun PhotoViewerScreen(
                         } else {
                             Icon(
                                 Icons.Default.Share,
-                                contentDescription = "分享",
+                                contentDescription = stringResource(R.string.viewer_action_share),
                                 tint = Color.White
                             )
                         }
@@ -713,7 +716,7 @@ fun PhotoViewerScreen(
                     onClick = { onShare(current) }
                 )
                 ViewerAction(
-                    label = "信息",
+                    label = stringResource(R.string.viewer_action_info),
                     icon = { Icon(Icons.Default.Info, contentDescription = null, tint = Color.White) },
                     onClick = { showInfo = !showInfo }
                 )
@@ -800,10 +803,11 @@ private fun isVideo(photo: PhotoAssetEntity): Boolean =
         photo.filename.endsWith(".mp4", ignoreCase = true) ||
         photo.filename.endsWith(".mov", ignoreCase = true)
 
+@Composable
 private fun downloadLabel(state: DownloadState): String = when (state) {
-    is DownloadState.Downloading -> "下载中"
-    is DownloadState.Success -> "已保存"
-    else -> "下载"
+    is DownloadState.Downloading -> stringResource(R.string.viewer_action_dl_active)
+    is DownloadState.Success -> stringResource(R.string.viewer_action_dl_done)
+    else -> stringResource(R.string.viewer_action_dl_idle)
 }
 
 /**
@@ -857,9 +861,10 @@ internal fun pagesFromSwipe(
     }
 }
 
+@Composable
 private fun viewerDate(timestamp: Long): String {
-    if (timestamp <= 0) return "未知日期"
-    return SimpleDateFormat("yyyy年M月d日", Locale.getDefault()).format(Date(timestamp))
+    if (timestamp <= 0) return stringResource(R.string.photo_info_unknown_date)
+    return SimpleDateFormat(stringResource(R.string.photo_info_date_format_zh), Locale.getDefault()).format(Date(timestamp))
 }
 
 private fun viewerTime(timestamp: Long): String {

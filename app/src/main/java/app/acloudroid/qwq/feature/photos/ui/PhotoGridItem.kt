@@ -1,5 +1,7 @@
 package app.acloudroid.qwq.feature.photos.ui
 
+import app.acloudroid.qwq.R
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -91,7 +93,7 @@ fun PhotoGridItem(
                 ) {
                     Icon(
                         imageVector = Icons.Default.PlayArrow,
-                        contentDescription = "视频",
+                        contentDescription = stringResource(R.string.photo_cd_video),
                         tint = Color.White,
                         modifier = Modifier.size(12.dp)
                     )
@@ -127,7 +129,7 @@ fun PhotoGridItem(
         if (photo.isFavorite) {
             Icon(
                 imageVector = Icons.Default.Favorite,
-                contentDescription = "收藏",
+                contentDescription = stringResource(R.string.photo_cd_favorite),
                 tint = Color(0xFFFF5252),
                 modifier = Modifier
                     .align(Alignment.BottomStart)

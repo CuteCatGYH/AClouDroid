@@ -54,4 +54,538 @@
     <string name="action_back">Back</string>
     <string name="action_settings">Settings</string>
     <string name="action_sign_out">Sign Out</string>
+
+    <!-- Update Dialog / App Shell -->
+    <string name="update_banner_title">🎉 New version available: %1$s</string>
+    <string name="update_banner_desc">Tap to view and update on GitHub</string>
+    <string name="update_banner_view">View</string>
+    <string name="update_banner_ignore">Ignore</string>
+
+    <!-- Settings Dialog -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_full_scan_dialog_title">Start full scan?</string>
+    <string name="settings_full_scan_dialog_desc_1">A full scan will traverse the entire iCloud photo library (making hundreds of requests) and compare it with the local database to clean up photos deleted on other devices.</string>
+    <string name="settings_full_scan_dialog_desc_2_on">Background scan is enabled (runs automatically at %1$s at 3:00 AM) and usually doesn\'t need to be triggered manually.</string>
+    <string name="settings_full_scan_dialog_desc_3">Quitting midway won\'t corrupt any data; it will resume from where it left off next time.</string>
+    <string name="settings_full_scan_start">Start Scan</string>
+
+    <!-- Settings Items: Misc -->
+    <string name="settings_item_icloud_web">iCloud on the Web</string>
+    <string name="settings_item_nav_bar_items">Navigation Bar Items</string>
+    <string name="settings_item_nav_bar_items_desc">Choose the tabs to display at the bottom</string>
+    <string name="settings_item_full_scan">Full Scan &amp; Reconciliation</string>
+    <string name="settings_item_full_scan_desc_complete">Synced</string>
+    <string name="settings_item_month_cover">Year Grid Covers</string>
+    <string name="settings_item_month_cover_desc">Turn off to save data and improve list scrolling smoothness</string>
+    <string name="settings_item_download_all">Download All Original Photos</string>
+    <string name="settings_item_download_all_desc">Download all original photos from iCloud to your device (resuming interrupted downloads is not supported)</string>
+
+    <!-- Settings Items: Scan Frequency -->
+    <string name="settings_item_scan_frequency">Periodic Scan Frequency</string>
+    <string name="settings_item_scan_frequency_desc">Time interval for automatically running a full scan</string>
+    <string name="settings_scan_freq_off">Off</string>
+    <string name="settings_scan_freq_daily">Daily</string>
+    <string name="settings_scan_freq_weekly">Weekly</string>
+    <string name="settings_scan_freq_monthly">Monthly</string>
+    <string name="settings_scan_freq_custom">Every %1$d days</string>
+
+    <!-- Settings Items: Cloud Media Provider -->
+    <string name="settings_item_cloud_media">System Photo Picker Integration</string>
+    <string name="settings_item_cloud_media_desc_on">Whitelist activated; iCloud photos are visible in the native picker</string>
+    <string name="settings_item_cloud_media_desc_off">Tap to inject whitelist via Shizuku</string>
+    <string name="settings_item_cloud_media_toast_manual">Your device does not support direct navigation; please enable it manually in system settings.</string>
+
+    <!-- Settings Items: Auto Backup -->
+    <string name="settings_item_battery_opt">Run in Background (Real-time Backup)</string>
+    <string name="settings_item_battery_opt_desc_on">Allowed to run in the background, increasing real-time backup chances</string>
+    <string name="settings_item_battery_opt_desc_off">Ignore battery optimizations to prevent the app from being killed by the system</string>
+    <string name="settings_item_battery_opt_help">If the setting doesn\'t apply, please refer to Don\'t kill my app!</string>
+    <string name="settings_item_keep_alive">Show Persistent Notification</string>
+    <string name="settings_item_keep_alive_desc_on">Persistent notification enabled</string>
+    <string name="settings_item_keep_alive_desc_off">Show a persistent notification to prevent the system from killing the app</string>
+    <string name="settings_item_backup_interval">Periodic Backup Frequency</string>
+    <string name="settings_item_backup_interval_desc_immediate">Trigger backup immediately when new photos are added</string>
+    <string name="settings_item_backup_interval_desc">Maximum frequency for triggering automatic background backups</string>
+    <string name="settings_backup_interval_immediate">Immediate (Media Listener)</string>
+    <string name="settings_backup_interval_immediate_short">Immediate</string>
+    <string name="settings_backup_interval_15m">15 Minutes</string>
+    <string name="settings_backup_interval_30m">30 Minutes</string>
+    <string name="settings_backup_interval_1h">1 Hour</string>
+    <string name="settings_backup_interval_custom">Custom...</string>
+    <string name="settings_backup_interval_custom_val">%1$d Minutes</string>
+    <string name="settings_item_backup_cellular">Allow Cellular Data</string>
+    <string name="settings_item_backup_cellular_desc_on">Backup via Wi-Fi or cellular data</string>
+    <string name="settings_item_backup_cellular_desc_off">Backup only on Wi-Fi</string>
+    <string name="settings_item_backup_charging">Backup Only While Charging</string>
+    <string name="settings_item_backup_charging_desc_on">Backup only when connected to a power source</string>
+    <string name="settings_item_backup_charging_desc_off">No charging state restrictions</string>
+    <string name="settings_item_backup_battery">Backup Only with Sufficient Battery</string>
+    <string name="settings_item_backup_battery_desc_on">Pause backup when battery falls below 20%</string>
+    <string name="settings_item_backup_battery_desc_off">No battery level restrictions</string>
+    <string name="settings_item_backup_concurrent">Max Concurrent Uploads</string>
+    <string name="settings_item_backup_concurrent_desc">Number of files uploading simultaneously: %1$d</string>
+    <string name="settings_item_backup_notification">Show Background Progress Notification</string>
+    <string name="settings_item_backup_notification_desc_on">Display a progress bar notification during automatic backups</string>
+    <string name="settings_item_backup_notification_desc_off">Backup silently in the background</string>
+
+    <!-- Settings Items: Drive -->
+    <string name="settings_item_drive_mode">View Mode</string>
+    <string name="settings_item_drive_mode_desc_curr">Current: %1$s</string>
+    <string name="settings_item_drive_sort_field">Sort By</string>
+    <string name="settings_item_drive_sort_field_desc_curr">Current: %1$s</string>
+    <string name="settings_item_drive_sort_order">Sort Order</string>
+    <string name="settings_item_drive_sort_order_desc_asc">Ascending (A-Z)</string>
+    <string name="settings_item_drive_sort_order_desc_desc">Descending (Z-A)</string>
+    <string name="settings_item_drive_sort_order_desc_curr">Order: %1$s</string>
+
+    <!-- Settings Items: About -->
+    <string name="settings_item_auto_update">Check for Updates Automatically</string>
+    <string name="settings_item_auto_update_desc_on">Automatically check for new versions on GitHub on startup</string>
+    <string name="settings_item_auto_update_desc_off">Automatic update checks are disabled</string>
+    <string name="settings_item_about">About</string>
+    <string name="settings_item_about_desc_curr">Current version: %1$s</string>
+
+
+    <!-- Settings Screen Misc Remaining -->
+    <string name="settings_item_backup_concurrent_val">%1$d items</string>
+    <string name="settings_item_backup_concurrent_val_1">(Serial)</string>
+    <string name="settings_item_backup_concurrent_val_2">(Recommended)</string>
+    <string name="settings_item_backup_concurrent_val_3">(Parallel)</string>
+    <string name="settings_item_backup_concurrent_val_1_full">1 item (Serial upload)</string>
+    <string name="settings_item_backup_concurrent_val_2_full">2 items (Balanced recommendation)</string>
+    <string name="settings_item_backup_concurrent_val_3_full">3 items (High-speed parallel)</string>
+    <string name="settings_item_month_cover_desc_on">Shows monthly photo covers in the jump panel; turning this off stops cover downloads</string>
+    <string name="settings_item_month_cover_desc_off">Disabled, months are displayed as plain text and use no storage</string>
+    <string name="settings_item_cloud_media_desc_shizuku">Activate via Shizuku with one tap or go to system settings</string>
+    <string name="settings_item_cloud_media_desc_req">Requires Android 13 (API 33) and above</string>
+    <string name="settings_item_full_scan_desc_scanning">Scanning…</string>
+    <string name="settings_item_full_scan_desc_idle">Clean up photos deleted on other devices</string>
+    <string name="settings_item_download_all_desc_prep">Preparing download queue…</string>
+    <string name="settings_item_download_all_desc_dl">Saving to %1$s (%2$d/%3$d)</string>
+    <string name="settings_item_download_all_desc_pause">Paused (%1$d/%2$d items)</string>
+    <string name="settings_item_download_all_desc_idle">Save all iCloud content to your local gallery (Default: DCIM/Camera)</string>
+    <string name="settings_item_scan_freq_title_short">Auto Scan Frequency</string>
+    <string name="settings_item_scan_freq_desc_off">Background auto-scans will not run when turned off</string>
+    <string name="settings_item_custom_interval">Custom Interval</string>
+    <string name="settings_item_custom_interval_desc_on">Executes once every %1$d days</string>
+    <string name="settings_item_custom_interval_desc_off">Only applies when frequency is set to \"Custom\"</string>
+
+    <!-- Settings Screen Misc Remaining (Part 2) -->
+    <string name="settings_item_custom_interval_val">%1$d days</string>
+    <string name="settings_item_drive_mode_title">Drive View Mode</string>
+    <string name="settings_item_drive_mode_desc">Switch how files and folders are displayed in iCloud Drive</string>
+    <string name="settings_item_drive_sort_field_title">Default Sort Field</string>
+    <string name="settings_item_drive_sort_field_desc">Set the default sorting criteria for Drive files and folders</string>
+    <string name="settings_item_drive_sort_order_title">Default Sort Direction</string>
+    <string name="settings_item_drive_sort_order_desc">Set the default ascending/descending sorting order in Drive</string>
+    <string name="settings_item_auto_update_title">Auto Check for Updates</string>
+    <string name="settings_item_auto_update_desc">Automatically detect the latest version on GitHub Releases upon app startup</string>
+    <string name="settings_item_about_title">About</string>
+    <string name="settings_item_about_desc">About AClouDroid</string>
+    <string name="settings_cloud_media_dialog_title">System Cloud Media Settings</string>
+    <string name="settings_cloud_media_dialog_desc">The Android system enforces a whitelist for cloud media providers. You can activate it using one of the following methods:</string>
+    <string name="settings_cloud_media_shizuku_auth">✅ Shizuku connected and authorized</string>
+    <string name="settings_cloud_media_shizuku_req">⚠️ Shizuku is running, tap to request authorization</string>
+    <string name="settings_cloud_media_shizuku_missing">ℹ️ Shizuku is not running. You can also activate via ADB command from your computer.</string>
+    <string name="settings_cloud_media_adb_copied">ADB command copied to clipboard</string>
+    <string name="settings_cloud_media_adb_copy_btn">Copy ADB activation command for PC</string>
+    <string name="settings_cloud_media_writing">Writing system configuration...</string>
+    <string name="settings_cloud_media_failed">Failed: %1$s</string>
+    <string name="settings_cloud_media_req_btn">Request Shizuku Authorization</string>
+    <string name="settings_cloud_media_activate_btn">Activate via Shizuku with one tap</string>
+    <string name="settings_cloud_media_go_settings_btn">Go to System Settings</string>
+    <string name="settings_icloud_web_title">iCloud on the Web</string>
+    <string name="settings_about_header">About</string>
+    <string name="settings_about_slogan">Browse and sync your iCloud directly on your Android phone!</string>
+    <string name="settings_about_check_update">Checking for updates...</string>
+    <string name="settings_about_up_to_date">You are up to date (v%1$s)</string>
+    <string name="settings_about_update_failed">Failed to check for updates</string>
+
+    <!-- Settings Screen Misc Remaining (Part 3) -->
+    <string name="settings_about_version">Version</string>
+    <string name="settings_about_check_btn">Check for Updates</string>
+    <string name="settings_about_repo_copied">Repository address copied to clipboard</string>
+    <string name="settings_about_repo_failed">Unable to open URL: %1$s</string>
+    <string name="settings_about_repo_btn">View source code on GitHub</string>
+    <string name="settings_about_repo_icon">Open Repository</string>
+    <string name="settings_diag_title">Diagnostics &amp; Troubleshooting</string>
+    <string name="settings_diag_export_failed">Failed to export diagnostic logs: %1$s</string>
+    <string name="settings_diag_export_btn">Export Diagnostic Logs</string>
+    <string name="settings_diag_export_desc">Package and export App behavior logs and Logcat</string>
+    <string name="settings_diag_export_icon">Export Diagnostics</string>
+    <string name="settings_diag_clear_toast">Diagnostic logs cleared</string>
+    <string name="settings_diag_clear_btn">Clear Diagnostic Logs</string>
+    <string name="settings_diag_clear_desc">Clear locally saved behavior logs and Logcat buffers</string>
+    <string name="settings_diag_clear_icon">Clear Diagnostics</string>
+
+    <!-- Download Dialog -->
+    <string name="settings_dl_progress_prep">Preparing full download queue…</string>
+    <string name="settings_dl_progress_pause">Full download paused</string>
+    <string name="settings_dl_progress_active">Downloading all (%1$d%%)</string>
+    <string name="settings_dl_progress_loc">Saving to: %1$s · Completed %2$d / %3$d items</string>
+    <string name="settings_dl_progress_loc_failed"> (%1$d items failed)</string>
+    <string name="settings_dl_resume">Resume Download</string>
+    <string name="settings_dl_pause">Pause</string>
+    <string name="settings_dl_stop">Stop Task</string>
+    <string name="settings_dl_title">Download All Photos and Videos</string>
+    <string name="settings_dl_est_count">• Cloud media count: %1$d items (approx. %2$s)</string>
+    <string name="settings_dl_est_avail">• Local space available: %1$s</string>
+    <string name="settings_dl_est_warn">⚠️ Available space is lower than the estimated total. It is recommended to free up some space before downloading.</string>
+    <string name="settings_dl_est_calc">Calculating cloud photo count...</string>
+    <string name="settings_dl_loc_title">Select Save Location</string>
+    <string name="settings_dl_loc_dcim_title">DCIM/Camera (Recommended Default)</string>
+    <string name="settings_dl_loc_dcim_desc">Saves directly to the system camera roll, merging seamlessly with native photos</string>
+    <string name="settings_dl_loc_pic_title">Pictures/iCloud</string>
+    <string name="settings_dl_loc_pic_desc">Creates an independent \"iCloud\" album folder in your gallery</string>
+
+    <!-- Settings Screen Misc Remaining (Part 4) -->
+    <string name="settings_dl_loc_pic_desc_2">Saves to a standalone album under the standard Pictures directory</string>
+    <string name="settings_dl_loc_custom_title_empty">Custom export location...</string>
+    <string name="settings_dl_loc_custom_title_picked">Selected: %1$s</string>
+    <string name="settings_dl_loc_custom_desc_empty">Open the system file picker to select any custom album or folder</string>
+    <string name="settings_dl_loc_custom_desc_picked">Tap \"Change\" on the right to select a different folder</string>
+    <string name="settings_dl_loc_custom_change">Change</string>
+    <string name="settings_dl_meta_note">• Metadata preservation: Original shooting times, EXIF, and GPS locations of photos and videos will be completely retained, strictly ensuring timeline accuracy.</string>
+    <string name="settings_dl_wifi_note">• It is recommended to connect to Wi-Fi and a charger for lengthy full downloads.</string>
+    <string name="settings_dl_start_countdown">Start Download (%1$ds)</string>
+    <string name="settings_dl_start">Start Download</string>
+    <string name="settings_dl_stop_title">Stop full download?</string>
+    <string name="settings_dl_stop_desc">Successfully downloaded and saved %1$d items to \"%2$s\". Please choose how to handle the files downloaded so far:</string>
+    <string name="settings_dl_stop_keep_title">Only Stop Download (Keep downloaded files)</string>
+    <string name="settings_dl_stop_keep_desc">Stop further downloads. The files already saved to your local gallery will be kept completely.</string>
+    <string name="settings_dl_stop_delete_title">Stop and Delete downloaded content</string>
+    <string name="settings_dl_stop_delete_desc">Stop the task and precisely remove the %1$d items downloaded during this session from your gallery.</string>
+    <string name="settings_dl_stop_back">Back to Continue Downloading</string>
+
+    <!-- Account Info Dialog -->
+    <string name="account_info_logged_in">Signed In</string>
+    <string name="account_info_title">iCloud Account Information</string>
+    <string name="account_info_node_label">Service Node</string>
+    <string name="account_info_node_cn">Mainland China (GCBD)</string>
+    <string name="account_info_node_intl">International (icloud.com)</string>
+    <string name="account_info_dsid_label">Account DSID</string>
+    <string name="account_info_ck_label">CloudKit Routing</string>
+    <string name="account_info_2fa_label">2FA HSA-TRUST Token</string>
+    <string name="account_info_2fa_yes">Captured (Silent long-term renewal)</string>
+    <string name="account_info_2fa_no">Not detected</string>
+    <string name="account_info_sign_out_desc">Sign out and clear local credentials</string>
+
+    <!-- Month Bucketing -->
+    <string name="month_unorganized">Uncategorized</string>
+    <string name="month_label_zh">%1$d-%2$02d</string>
+    <string name="month_label_zh_short">%1$d</string>
+
+    <!-- Month Header -->
+    <string name="month_header_count_complete">%1$d items</string>
+    <string name="month_header_count_scanning">%1$d items · Scanning</string>
+
+    <!-- Photos Screen -->
+    <string name="photos_title_scanning">Scanning &amp; reconciling…</string>
+    <string name="photos_title_all">All iCloud Media</string>
+    <string name="photos_title_syncing">Syncing library…</string>
+    <string name="photos_action_sync">Incremental Sync</string>
+    <string name="photos_action_account">Account Info</string>
+    <string name="photos_ptr_syncing">Syncing...</string>
+    <string name="photos_ptr_release">Release to sync</string>
+    <string name="photos_ptr_pull">Pull to sync</string>
+    <string name="photos_empty_syncing">Fetching photos from iCloud...</string>
+    <string name="photos_empty_title">No iCloud Photos</string>
+    <string name="photos_empty_desc">Please start the initial fetch in "Settings → Full Scan Photo Library"</string>
+    <string name="photos_count_suffix">%1$d items</string>
+
+    <!-- EXIF Info / Photo Viewer -->
+    <string name="photo_info_err_fetch">Failed to fetch photo info</string>
+    <string name="photo_info_coords_label">Coordinates</string>
+    <string name="photo_info_coords_copied">Coordinates copied</string>
+    <string name="photo_info_no_metadata">This photo has no shooting metadata (might be a screenshot or imported from another app)</string>
+    <string name="photo_info_coords_copy_hint_1">%1$s · Tap to copy coordinates</string>
+    <string name="photo_info_coords_copy_hint_2">Tap to copy coordinates</string>
+    <string name="photo_info_loading">Loading metadata…</string>
+    <string name="photo_info_retry">Retry</string>
+    <string name="photo_info_unknown_date">Unknown Date</string>
+    <string name="photo_info_date_format_zh">MMM d, yyyy</string>
+
+    <string name="photo_info_focal_both">%1$s mm · %2$s mm eq.</string>
+    <string name="photo_info_focal_eq">%1$s mm eq.</string>
+    <string name="photo_info_compass_n">N</string>
+    <string name="photo_info_compass_ne">NE</string>
+    <string name="photo_info_compass_e">E</string>
+    <string name="photo_info_compass_se">SE</string>
+    <string name="photo_info_compass_s">S</string>
+    <string name="photo_info_compass_sw">SW</string>
+    <string name="photo_info_compass_w">W</string>
+    <string name="photo_info_compass_nw">NW</string>
+    <string name="photo_info_datetime_format_zh">%1$s-%2$s-%3$s %4$s</string>
+
+    <string name="viewer_live_playing">Playing LIVE</string>
+    <string name="viewer_live_hint">LIVE (Tap/Hold to play)</string>
+    <string name="viewer_action_share_prep">Preparing</string>
+    <string name="viewer_action_share">Share</string>
+    <string name="viewer_action_info">Info</string>
+    <string name="viewer_action_dl_active">Downloading</string>
+    <string name="viewer_action_dl_done">Saved</string>
+    <string name="viewer_action_dl_idle">Download</string>
+
+    <!-- Drive Screen -->
+    <string name="drive_empty_folder">This folder is empty</string>
+    <string name="drive_rechecking">Rechecking…</string>
+    <string name="drive_action_upload">Upload File</string>
+    <string name="drive_action_switch_view">Switch View</string>
+    <string name="drive_action_sort">Sort By</string>
+    <string name="drive_sort_field">Sort Field</string>
+    <string name="drive_sort_order_asc">Ascending (A-Z)</string>
+    <string name="drive_sort_order_desc">Descending (Z-A)</string>
+    <string name="drive_sort_order_format">Order: %1$s</string>
+    <string name="drive_action_new_folder">New Folder</string>
+    <string name="drive_action_more">More Actions</string>
+    <string name="drive_action_sync">Incremental Sync</string>
+    <string name="drive_action_refresh_all">Refresh All</string>
+    <string name="drive_action_trash">Recently Deleted (Web)</string>
+    <string name="drive_action_cancel_dl">Cancel Download</string>
+    <string name="drive_action_download">Download</string>
+    <string name="drive_action_dl_item">Download File</string>
+    <string name="drive_action_preview">Preview</string>
+    <string name="drive_action_share">Share</string>
+    <string name="drive_action_iwork">Open in iWork for Web</string>
+    <string name="drive_action_rename">Rename</string>
+    <string name="drive_action_move">Move</string>
+    <string name="drive_action_move_to_trash">Move to Recently Deleted</string>
+    <string name="drive_icon_folder">Folder</string>
+    <string name="drive_icon_image">Image</string>
+    <string name="drive_icon_video">Video</string>
+    <string name="drive_icon_audio">Audio</string>
+    <string name="drive_icon_archive">Archive</string>
+    <string name="drive_icon_doc">Document</string>
+    <string name="drive_icon_text">Text</string>
+    <string name="drive_icon_file">File</string>
+    <string name="drive_item_count_suffix">%1$d items</string>
+    <string name="drive_action_close_hint">Dismiss Hint</string>
+
+    <!-- Drive Upload Progress -->
+    <string name="drive_upload_prog_mixed">Uploading %1$d files · %2$d failed</string>
+    <string name="drive_upload_prog_failed">%1$d uploads failed</string>
+    <string name="drive_upload_prog_queued">(%1$d queued)</string>
+    <string name="drive_upload_prog_uploading">Uploading %1$d files</string>
+    <string name="drive_upload_prog_only_queued">%1$d files queued for upload…</string>
+    <string name="drive_upload_expand">Expand Details</string>
+    <string name="drive_upload_collapse">Collapse Details</string>
+    <string name="drive_upload_status_queued">Queued…</string>
+    <string name="drive_upload_status_active">Transferring · %1$d%%</string>
+    <string name="drive_upload_status_failed">Failed: %1$s</string>
+    <string name="drive_upload_status_unknown_err">Unknown error</string>
+    <string name="drive_upload_status_success">Success</string>
+    <string name="drive_upload_retry">Retry</string>
+    <string name="drive_upload_cancel">Cancel Upload</string>
+
+    <!-- Drive Modals -->
+    <string name="drive_modal_new_folder_title">New Folder</string>
+    <string name="drive_modal_new_folder_label">Folder Name</string>
+    <string name="drive_modal_new_folder_btn">Create</string>
+    <string name="drive_modal_rename_title">Rename</string>
+    <string name="drive_modal_rename_label">New Name</string>
+    <string name="drive_modal_move_up">Go to Parent Folder</string>
+    <string name="drive_modal_move_current">Selected folder: %1$s</string>
+    <string name="drive_modal_move_empty">No subfolders in this directory</string>
+    <string name="drive_modal_move_enter">Open Subfolder</string>
+    <string name="drive_modal_move_title">Move \"%1$s\" to</string>
+    <string name="drive_modal_move_btn">Move Here</string>
+    <string name="drive_modal_trash_title">Move to Recently Deleted</string>
+    <string name="drive_modal_trash_desc">Are you sure you want to move \"%1$s\" to Recently Deleted? You can restore or permanently delete it on the web.</string>
+    <string name="drive_modal_trash_btn">Move to Recently Deleted</string>
+    <string name="drive_modal_gcz_limit_title">GCBD Account Upload Limit Notice</string>
+    <string name="drive_modal_gcz_limit_desc">Your account is on the GCBD (Mainland China) node. Apple servers limit single file upload requests in this region to 1 GiB (~1073 MB).\n\nUploads exceeding 1 GiB will be rejected by the cloud server. This app will automatically show a warning after selecting files.</string>
+    <string name="drive_modal_gcz_limit_btn">Got it, Continue</string>
+
+    <!-- Drive IWork & Media Viewer -->
+    <string name="drive_iwork_fallback_title">iCloud Drive Web</string>
+    <string name="drive_iwork_refresh">Refresh Page</string>
+    <string name="drive_iwork_open_ext">Open in External Browser</string>
+    <string name="drive_media_err_fetch">Failed to load media preview</string>
+    <string name="drive_media_preparing">Preparing preview...</string>
+
+    <!-- Notifications -->
+    <string name="notif_channel_drive_dl_name">Drive File Download</string>
+    <string name="notif_channel_drive_dl_desc">Progress and completion notifications for downloading iCloud Drive files</string>
+    <string name="notif_drive_dl_prog_full">Downloading %1$s (%2$d%% · %3$s)</string>
+    <string name="notif_drive_dl_prog_pct">Downloading %1$s (%2$d%%)</string>
+    <string name="notif_drive_dl_prog_bytes">Downloading %1$s (%2$s)</string>
+    <string name="notif_drive_dl_prog_unk">Downloading %1$s...</string>
+    <string name="notif_drive_dl_title">iCloud Drive Download</string>
+    <string name="notif_action_cancel">Cancel</string>
+    <string name="notif_drive_dl_done_title">File Download Complete</string>
+    <string name="notif_drive_dl_done_text">%1$s · Tap to open</string>
+    <string name="notif_drive_dl_fail_text">Download failed: %1$s</string>
+    <string name="notif_drive_dl_fail_title">Download Failed</string>
+
+    <string name="notif_channel_scan_name">Photo Scan</string>
+    <string name="notif_channel_scan_desc">Progress notifications when scanning iCloud Photo Library in the background</string>
+    <string name="notif_scan_prog_full">Scanned %1$s / %2$s items%3$s</string>
+    <string name="notif_scan_prog_unk">Scanned %1$s items%2$s</string>
+    <string name="notif_scan_prog_title">Scanning iCloud photos silently in the background</string>
+    <string name="notif_scan_done_title">iCloud Photo Scan Complete</string>
+    <string name="notif_scan_done_text">Organized %1$s photos and videos in total</string>
+
+    <!-- Drive Download Errors -->
+    <string name="drive_err_dl_generic">Download failed</string>
+    <string name="drive_err_dl_iwork">This file type (such as iWork packages) is currently not supported for direct download</string>
+    <string name="drive_err_dl_auth">iCloud login credentials expired, please sign in again</string>
+    <string name="drive_err_dl_not_found">File does not exist on cloud or has been deleted</string>
+    <string name="drive_err_dl_service_unavailable">Cloud service currently unavailable, please try again later</string>
+
+    <!-- Day Bucketing -->
+    <string name="day_today">Today</string>
+    <string name="day_yesterday">Yesterday</string>
+    <string name="day_before_yesterday">Day before yesterday</string>
+
+    <!-- Backup Screen -->
+    <string name="backup_title">Local Album Backup</string>
+    <string name="backup_count_folder">%1$d local album folders in total</string>
+    <string name="backup_permission_waiting">Waiting for local media permission</string>
+    <string name="backup_empty">No local album or media folders found</string>
+    <string name="backup_status_active_force">⚡ Upload now (active for 1h)</string>
+    <string name="backup_status_active">Auto backup in progress</string>
+    <string name="backup_status_synced">Album backup synced</string>
+    <string name="backup_status_desc_active">%1$d items remaining to upload</string>
+    <string name="backup_status_desc_failed"> · %1$d failed</string>
+    <string name="backup_status_desc_synced">New photos from all selected albums are backed up</string>
+    <string name="backup_action_manage">Manage Queue</string>
+    <string name="backup_album_enabled">Backup enabled</string>
+    <string name="backup_album_disabled">Not backed up</string>
+    <string name="backup_count_items">%1$d items</string>
+    <string name="backup_queue_title">Backup Queue Management</string>
+    <string name="backup_queue_summary">%1$d items in total (%2$d pending / %3$d uploading / %4$d failed)</string>
+    <string name="backup_queue_btn_upload">Upload Now</string>
+    <string name="backup_queue_btn_uploading">Uploading</string>
+    <string name="backup_queue_btn_retry">Retry Failed</string>
+    <string name="backup_queue_btn_clear_done">Clear Completed</string>
+    <string name="backup_queue_btn_clear_all">Clear All</string>
+    <string name="backup_queue_empty">No backup tasks, queue is empty</string>
+    <string name="backup_queue_item_uploading">Uploading</string>
+    <string name="backup_queue_item_done">Completed</string>
+    <string name="backup_queue_item_failed">Failed</string>
+    <string name="backup_queue_item_pending">Pending</string>
+
+    <!-- Drive Sync Status -->
+    <string name="drive_walk_latest">Up to date (%1$d folders checked)</string>
+    <string name="drive_walk_updated">Updated %1$d folders (%2$d checked)</string>
+    <string name="drive_walk_unfinished">Incomplete</string>
+    <string name="drive_walk_budget">Container budget reached for this pass, continuing next time</string>
+    <string name="drive_queue_deduped">%1$d files already in queue</string>
+    <string name="drive_queue_revived">%1$d failed tasks re-queued</string>
+    <string name="drive_queue_renamed">%1$d duplicate files renamed to %2$s etc.</string>
+
+    <!-- Photos Sync Status -->
+    <string name="photos_sync_done_total">Sync complete, %1$d items in total</string>
+    <string name="photos_sync_done_changed">Sync complete, %1$d items changed</string>
+
+    <!-- Settings Groups &amp; Enums -->
+    <string name="settings_group_quick_access">Quick Access</string>
+    <string name="settings_group_quick_access_desc">Quickly access official web version of iCloud inside the app</string>
+    <string name="settings_group_navigation">Navigation Bar</string>
+    <string name="settings_group_navigation_desc">Customize items displayed in the bottom navigation bar</string>
+    <string name="settings_group_appearance">Appearance &amp; Personalization</string>
+    <string name="settings_group_appearance_desc">Set the app\'s light/dark theme and Android 12+ Monet dynamic wallpaper color extraction.</string>
+    <string name="settings_group_system_integration">System Integration</string>
+    <string name="settings_group_system_integration_desc">Configure deep integration between iClouDroid and Android multimedia ecosystem.</string>
+    <string name="settings_group_auto_backup">Auto Backup Policy</string>
+    <string name="settings_group_auto_backup_desc">Configure network and battery constraints for background local album backup.</string>
+    <string name="settings_group_photos_library">Photos Library</string>
+    <string name="settings_group_photos_library_desc">Full library scan traverses the entire iCloud Photos library to discover and clean up photos deleted on other devices.</string>
+    <string name="settings_group_auto_scan">Auto Scan</string>
+    <string name="settings_group_auto_scan_desc">Automatically perform full scan and incremental sync in the background (3:00 AM) based on schedule.</string>
+    <string name="settings_group_drive">iCloud Drive</string>
+    <string name="settings_group_drive_desc">Set default view mode and sorting rules for iCloud Drive file lists.</string>
+    <string name="settings_group_advanced">Advanced Features</string>
+    <string name="settings_group_advanced_desc">Advanced functions such as full data export and deep system migration.</string>
+    <string name="settings_group_about">About</string>
+    <string name="settings_group_about_desc">View app version info and open-source repository</string>
+
+    <string name="nav_item_photos">Photos</string>
+    <string name="nav_item_backup">Backup</string>
+    <string name="nav_item_drive">Drive</string>
+    <string name="nav_item_notes">Notes</string>
+    <string name="nav_item_reminders">Reminders</string>
+    <string name="nav_item_findmy">Find My</string>
+
+    <string name="enum_unit_day">Day</string>
+    <string name="enum_unit_month">Month</string>
+    <string name="enum_view_list">List</string>
+    <string name="enum_view_grid">Grid</string>
+    <string name="enum_sort_name">Name</string>
+    <string name="enum_sort_date">Date Modified</string>
+    <string name="enum_sort_size">Size</string>
+    <string name="enum_sort_type">Type</string>
+    <string name="enum_order_asc">Ascending</string>
+    <string name="enum_order_desc">Descending</string>
+    <string name="enum_freq_off">Off</string>
+    <string name="enum_freq_daily">Daily</string>
+    <string name="enum_freq_weekly">Weekly</string>
+    <string name="enum_freq_monthly">Monthly</string>
+    <string name="enum_freq_custom">Custom</string>
+
+    <!-- Errors &amp; Updates -->
+    <string name="err_github_rate_limit">GitHub API rate limit exceeded, please try again later</string>
+
+    <!-- Photos ViewModel Sync Messages -->
+    <string name="photos_msg_caching_covers">Caching month covers…</string>
+    <string name="photos_msg_scan_done">Full scan complete, %1$d items in total</string>
+    <string name="photos_msg_scanned_partial">Scanned %1$d items, will resume automatically later</string>
+    <string name="photos_msg_connecting">Connecting to iCloud Photos library...</string>
+    <string name="photos_msg_zone_not_ready">PrimarySync zone not ready</string>
+    <string name="photos_msg_err_prefix">Error: %1$s</string>
+    <string name="photos_msg_scanning">Scanning photo library...</string>
+    <string name="photos_msg_syncing">Syncing latest photo changes...</string>
+    <string name="photos_msg_scan_failed">Scan failed: %1$s</string>
+    <string name="photos_msg_sync_failed">Sync failed: %1$s</string>
+    <string name="photos_msg_checking_update">Checking for incremental updates...</string>
+    <string name="photos_msg_sync_changed">Sync complete, %1$d items changed</string>
+    <string name="photos_msg_already_latest">Up to date, no new photos</string>
+    <string name="photos_msg_scanning_progress">Scanning %1$d / %2$d items%3$s</string>
+    <string name="photos_msg_scanning_progress_unk">Scanning · %1$d items scanned%2$s</string>
+    <string name="photos_toast_downloaded">Downloaded to album: %1$s</string>
+    <string name="photos_toast_download_failed">Download failed: %1$s</string>
+    <string name="photos_toast_share_prep_failed">Failed to prepare share: %1$s</string>
+    <string name="photos_toast_share_err">Share error: %1$s</string>
+    <string name="photos_share_chooser_title">Share photos or videos</string>
+    <string name="photos_toast_share_launch_failed">Failed to launch share: %1$s</string>
+
+    <!-- Month Index Bar -->
+    <string name="month_jump_title">Jump to Month</string>
+    <string name="month_prev">Previous Month</string>
+    <string name="month_next">Next Month</string>
+
+    <!-- Photo Grid Items -->
+    <string name="photo_cd_video">Video</string>
+    <string name="photo_cd_favorite">Favorite</string>
+
+    <!-- Scan Progress Bar -->
+    <string name="scan_progress_caching">Caching month covers…</string>
+    <string name="scan_progress_items">%1$s / %2$s items</string>
+    <string name="scan_progress_scanned">Scanned %1$s items</string>
+
+    <!-- Share Upload Sheet -->
+    <string name="share_item_type_media">Photos/Videos</string>
+    <string name="share_item_type_files">Files</string>
+    <string name="share_prep_sending">Preparing to send %1$d items%2$s%3$s</string>
+    <string name="share_grant_photos_perm">Grant \"Photos and Videos\" permission</string>
+    <string name="share_photos_subtitle">Save to iCloud Photos Library</string>
+    <string name="share_drive_subtitle">Select directory and save to iCloud Drive</string>
+    <string name="share_cd_parent_dir">Go to parent folder</string>
+    <string name="share_selected_dir">Selected: %1$s</string>
+    <string name="share_no_subdirs">No subfolders in this directory</string>
+    <string name="share_cd_sub_dir">Enter subfolder</string>
+
+    <!-- Photo Viewer Pages Errors -->
+    <string name="viewer_err_link_invalid">Failed to load original image (Link expired)</string>
+    <string name="viewer_err_hdr_degraded">This image is in HDR format, preview is currently not supported\nTap the button below to download the original image</string>
+    <string name="viewer_err_decode_failed">Failed to decode original image (Format currently unsupported)</string>
+    <string name="viewer_err_no_video_link">Cannot play: No valid video playback link</string>
+    <string name="viewer_err_video_expired">Video link expired (HTTP %1$d). Multiple refreshes failed, please try again later</string>
+    <string name="viewer_err_video_refresh_failed_code">Failed to refresh video link (HTTP %1$d)</string>
+    <string name="viewer_err_video_deleted">Video has been deleted from the cloud</string>
+    <string name="viewer_err_network_code">Network error (HTTP %1$d)</string>
+    <string name="viewer_err_play_failed">Playback failed: %1$s</string>
+    <string name="viewer_title_play_failed">Online playback failed</string>
+    <string name="viewer_action_retry">Retry</string>
+    <string name="viewer_err_video_refresh_failed">Failed to refresh video link. Please check your network and try again</string>
 </resources>

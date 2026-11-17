@@ -1,20 +1,14 @@
 package app.acloudroid.qwq.feature.photos.data
 
+import android.content.Context
+import app.acloudroid.qwq.R
 import app.acloudroid.qwq.feature.photos.data.db.PhotoAssetEntity
 import java.util.Calendar
+import java.util.Locale
 import java.util.TimeZone
 
 /**
  * Pure functions for day-level bucketing inside month sections.
- *
- * ## Rationale (ISS-027 & AGENTS §6.4)
- *
- * The cloud gallery stores and paginates assets using [MonthBucketing] (yyyyMM) as the stable
- * root partition. This object handles the sub-division of a single month's photo stream into
- * day groups (yyyyMMdd) for the Day View, ensuring:
- *  1. Zero alteration to Room schema, scanning cursor, or reconciliation logic.
- *  2. Pure calculation in the device's local timezone (preventing midnight drifting).
- *  3. Human-friendly labels ("今天", "昨天", "前天", "3月28日", "2025年11月14日").
  */
 object DayBucketing {
 
@@ -31,8 +25,6 @@ object DayBucketing {
 
     /**
      * Converts an epoch-millis timestamp to an integer day key: `yyyyMMdd`.
-     *
-     * Example: 1774684800000 -> 20260328
      */
     fun dayKeyOf(assetDateMs: Long, timeZone: TimeZone = TimeZone.getDefault()): Int {
         if (assetDateMs <= 0L) return UNBUCKETED
@@ -55,22 +47,20 @@ object DayBucketing {
 
     /**
      * Human-friendly label for a day key relative to `nowMs`.
-     *
-     *  - Same day as now -> "今天"
-     *  - 1 day ago      -> "昨天"
-     *  - 2 days ago     -> "前天"
-     *  - Same year      -> "M月d日" (e.g. "3月28日")
-     *  - Different year -> "yyyy年M月d日" (e.g. "2025年11月14日")
      */
     fun labelOf(
         dayKey: Int,
         nowMs: Long = System.currentTimeMillis(),
-        timeZone: TimeZone = TimeZone.getDefault()
+        timeZone: TimeZone = TimeZone.getDefault(),
+        context: Context? = null,
+        locale: Locale = context?.resources?.configuration?.locales?.get(0) ?: Locale.getDefault()
     ): String {
-        if (dayKey <= 0) return "未分组"
+        if (dayKey <= 0) return context?.getString(R.string.month_unorganized) ?: if (locale.language.equals("zh", ignoreCase = true)) "未分组" else "Unorganized"
 
         val todayKey = dayKeyOf(nowMs, timeZone)
-        if (dayKey == todayKey) return "今天"
+        if (dayKey == todayKey) {
+            return context?.getString(R.string.day_today) ?: if (locale.language.equals("zh", ignoreCase = true)) "今天" else "Today"
+        }
 
         // Check yesterday and day before yesterday
         val cal = Calendar.getInstance(timeZone)
@@ -78,21 +68,36 @@ object DayBucketing {
 
         cal.add(Calendar.DAY_OF_MONTH, -1)
         val yesterdayKey = dayKeyOf(cal.timeInMillis, timeZone)
-        if (dayKey == yesterdayKey) return "昨天"
+        if (dayKey == yesterdayKey) {
+            return context?.getString(R.string.day_yesterday) ?: if (locale.language.equals("zh", ignoreCase = true)) "昨天" else "Yesterday"
+        }
 
         cal.add(Calendar.DAY_OF_MONTH, -1)
         val dayBeforeYesterdayKey = dayKeyOf(cal.timeInMillis, timeZone)
-        if (dayKey == dayBeforeYesterdayKey) return "前天"
+        if (dayKey == dayBeforeYesterdayKey) {
+            return context?.getString(R.string.day_before_yesterday) ?: if (locale.language.equals("zh", ignoreCase = true)) "前天" else "2 days ago"
+        }
 
-        val currentYear = cal.get(Calendar.YEAR)
+        val targetCal = Calendar.getInstance(timeZone)
         val targetYear = yearOf(dayKey)
         val targetMonth = monthOf(dayKey)
         val targetDay = dayOfMonth(dayKey)
+        targetCal.set(targetYear, targetMonth - 1, targetDay)
 
-        return if (targetYear == currentYear) {
-            "${targetMonth}月${targetDay}日"
+        val currentYear = cal.get(Calendar.YEAR)
+
+        if (locale.language.equals("zh", ignoreCase = true)) {
+            return if (targetYear == currentYear) {
+                "${targetMonth}月${targetDay}日"
+            } else {
+                "${targetYear}年${targetMonth}月${targetDay}日"
+            }
         } else {
-            "${targetYear}年${targetMonth}月${targetDay}日"
+            val df = java.text.DateFormat.getDateInstance(
+                if (targetYear == currentYear) java.text.DateFormat.MEDIUM else java.text.DateFormat.MEDIUM,
+                locale
+            )
+            return df.format(targetCal.time)
         }
     }
 
@@ -102,7 +107,9 @@ object DayBucketing {
     fun groupPhotosByDay(
         photos: List<PhotoAssetEntity>,
         nowMs: Long = System.currentTimeMillis(),
-        timeZone: TimeZone = TimeZone.getDefault()
+        timeZone: TimeZone = TimeZone.getDefault(),
+        context: Context? = null,
+        locale: Locale = context?.resources?.configuration?.locales?.get(0) ?: Locale.getDefault()
     ): List<DayGroup> {
         if (photos.isEmpty()) return emptyList()
 
@@ -117,7 +124,7 @@ object DayBucketing {
                     result.add(
                         DayGroup(
                             dayKey = currentDayKey,
-                            label = labelOf(currentDayKey, nowMs, timeZone),
+                            label = labelOf(currentDayKey, nowMs, timeZone, context, locale),
                             photos = currentPhotos
                         )
                     )
@@ -133,7 +140,7 @@ object DayBucketing {
             result.add(
                 DayGroup(
                     dayKey = currentDayKey,
-                    label = labelOf(currentDayKey, nowMs, timeZone),
+                    label = labelOf(currentDayKey, nowMs, timeZone, context, locale),
                     photos = currentPhotos
                 )
             )

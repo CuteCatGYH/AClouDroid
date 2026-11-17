@@ -1,5 +1,8 @@
 package app.acloudroid.qwq.ui.auth
 
+import app.acloudroid.qwq.R
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -49,12 +52,12 @@ fun AccountInfoDialog(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = Icons.Default.CheckCircle,
-                    contentDescription = "已登录",
+                    contentDescription = stringResource(R.string.account_info_logged_in),
                     tint = Color(0xFF4CAF50)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "iCloud 账号信息",
+                    text = stringResource(R.string.account_info_title),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
@@ -69,12 +72,12 @@ fun AccountInfoDialog(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    InfoItem(label = "服务节点", value = if (state.isChinaMainland) "中国大陆 (云上贵州)" else "国际区 (icloud.com)")
-                    InfoItem(label = "账号 DSID", value = state.dsid)
-                    InfoItem(label = "CloudKit 路由", value = state.ckDatabaseUrl)
+                    InfoItem(label = stringResource(R.string.account_info_node_label), value = if (state.isChinaMainland) stringResource(R.string.account_info_node_cn) else stringResource(R.string.account_info_node_intl))
+                    InfoItem(label = stringResource(R.string.account_info_dsid_label), value = state.dsid)
+                    InfoItem(label = stringResource(R.string.account_info_ck_label), value = state.ckDatabaseUrl)
                     InfoItem(
-                        label = "2FA HSA-TRUST 凭证",
-                        value = if (state.hasHsaTrust) "已捕获 (长效静默续期)" else "未检测到"
+                        label = stringResource(R.string.account_info_2fa_label),
+                        value = if (state.hasHsaTrust) stringResource(R.string.account_info_2fa_yes) else stringResource(R.string.account_info_2fa_no)
                     )
                 }
             }
@@ -93,7 +96,7 @@ fun AccountInfoDialog(
                     modifier = Modifier.size(18.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("设置")
+                Text(stringResource(R.string.action_settings))
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -105,7 +108,7 @@ fun AccountInfoDialog(
                 ),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("退出登录并清除本地凭证")
+                Text(stringResource(R.string.account_info_sign_out_desc))
             }
 
             Spacer(modifier = Modifier.height(16.dp))

@@ -149,14 +149,14 @@ fun SettingsScreen(
                 TopAppBar(
                     title = {
                         Text(
-                            text = "设置",
+                            text = stringResource(R.string.settings_title),
                             fontWeight = FontWeight.Bold,
                             style = MaterialTheme.typography.titleLarge
                         )
                     },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -194,16 +194,16 @@ fun SettingsScreen(
 
                 SettingsCatalog.groups.forEach { group ->
                     Text(
-                        text = group.title,
+                        text = stringResource(group.titleRes),
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 4.dp)
                     )
 
-                    if (group.description != null) {
+                    if (group.descriptionRes != null) {
                         Text(
-                            text = group.description,
+                            text = stringResource(group.descriptionRes),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
@@ -354,37 +354,37 @@ private fun FullScanWarningDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("开始全盘扫描？") },
+        title = { Text(stringResource(R.string.settings_full_scan_dialog_title)) },
         text = {
             Column {
                 Text(
-                    "全盘扫描会完整遍历云端照片库（发起数百次请求），并比对本地数据库以清理在其它设备上已删除的照片。"
+                    stringResource(R.string.settings_full_scan_dialog_desc_1)
                 )
                 Spacer(Modifier.height(8.dp))
                 if (frequency != ScanFrequency.OFF) {
                     val cadenceDesc = when (frequency) {
-                        ScanFrequency.DAILY -> "每天"
-                        ScanFrequency.WEEKLY -> "每周"
-                        ScanFrequency.MONTHLY -> "每月"
-                        ScanFrequency.CUSTOM -> "每 $customDays 天"
+                        ScanFrequency.DAILY -> stringResource(R.string.settings_scan_freq_daily)
+                        ScanFrequency.WEEKLY -> stringResource(R.string.settings_scan_freq_weekly)
+                        ScanFrequency.MONTHLY -> stringResource(R.string.settings_scan_freq_monthly)
+                        ScanFrequency.CUSTOM -> stringResource(R.string.settings_scan_freq_custom, customDays)
                         ScanFrequency.OFF -> ""
                     }
                     Text(
-                        "后台扫描已开启（$cadenceDesc 凌晨 3:00 自动执行），通常无需手动触发。",
+                        stringResource(R.string.settings_full_scan_dialog_desc_2_on, cadenceDesc),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )
                     Spacer(Modifier.height(8.dp))
                 }
                 Text(
-                    "扫到一半退出不会损坏任何数据，下次会从断点继续。",
+                    stringResource(R.string.settings_full_scan_dialog_desc_3),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("开始扫描") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+        confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.settings_full_scan_start)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) } }
     )
 }
 
@@ -442,7 +442,7 @@ private fun SettingsRow(
                                 context.startActivity(intent)
                             } catch (e: Exception) {
                                 android.util.Log.e("SettingsScreen", "Failed to launch battery optimization intent", e)
-                                android.widget.Toast.makeText(context, "设备不支持直接跳转，请到系统设置中手动开启", android.widget.Toast.LENGTH_SHORT).show()
+                                android.widget.Toast.makeText(context, context.getString(R.string.settings_item_cloud_media_toast_manual), android.widget.Toast.LENGTH_SHORT).show()
                             }
                         } else {
                             // Already ignoring, maybe guide user to regular settings if they want to turn it off?
@@ -459,19 +459,19 @@ private fun SettingsRow(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "常驻后台 (实时备份)",
+                        text = stringResource(R.string.settings_item_battery_opt),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = if (isIgnoring) "已允许常驻后台，可提升实时备份概率" else "忽略电池优化，防止应用在后台被系统杀死",
+                        text = if (isIgnoring) stringResource(R.string.settings_item_battery_opt_desc_on) else stringResource(R.string.settings_item_battery_opt_desc_off),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     
                     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
                     Text(
-                        text = "若设置未生效，请参考 Don't kill my app! ",
+                        text = stringResource(R.string.settings_item_battery_opt_help),
                         style = MaterialTheme.typography.bodySmall.copy(textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline),
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.clickable {
@@ -507,12 +507,12 @@ private fun SettingsRow(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "显示常驻通知",
+                        text = stringResource(R.string.settings_item_keep_alive),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = if (keepBackgroundAlive) "已开启常驻通知" else "显示一条常驻通知，阻止应用被系统杀死",
+                        text = if (keepBackgroundAlive) stringResource(R.string.settings_item_keep_alive_desc_on) else stringResource(R.string.settings_item_keep_alive_desc_off),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -536,22 +536,22 @@ private fun SettingsRow(
             var showCustomIntervalDialog by remember { mutableStateOf(false) }
 
             DropdownRow(
-                title = "周期备份频率",
-                subtitle = if (periodicBackupInterval == 0L) "新增照片后立刻触发备份" else "后台触发自动备份的最高频率",
+                title = stringResource(R.string.settings_item_backup_interval),
+                subtitle = if (periodicBackupInterval == 0L) stringResource(R.string.settings_item_backup_interval_desc_immediate) else stringResource(R.string.settings_item_backup_interval_desc),
                 current = when (periodicBackupInterval) {
-                    0L -> "立即"
-                    15L -> "15 分钟"
-                    30L -> "30 分钟"
-                    60L -> "1 小时"
-                    else -> "$periodicBackupInterval 分钟"
+                    0L -> stringResource(R.string.settings_backup_interval_immediate_short)
+                    15L -> stringResource(R.string.settings_backup_interval_15m)
+                    30L -> stringResource(R.string.settings_backup_interval_30m)
+                    60L -> stringResource(R.string.settings_backup_interval_1h)
+                    else -> stringResource(R.string.settings_backup_interval_custom_val, periodicBackupInterval)
                 },
                 options = listOf(
-                    0L to "立即 (媒体监听)",
-                    15L to "15 分钟",
-                    30L to "30 分钟",
-                    60L to "1 小时",
-                    -1L to "自定义..."
-                ) + (if (listOf(0L, 15L, 30L, 60L, -1L).contains(periodicBackupInterval)) emptyList() else listOf(periodicBackupInterval to "$periodicBackupInterval 分钟 (自定义)")),
+                    0L to stringResource(R.string.settings_backup_interval_immediate),
+                    15L to stringResource(R.string.settings_backup_interval_15m),
+                    30L to stringResource(R.string.settings_backup_interval_30m),
+                    60L to stringResource(R.string.settings_backup_interval_1h),
+                    -1L to stringResource(R.string.settings_backup_interval_custom)
+                ) + (if (listOf(0L, 15L, 30L, 60L, -1L).contains(periodicBackupInterval)) emptyList() else listOf(periodicBackupInterval to stringResource(R.string.settings_backup_interval_custom_val, periodicBackupInterval))),
                 onSelect = {
                     if (it == -1L) {
                         showCustomIntervalDialog = true
@@ -567,10 +567,10 @@ private fun SettingsRow(
                 var customInput by remember { mutableStateOf(periodicBackupInterval.toString()) }
                 AlertDialog(
                     onDismissRequest = { showCustomIntervalDialog = false },
-                    title = { Text("自定义周期备份频率") },
+                    title = { Text(stringResource(R.string.settings_item_backup_interval)) },
                     text = {
                         Column {
-                            Text("输入间隔分钟数 (分钟):", style = MaterialTheme.typography.bodyMedium)
+                            Text(stringResource(R.string.settings_item_backup_interval), style = MaterialTheme.typography.bodyMedium)
                             Spacer(Modifier.height(8.dp))
                             androidx.compose.material3.OutlinedTextField(
                                 value = customInput,
@@ -588,10 +588,10 @@ private fun SettingsRow(
                                 app.acloudroid.qwq.feature.photos.work.PhotoBackupWorker.scheduleBackup(context)
                                 showCustomIntervalDialog = false
                             }
-                        ) { Text("确定") }
+                        ) { Text(stringResource(R.string.action_confirm)) }
                     },
                     dismissButton = {
-                        TextButton(onClick = { showCustomIntervalDialog = false }) { Text("取消") }
+                        TextButton(onClick = { showCustomIntervalDialog = false }) { Text(stringResource(R.string.action_cancel)) }
                     }
                 )
             }
@@ -605,12 +605,12 @@ private fun SettingsRow(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "允许蜂窝移动网络备份",
+                    text = stringResource(R.string.settings_item_backup_cellular),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = if (allowCellularUpload) "已允许使用蜂窝移动数据上传备份" else "默认仅限 Wi-Fi 网络下执行自动备份",
+                    text = if (allowCellularUpload) stringResource(R.string.settings_item_backup_cellular_desc_on) else stringResource(R.string.settings_item_backup_cellular_desc_off),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -633,12 +633,12 @@ private fun SettingsRow(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "仅限设备充电时备份",
+                    text = stringResource(R.string.settings_item_backup_charging),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = if (requireCharging) "仅在连接电源充电时触发后台自动备份" else "连接电源或未充电时均可运行后台备份",
+                    text = if (requireCharging) stringResource(R.string.settings_item_backup_charging_desc_on) else stringResource(R.string.settings_item_backup_charging_desc_off),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -661,12 +661,12 @@ private fun SettingsRow(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "低电量时自动暂停备份",
+                    text = stringResource(R.string.settings_item_backup_battery),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = if (requireBatteryNotLow) "系统处于低电量模式时暂停后台备份" else "忽略系统电量限制继续备份",
+                    text = if (requireBatteryNotLow) stringResource(R.string.settings_item_backup_battery_desc_on) else stringResource(R.string.settings_item_backup_battery_desc_off),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -682,18 +682,18 @@ private fun SettingsRow(
         }
 
         SettingsItem.BACKUP_CONCURRENT_LIMIT -> DropdownRow(
-            title = "多线程并发备份",
-            subtitle = "同时上传的照片或视频数量（最多 3 项）",
-            current = "$maxConcurrentUploads 项" + when (maxConcurrentUploads) {
-                1 -> " (串行)"
-                2 -> " (推荐)"
-                3 -> " (并行)"
+            title = stringResource(R.string.settings_item_backup_concurrent),
+            subtitle = stringResource(R.string.settings_item_backup_concurrent_desc, 3),
+            current = stringResource(R.string.settings_item_backup_concurrent_val, maxConcurrentUploads) + when (maxConcurrentUploads) {
+                1 -> " " + stringResource(R.string.settings_item_backup_concurrent_val_1)
+                2 -> " " + stringResource(R.string.settings_item_backup_concurrent_val_2)
+                3 -> " " + stringResource(R.string.settings_item_backup_concurrent_val_3)
                 else -> ""
             },
             options = listOf(
-                1 to "1 项 (串行上传)",
-                2 to "2 项 (均衡推荐)",
-                3 to "3 项 (高速并行)"
+                1 to stringResource(R.string.settings_item_backup_concurrent_val_1_full),
+                2 to stringResource(R.string.settings_item_backup_concurrent_val_2_full),
+                3 to stringResource(R.string.settings_item_backup_concurrent_val_3_full)
             ),
             onSelect = { settings.setMaxConcurrentUploads(it) }
         )
@@ -706,12 +706,12 @@ private fun SettingsRow(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "显示备份通知栏进度",
+                    text = stringResource(R.string.settings_item_backup_notification),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = if (showBackupNotification) "后台备份时在通知栏实时展示上传进度" else "静默后台备份，不在通知栏显示进度",
+                    text = if (showBackupNotification) stringResource(R.string.settings_item_backup_notification_desc_on) else stringResource(R.string.settings_item_backup_notification_desc_off),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -732,7 +732,7 @@ private fun SettingsRow(
             val targetUrl = if (isChinaMainland) "https://www.icloud.com.cn" else "https://www.icloud.com"
 
             ActionRow(
-                title = "访问 iCloud 网页版",
+                title = stringResource(R.string.settings_group_quick_access),
                 subtitle = if (isChinaMainland) "https://www.icloud.com.cn" else "https://www.icloud.com",
                 trailing = {
                     Icon(
@@ -767,7 +767,7 @@ private fun SettingsRow(
                         Icon(imageVector = dest.icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.width(16.dp))
                         Text(
-                            text = dest.label,
+                            text = stringResource(dest.labelRes),
                             style = MaterialTheme.typography.bodyLarge,
                             modifier = Modifier.weight(1f)
                         )
@@ -848,7 +848,7 @@ private fun SettingsRow(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "月份封面预览",
+                    text = stringResource(R.string.settings_item_month_cover),
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onSurface
                 )
@@ -856,9 +856,9 @@ private fun SettingsRow(
                     // States the non-obvious half: turning this off also stops the download, so
                     // a user reaching for it to save space gets what they expect.
                     text = if (monthCoverEnabled) {
-                        "跳转面板显示每月照片封面；关闭后不再下载封面"
+                        stringResource(R.string.settings_item_month_cover_desc_on)
                     } else {
-                        "已关闭，月份以纯文本显示且不占用存储"
+                        stringResource(R.string.settings_item_month_cover_desc_off)
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -875,11 +875,11 @@ private fun SettingsRow(
             var showShizukuDialog by remember { mutableStateOf(false) }
 
             ActionRow(
-                title = "云端媒体提供方",
+                title = stringResource(R.string.settings_item_cloud_media),
                 subtitle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    "通过 Shizuku 一键激活或前往系统设置"
+                    stringResource(R.string.settings_item_cloud_media_desc_shizuku)
                 } else {
-                    "需要 Android 13 (API 33) 及以上系统支持"
+                    stringResource(R.string.settings_item_cloud_media_desc_req)
                 },
                 enabled = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU,
                 trailing = {
@@ -914,8 +914,8 @@ private fun SettingsRow(
         }
 
         SettingsItem.FULL_SCAN -> ActionRow(
-            title = "全盘扫描照片库",
-            subtitle = if (isFullScanRunning) "正在扫描…" else "清理在其它设备上已删除的照片",
+            title = stringResource(R.string.settings_group_photos_library),
+            subtitle = if (isFullScanRunning) stringResource(R.string.settings_item_full_scan_desc_scanning) else stringResource(R.string.settings_item_full_scan_desc_idle),
             enabled = !isFullScanRunning,
             trailing = {
                 if (isFullScanRunning) {
@@ -936,12 +936,12 @@ private fun SettingsRow(
             val isPreparing = activeDownloadTask?.status == BatchDownloadStatus.PREPARING
 
             ActionRow(
-                title = "下载所有照片和视频",
+                title = stringResource(R.string.settings_item_download_all),
                 subtitle = when {
-                    isPreparing -> "正在准备下载队列…"
-                    isDownloading && activeDownloadTask != null -> "正在保存到 ${activeDownloadTask.targetRelativePath} (${activeDownloadTask.successCount}/${activeDownloadTask.totalCount})"
-                    isPaused && activeDownloadTask != null -> "已暂停 (${activeDownloadTask.successCount}/${activeDownloadTask.totalCount} 项)"
-                    else -> "保存云端所有内容至本地相册 (默认 DCIM/Camera)"
+                    isPreparing -> stringResource(R.string.settings_item_download_all_desc_prep)
+                    isDownloading && activeDownloadTask != null -> stringResource(R.string.settings_item_download_all_desc_dl, activeDownloadTask.targetRelativePath, activeDownloadTask.successCount, activeDownloadTask.totalCount)
+                    isPaused && activeDownloadTask != null -> stringResource(R.string.settings_item_download_all_desc_pause, activeDownloadTask.successCount, activeDownloadTask.totalCount)
+                    else -> stringResource(R.string.settings_item_download_all_desc_idle)
                 },
                 enabled = true,
                 trailing = {
@@ -959,33 +959,33 @@ private fun SettingsRow(
         }
 
         SettingsItem.SCAN_FREQUENCY -> DropdownRow(
-            title = "自动扫描频率",
-            subtitle = "关闭时常驻后台的自动扫描不会运行",
-            current = frequency.label,
-            options = ScanFrequency.entries.map { it to it.label },
+            title = stringResource(R.string.settings_item_scan_freq_title_short),
+            subtitle = stringResource(R.string.settings_item_scan_freq_desc_off),
+            current = stringResource(frequency.labelRes),
+            options = ScanFrequency.entries.map { it to stringResource(it.labelRes) },
             onSelect = onFrequencyChanged
         )
 
         SettingsItem.CUSTOM_INTERVAL -> DropdownRow(
-            title = "自定义周期",
+            title = stringResource(R.string.settings_item_custom_interval),
             subtitle = if (frequency == ScanFrequency.CUSTOM) {
-                "每 $customDays 天执行一次"
+                stringResource(R.string.settings_item_custom_interval_desc_on, customDays)
             } else {
-                "仅在频率选择「自定义」时生效"
+                stringResource(R.string.settings_item_custom_interval_desc_off)
             },
             enabled = frequency == ScanFrequency.CUSTOM,
-            current = "$customDays 天",
-            options = CUSTOM_DAY_OPTIONS.map { it to "$it 天" },
+            current = stringResource(R.string.settings_item_custom_interval_val, customDays),
+            options = CUSTOM_DAY_OPTIONS.map { it to stringResource(R.string.settings_item_custom_interval_val, it) },
             onSelect = { onCustomIntervalChanged(it) }
         )
 
         SettingsItem.DRIVE_DISPLAY_MODE -> {
             val displayMode by settings.driveDisplayMode.collectAsStateWithLifecycle()
             DropdownRow(
-                title = "云盘显示模式",
-                subtitle = "切换文件与文件夹在云盘中的显示样式",
-                current = displayMode.label,
-                options = DriveDisplayMode.entries.map { it to it.label },
+                title = stringResource(R.string.settings_item_drive_mode_title),
+                subtitle = stringResource(R.string.settings_item_drive_mode_desc),
+                current = stringResource(displayMode.labelRes),
+                options = DriveDisplayMode.entries.map { it to stringResource(it.labelRes) },
                 onSelect = { settings.setDriveDisplayMode(it) }
             )
         }
@@ -993,10 +993,10 @@ private fun SettingsRow(
         SettingsItem.DRIVE_SORT_FIELD -> {
             val sortField by settings.driveSortField.collectAsStateWithLifecycle()
             DropdownRow(
-                title = "默认排序字段",
-                subtitle = "设置云盘文件与文件夹的默认排序依据",
-                current = sortField.label,
-                options = DriveSortField.entries.map { it to it.label },
+                title = stringResource(R.string.settings_item_drive_sort_field_title),
+                subtitle = stringResource(R.string.settings_item_drive_sort_field_desc),
+                current = stringResource(sortField.labelRes),
+                options = DriveSortField.entries.map { it to stringResource(it.labelRes) },
                 onSelect = { settings.setDriveSortField(it) }
             )
         }
@@ -1004,10 +1004,10 @@ private fun SettingsRow(
         SettingsItem.DRIVE_SORT_ORDER -> {
             val sortOrder by settings.driveSortOrder.collectAsStateWithLifecycle()
             DropdownRow(
-                title = "默认排序方向",
-                subtitle = "设置云盘文件与文件夹的默认排序升降序",
-                current = sortOrder.label,
-                options = DriveSortOrder.entries.map { it to it.label },
+                title = stringResource(R.string.settings_item_drive_sort_order_title),
+                subtitle = stringResource(R.string.settings_item_drive_sort_order_desc),
+                current = stringResource(sortOrder.labelRes),
+                options = DriveSortOrder.entries.map { it to stringResource(it.labelRes) },
                 onSelect = { settings.setDriveSortOrder(it) }
             )
         }
@@ -1023,12 +1023,12 @@ private fun SettingsRow(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "自动检查更新",
+                        text = stringResource(R.string.settings_item_auto_update_title),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "应用启动时自动检测 GitHub Releases 最新版本",
+                        text = stringResource(R.string.settings_item_auto_update_desc),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1041,8 +1041,8 @@ private fun SettingsRow(
         }
 
         SettingsItem.ABOUT -> ActionRow(
-            title = "关于",
-            subtitle = "关于 AClouDroid",
+            title = stringResource(R.string.settings_item_about_title),
+            subtitle = stringResource(R.string.settings_item_about_desc),
             trailing = {
                 Icon(
                     Icons.Default.ChevronRight,
@@ -1171,25 +1171,25 @@ private fun CloudMediaActivationDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("系统云端媒体设置") },
+        title = { Text(stringResource(R.string.settings_cloud_media_dialog_title)) },
         text = {
             Column {
                 Text(
-                    text = "Android 系统对云端媒体提供方开启了白名单保护。您可以通过以下方式之一完成激活：",
+                    text = stringResource(R.string.settings_cloud_media_dialog_desc),
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(Modifier.height(12.dp))
 
                 if (isShizukuRunning) {
                     Text(
-                        text = if (hasPermission) "✅ Shizuku 已连接并授权" else "⚠️ Shizuku 已运行，点击可请求授权",
+                        text = if (hasPermission) stringResource(R.string.settings_cloud_media_shizuku_auth) else stringResource(R.string.settings_cloud_media_shizuku_req),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.SemiBold
                     )
                 } else {
                     Text(
-                        text = "ℹ️ 未检测到 Shizuku 运行。您也可通过电脑执行 ADB 命令完成激活。",
+                        text = stringResource(R.string.settings_cloud_media_shizuku_missing),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1212,11 +1212,11 @@ private fun CloudMediaActivationDialog(
                         val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                         val clip = android.content.ClipData.newPlainText("ADB Command", app.acloudroid.qwq.provider.ShizukuMediaHelper.adbCommand)
                         clipboard.setPrimaryClip(clip)
-                        android.widget.Toast.makeText(context, "已复制 ADB 命令到剪贴板", android.widget.Toast.LENGTH_SHORT).show()
+                        android.widget.Toast.makeText(context, context.getString(R.string.settings_cloud_media_adb_copied), android.widget.Toast.LENGTH_SHORT).show()
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("复制电脑端 ADB 激活命令")
+                    Text(stringResource(R.string.settings_cloud_media_adb_copy_btn))
                 }
             }
         },
@@ -1229,13 +1229,13 @@ private fun CloudMediaActivationDialog(
                             app.acloudroid.qwq.provider.ShizukuMediaHelper.requestShizukuPermission()
                         } else {
                             isActivating = true
-                            activationStatus = "正在写入系统配置..."
+                            activationStatus = context.getString(R.string.settings_cloud_media_writing)
                             scope.launch {
                                 val result = app.acloudroid.qwq.provider.ShizukuMediaHelper.executeActivation()
                                 isActivating = false
                                 activationStatus = result.fold(
                                     onSuccess = { it },
-                                    onFailure = { "失败: ${it.message}" }
+                                    onFailure = { context.getString(R.string.settings_cloud_media_failed, it.message) }
                                 )
                             }
                         }
@@ -1245,17 +1245,17 @@ private fun CloudMediaActivationDialog(
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(6.dp))
                     }
-                    Text(if (!hasPermission) "请求 Shizuku 授权" else "通过 Shizuku 一键激活")
+                    Text(if (!hasPermission) stringResource(R.string.settings_cloud_media_req_btn) else stringResource(R.string.settings_cloud_media_activate_btn))
                 }
             } else {
                 Button(onClick = onOpenSystemSettings) {
-                    Text("前往系统设置")
+                    Text(stringResource(R.string.settings_cloud_media_go_settings_btn))
                 }
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("关闭")
+                Text(stringResource(R.string.action_close))
             }
         }
     )
@@ -1279,7 +1279,7 @@ private fun ICloudWebDialog(
                     title = {
                         Column {
                             Text(
-                                text = "iCloud 网页版",
+                                text = stringResource(R.string.settings_icloud_web_title),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
@@ -1294,7 +1294,7 @@ private fun ICloudWebDialog(
                         IconButton(onClick = onDismiss) {
                             Icon(
                                 imageVector = Icons.Default.Close,
-                                contentDescription = "关闭"
+                                contentDescription = stringResource(R.string.action_close)
                             )
                         }
                     },
@@ -1389,14 +1389,14 @@ private fun AboutSubScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "关于",
+                        text = stringResource(R.string.settings_about_header),
                         fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.titleLarge
                     )
                 },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -1452,7 +1452,7 @@ private fun AboutSubScreen(
             Spacer(Modifier.height(6.dp))
 
             Text(
-                text = "在 Android 手机上直接浏览与同步你的 iCloud！",
+                text = stringResource(R.string.settings_about_slogan),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -1477,7 +1477,7 @@ private fun AboutSubScreen(
                                     isCheckingUpdate = true
                                     android.widget.Toast.makeText(
                                         context,
-                                        "正在检查更新...",
+                                        context.getString(R.string.settings_about_check_update),
                                         android.widget.Toast.LENGTH_SHORT
                                     ).show()
                                     val result = updateRepository.checkLatestReleaseIfDue(
@@ -1492,7 +1492,7 @@ private fun AboutSubScreen(
                                             } else {
                                                 android.widget.Toast.makeText(
                                                     context,
-                                                    "当前已是最新版本 (v$versionName)",
+                                                    context.getString(R.string.settings_about_up_to_date, versionName),
                                                     android.widget.Toast.LENGTH_SHORT
                                                 ).show()
                                             }
@@ -1500,7 +1500,7 @@ private fun AboutSubScreen(
                                         onFailure = { error ->
                                             android.widget.Toast.makeText(
                                                 context,
-                                                error.localizedMessage ?: "检查更新失败",
+                                                error.localizedMessage ?: context.getString(R.string.settings_about_update_failed),
                                                 android.widget.Toast.LENGTH_SHORT
                                             ).show()
                                         }
@@ -1512,12 +1512,12 @@ private fun AboutSubScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "版本号",
+                                text = stringResource(R.string.settings_about_version),
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = if (isCheckingUpdate) "正在检查更新..." else "v$versionName (Build $versionCode)",
+                                text = if (isCheckingUpdate) stringResource(R.string.settings_about_check_update) else "v$versionName (Build $versionCode)",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1529,7 +1529,7 @@ private fun AboutSubScreen(
                             )
                         } else {
                             Text(
-                                text = "检查更新",
+                                text = stringResource(R.string.settings_about_check_btn),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.SemiBold
@@ -1554,9 +1554,9 @@ private fun AboutSubScreen(
                                         val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
                                         val clip = android.content.ClipData.newPlainText("Repository URL", REPOSITORY_URL)
                                         clipboard.setPrimaryClip(clip)
-                                        android.widget.Toast.makeText(context, "已复制仓库地址到剪贴板", android.widget.Toast.LENGTH_SHORT).show()
+                                        android.widget.Toast.makeText(context, context.getString(R.string.settings_about_repo_copied), android.widget.Toast.LENGTH_SHORT).show()
                                     } catch (ex: Exception) {
-                                        android.widget.Toast.makeText(context, "无法打开网址: $REPOSITORY_URL", android.widget.Toast.LENGTH_SHORT).show()
+                                        android.widget.Toast.makeText(context, context.getString(R.string.settings_about_repo_failed, REPOSITORY_URL), android.widget.Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             }
@@ -1565,7 +1565,7 @@ private fun AboutSubScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "在 GitHub 上查看源代码",
+                                text = stringResource(R.string.settings_about_repo_btn),
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -1578,7 +1578,7 @@ private fun AboutSubScreen(
                         Spacer(Modifier.width(8.dp))
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                            contentDescription = "打开仓库",
+                            contentDescription = stringResource(R.string.settings_about_repo_icon),
                             tint = MaterialTheme.colorScheme.primary
                         )
                     }
@@ -1589,7 +1589,7 @@ private fun AboutSubScreen(
 
             // Diagnostic Log Section
             Text(
-                text = "故障调试与诊断",
+                text = stringResource(R.string.settings_diag_title),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary,
@@ -1621,7 +1621,7 @@ private fun AboutSubScreen(
                                     } catch (e: Exception) {
                                         android.widget.Toast.makeText(
                                             context,
-                                            "导出诊断日志失败: ${e.message}",
+                                            context.getString(R.string.settings_diag_export_failed, e.message),
                                             android.widget.Toast.LENGTH_SHORT
                                         ).show()
                                     } finally {
@@ -1634,12 +1634,12 @@ private fun AboutSubScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "导出诊断日志",
+                                text = stringResource(R.string.settings_diag_export_btn),
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "打包导出 App 行为日志与 Logcat",
+                                text = stringResource(R.string.settings_diag_export_desc),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1653,7 +1653,7 @@ private fun AboutSubScreen(
                         } else {
                             Icon(
                                 imageVector = Icons.Default.Share,
-                                contentDescription = "导出诊断日志",
+                                contentDescription = stringResource(R.string.settings_diag_export_icon),
                                 tint = MaterialTheme.colorScheme.primary
                             )
                         }
@@ -1672,7 +1672,7 @@ private fun AboutSubScreen(
                                 app.acloudroid.qwq.util.DiagnosticLogExporter.clearAllLogs(context)
                                 android.widget.Toast.makeText(
                                     context,
-                                    "诊断日志已清空",
+                                    context.getString(R.string.settings_diag_clear_toast),
                                     android.widget.Toast.LENGTH_SHORT
                                 ).show()
                             }
@@ -1681,12 +1681,12 @@ private fun AboutSubScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "清空诊断日志",
+                                text = stringResource(R.string.settings_diag_clear_btn),
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "清空本地保存的行为日志与 Logcat 缓冲区",
+                                text = stringResource(R.string.settings_diag_clear_desc),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1694,7 +1694,7 @@ private fun AboutSubScreen(
                         Spacer(Modifier.width(8.dp))
                         Icon(
                             imageVector = Icons.Default.DeleteOutline,
-                            contentDescription = "清空诊断日志",
+                            contentDescription = stringResource(R.string.settings_diag_clear_icon),
                             tint = MaterialTheme.colorScheme.error
                         )
                     }
@@ -1759,7 +1759,7 @@ private fun BatchDownloadProgressCard(
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = if (isPreparing) "准备全量下载队列…" else if (isPaused) "全量下载已暂停" else "全量下载中 ($percent%)",
+                    text = if (isPreparing) stringResource(R.string.settings_dl_progress_prep) else if (isPaused) stringResource(R.string.settings_dl_progress_pause) else stringResource(R.string.settings_dl_progress_active, percent),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -1770,8 +1770,8 @@ private fun BatchDownloadProgressCard(
             Spacer(Modifier.height(8.dp))
 
             Text(
-                text = "保存位置: ${task.targetRelativePath} · 已完成 ${task.successCount} / ${task.totalCount} 项" +
-                    (if (task.failedCount > 0) " (${task.failedCount} 项失败)" else ""),
+                text = stringResource(R.string.settings_dl_progress_loc, task.targetRelativePath, task.successCount, task.totalCount) +
+                    (if (task.failedCount > 0) stringResource(R.string.settings_dl_progress_loc_failed, task.failedCount) else ""),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
             )
@@ -1799,13 +1799,13 @@ private fun BatchDownloadProgressCard(
                         TextButton(onClick = onResume) {
                             Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("继续下载")
+                            Text(stringResource(R.string.settings_dl_resume))
                         }
                     } else {
                         TextButton(onClick = onPause) {
                             Icon(Icons.Default.Pause, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("暂停")
+                            Text(stringResource(R.string.settings_dl_pause))
                         }
                     }
                     Spacer(Modifier.width(8.dp))
@@ -1819,7 +1819,7 @@ private fun BatchDownloadProgressCard(
                 ) {
                     Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(4.dp))
-                    Text("终止任务")
+                    Text(stringResource(R.string.settings_dl_stop))
                 }
             }
         }
@@ -1879,37 +1879,37 @@ private fun BatchDownloadPrecheckDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text("全量下载所有照片和视频", fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.settings_dl_title), fontWeight = FontWeight.Bold)
         },
         text = {
             Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                 if (estimate != null) {
                     Text(
-                        text = "• 云端媒体数：${estimate.totalCount} 项 (约 ${formatDownloadSize(estimate.totalBytes)})",
+                        text = stringResource(R.string.settings_dl_est_count, estimate.totalCount, formatDownloadSize(estimate.totalBytes)),
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = "• 本地剩余空间：${formatDownloadSize(estimate.availableBytes)}",
+                        text = stringResource(R.string.settings_dl_est_avail, formatDownloadSize(estimate.availableBytes)),
                         style = MaterialTheme.typography.bodyMedium,
                         color = if (estimate.availableBytes < estimate.totalBytes) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
                     )
                     if (estimate.availableBytes < estimate.totalBytes) {
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            text = "⚠️ 手机可用空间低于预估总量，建议先清理部分空间再开始下载。",
+                            text = stringResource(R.string.settings_dl_est_warn),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error
                         )
                     }
                 } else {
-                    Text("正在统计云端照片数量...", style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.settings_dl_est_calc), style = MaterialTheme.typography.bodySmall)
                 }
 
                 Spacer(Modifier.height(16.dp))
 
                 Text(
-                    text = "保存位置选择",
+                    text = stringResource(R.string.settings_dl_loc_title),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary
@@ -1936,8 +1936,8 @@ private fun BatchDownloadPrecheckDialog(
                         }
                     )
                     Column(modifier = Modifier.padding(start = 8.dp)) {
-                        Text("DCIM/Camera (默认推荐)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                        Text("直接进入系统相机胶卷，与原生照片无缝合并", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.settings_dl_loc_dcim_title), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.settings_dl_loc_dcim_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
 
@@ -1961,7 +1961,7 @@ private fun BatchDownloadPrecheckDialog(
                     )
                     Column(modifier = Modifier.padding(start = 8.dp)) {
                         Text("DCIM/iCloud", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                        Text("在相册中建立独立的「iCloud」相册文件夹", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.settings_dl_loc_pic_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
 
@@ -1985,7 +1985,7 @@ private fun BatchDownloadPrecheckDialog(
                     )
                     Column(modifier = Modifier.padding(start = 8.dp)) {
                         Text("Pictures/iCloud", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                        Text("保存至标准图片目录下独立相册", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.settings_dl_loc_pic_desc_2), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
 
@@ -2018,14 +2018,15 @@ private fun BatchDownloadPrecheckDialog(
                             .weight(1f)
                             .padding(start = 8.dp)
                     ) {
+                        val pathStr = customPickedPath.orEmpty()
                         Text(
-                            text = if (customPickedPath.isNullOrBlank()) "自定义导出位置..." else "已选: $customPickedPath",
+                            text = if (customPickedPath.isNullOrBlank()) stringResource(R.string.settings_dl_loc_custom_title_empty) else stringResource(R.string.settings_dl_loc_custom_title_picked, pathStr),
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = if (isCustomSelected && !customPickedPath.isNullOrBlank()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = if (customPickedPath.isNullOrBlank()) "打开系统文件选择器挑选任意自定义相册或文件夹" else "点击右侧「更改」可重新挑选文件夹",
+                            text = if (customPickedPath.isNullOrBlank()) stringResource(R.string.settings_dl_loc_custom_desc_empty) else stringResource(R.string.settings_dl_loc_custom_desc_picked),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -2033,7 +2034,7 @@ private fun BatchDownloadPrecheckDialog(
 
                     if (!customPickedPath.isNullOrBlank()) {
                         TextButton(onClick = { folderPickerLauncher.launch(null) }) {
-                            Text("更改")
+                            Text(stringResource(R.string.settings_dl_loc_custom_change))
                         }
                     }
                 }
@@ -2041,13 +2042,13 @@ private fun BatchDownloadPrecheckDialog(
                 Spacer(Modifier.height(14.dp))
 
                 Text(
-                    text = "• 元数据保留：照片与视频的原始拍摄时间、EXIF 与 GPS 位置将完整保留，严格保证相册时间轴准确对齐。",
+                    text = stringResource(R.string.settings_dl_meta_note),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "• 建议在连接 Wi-Fi 与充电器时进行长时间全量下载。",
+                    text = stringResource(R.string.settings_dl_wifi_note),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -2059,13 +2060,13 @@ private fun BatchDownloadPrecheckDialog(
                 onClick = { onConfirm(finalPath) }
             ) {
                 Text(
-                    if (countdownSeconds > 0) "开始下载 (${countdownSeconds}s)" else "开始下载"
+                    if (countdownSeconds > 0) stringResource(R.string.settings_dl_start_countdown, countdownSeconds) else stringResource(R.string.settings_dl_start)
                 )
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("取消")
+                Text(stringResource(R.string.action_cancel))
             }
         }
     )
@@ -2082,12 +2083,12 @@ private fun BatchDownloadCancelDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text("终止全量下载？", fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.settings_dl_stop_title), fontWeight = FontWeight.Bold)
         },
         text = {
             Column {
                 Text(
-                    text = "当前已成功下载并保存了 $completedCount 项内容到「$targetPath」。请选择如何处理本次已下载的文件：",
+                    text = stringResource(R.string.settings_dl_stop_desc, completedCount, targetPath),
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(Modifier.height(16.dp))
@@ -2101,8 +2102,8 @@ private fun BatchDownloadCancelDialog(
                     )
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text("仅终止下载 (保留已下载文件)", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                        Text("停止后续下载，已保存到本地相册的文件将完整保留。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(stringResource(R.string.settings_dl_stop_keep_title), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.settings_dl_stop_keep_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
 
@@ -2117,15 +2118,15 @@ private fun BatchDownloadCancelDialog(
                     )
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
-                        Text("终止并删除本次已下载内容", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-                        Text("停止任务，并从相册中精准撤销移除本次下载的 $completedCount 项内容。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
+                        Text(stringResource(R.string.settings_dl_stop_delete_title), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.settings_dl_stop_delete_desc, completedCount), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer)
                     }
                 }
             }
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("返回继续下载")
+                Text(stringResource(R.string.settings_dl_stop_back))
             }
         }
     )

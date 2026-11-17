@@ -1,6 +1,7 @@
 package app.acloudroid.qwq.feature.drive.ui
 
 import android.app.Application
+import app.acloudroid.qwq.R
 import android.content.Context
 import android.content.Intent
 import android.util.Log
@@ -338,12 +339,14 @@ class DriveViewModel(
     }
 
     private fun summarize(report: DriveDeltaPlanner.SyncReport): String {
+        val app = getApplication<Application>()
         val base = if (report.listed == 0) {
-            "已是最新（检查 ${report.containersConsidered} 个文件夹）"
+            app.getString(R.string.drive_walk_latest, report.containersConsidered)
         } else {
-            "已更新 ${report.listed} 个文件夹（检查 ${report.containersConsidered} 个）"
+            app.getString(R.string.drive_walk_updated, report.listed, report.containersConsidered)
         }
-        return if (report.walkCompleted) base else "$base · ${report.abortReason ?: "未完成"}"
+        val abortMsg = report.abortReason ?: app.getString(R.string.drive_walk_unfinished)
+        return if (report.walkCompleted) base else "$base · $abortMsg"
     }
 
     fun dismissError() {
@@ -385,9 +388,10 @@ class DriveViewModel(
             }
 
             val parts = buildList {
-                if (deduped > 0) add("$deduped 个文件已在队列中")
-                if (revived > 0) add("$revived 个失败任务已重新排队")
-                if (renamed > 0) add("$renamed 个同名文件已改名为 $renamedSample 等")
+                val app = getApplication<Application>()
+                if (deduped > 0) add(app.getString(R.string.drive_queue_deduped, deduped))
+                if (revived > 0) add(app.getString(R.string.drive_queue_revived, revived))
+                if (renamed > 0) add(app.getString(R.string.drive_queue_renamed, renamed, renamedSample ?: ""))
             }
             if (parts.isNotEmpty()) {
                 android.widget.Toast.makeText(

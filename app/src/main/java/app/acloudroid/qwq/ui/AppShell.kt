@@ -1,5 +1,8 @@
 package app.acloudroid.qwq.ui
 
+import app.acloudroid.qwq.R
+import androidx.compose.ui.res.stringResource
+
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -320,24 +323,24 @@ private fun UpdateBanner(
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "🎉 发现新版本 ${releaseInfo.tagName}",
+                    text = stringResource(R.string.update_banner_title, releaseInfo.tagName),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
                 Text(
-                    text = "点击前往 GitHub 查看并更新",
+                    text = stringResource(R.string.update_banner_desc),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                 )
             }
             TextButton(onClick = onViewUpdate) {
-                Text("查看", fontWeight = FontWeight.Bold)
+                Text(stringResource(R.string.update_banner_view), fontWeight = FontWeight.Bold)
             }
             IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
                 Icon(
                     imageVector = Icons.Default.Close,
-                    contentDescription = "忽略",
+                    contentDescription = stringResource(R.string.update_banner_ignore),
                     tint = MaterialTheme.colorScheme.onPrimaryContainer
                 )
             }

@@ -35,10 +35,10 @@ object DriveDownloadNotificationHelper {
             val manager = context.getSystemService(NotificationManager::class.java) ?: return
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "云盘文件下载",
+                context.getString(R.string.notif_channel_drive_dl_name),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "下载 iCloud 云盘文件时的进度与完成提示"
+                description = context.getString(R.string.notif_channel_drive_dl_desc)
                 setShowBadge(false)
             }
             manager.createNotificationChannel(channel)
@@ -72,21 +72,21 @@ object DriveDownloadNotificationHelper {
 
         val text = if (progressPercent in 0..100) {
             if (downloadedBytes > 0) {
-                "正在下载 $filename ($progressPercent% · ${formatSize(downloadedBytes)})"
+                context.getString(R.string.notif_drive_dl_prog_full, filename, progressPercent, formatSize(downloadedBytes))
             } else {
-                "正在下载 $filename ($progressPercent%)"
+                context.getString(R.string.notif_drive_dl_prog_pct, filename, progressPercent)
             }
         } else {
             if (downloadedBytes > 0) {
-                "正在下载 $filename (${formatSize(downloadedBytes)})"
+                context.getString(R.string.notif_drive_dl_prog_bytes, filename, formatSize(downloadedBytes))
             } else {
-                "正在下载 $filename..."
+                context.getString(R.string.notif_drive_dl_prog_unk, filename)
             }
         }
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("iCloud 云盘下载")
+            .setContentTitle(context.getString(R.string.notif_drive_dl_title))
             .setContentText(text)
             .setOngoing(true)
             .setSilent(true)
@@ -112,7 +112,7 @@ object DriveDownloadNotificationHelper {
                 cancelIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-            builder.addAction(0, "取消", cancelPendingIntent)
+            builder.addAction(0, context.getString(R.string.notif_action_cancel), cancelPendingIntent)
         }
 
         try {
@@ -137,8 +137,8 @@ object DriveDownloadNotificationHelper {
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("文件下载完成")
-            .setContentText("$filename · 点击打开")
+            .setContentTitle(context.getString(R.string.notif_drive_dl_done_title))
+            .setContentText(context.getString(R.string.notif_drive_dl_done_text, filename))
             .setOngoing(false)
             .setAutoCancel(true)
             .setSilent(true)
@@ -182,11 +182,11 @@ object DriveDownloadNotificationHelper {
         ensureChannel(context)
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
 
-        val text = "下载失败：$filename" + if (!errorMsg.isNullOrBlank()) " ($errorMsg)" else ""
+        val text = context.getString(R.string.notif_drive_dl_fail_text, filename) + if (!errorMsg.isNullOrBlank()) " ($errorMsg)" else ""
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle("下载失败")
+            .setContentTitle(context.getString(R.string.notif_drive_dl_fail_title))
             .setContentText(text)
             .setOngoing(false)
             .setAutoCancel(true)

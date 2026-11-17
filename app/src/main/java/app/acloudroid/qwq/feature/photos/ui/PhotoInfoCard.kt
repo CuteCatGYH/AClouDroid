@@ -1,5 +1,8 @@
 package app.acloudroid.qwq.feature.photos.ui
 
+import app.acloudroid.qwq.R
+import androidx.compose.ui.res.stringResource
+
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -124,7 +127,7 @@ fun PhotoInfoCard(
         error = null
         val result = repository.fetchMetadata(photo.masterId)
         result.onSuccess { exifJson = it }
-            .onFailure { error = it.message ?: "获取照片信息失败" }
+            .onFailure { error = it.message ?: context.getString(R.string.photo_info_err_fetch) }
         loading = false
     }
 
@@ -189,7 +192,7 @@ fun PhotoInfoCard(
                     )
                 }
                 IconButton(onClick = onDismiss) {
-                    Icon(Icons.Default.Close, contentDescription = "关闭")
+                    Icon(Icons.Default.Close, contentDescription = stringResource(R.string.action_close))
                 }
             }
 
@@ -269,11 +272,11 @@ private fun MetadataBody(photo: PhotoAssetEntity, exif: PhotoExif?, context: Con
                 val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 cm.setPrimaryClip(
                     ClipData.newPlainText(
-                        "坐标",
+                        context.getString(R.string.photo_info_coords_label),
                         "${gps.latitude}, ${gps.longitude}"
                     )
                 )
-                Toast.makeText(context, "坐标已复制", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.photo_info_coords_copied), Toast.LENGTH_SHORT).show()
             }
         )
     }
@@ -308,7 +311,7 @@ private fun MetadataBody(photo: PhotoAssetEntity, exif: PhotoExif?, context: Con
     if (!hasCameraInfo(exif)) {
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "这张照片没有附带拍摄信息（可能是截图或由其他应用导入）",
+            text = stringResource(R.string.photo_info_no_metadata),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 40.dp, end = 16.dp, top = 4.dp)
@@ -403,7 +406,7 @@ private fun LocationRow(coordinates: String, detail: String?, onCopy: () -> Unit
                 fontWeight = FontWeight.Medium
             )
             Text(
-                text = detail?.let { "$it · 点击复制坐标" } ?: "点击复制坐标",
+                text = detail?.let { stringResource(R.string.photo_info_coords_copy_hint_1, it) } ?: stringResource(R.string.photo_info_coords_copy_hint_2),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -434,7 +437,7 @@ private fun LoadingSkeleton() {
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "正在读取拍摄信息…",
+                text = stringResource(R.string.photo_info_loading),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -459,7 +462,7 @@ private fun ErrorRow(message: String, onRetry: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurface
             )
         }
-        TextButton(onClick = onRetry) { Text("重试") }
+        TextButton(onClick = onRetry) { Text(stringResource(R.string.photo_info_retry)) }
     }
 }
 
@@ -471,9 +474,10 @@ private fun ErrorRow(message: String, onRetry: () -> Unit) {
  */
 private const val CARD_DISMISS_PX = 120f
 
+@Composable
 private fun infoDate(timestamp: Long): String {
-    if (timestamp <= 0) return "未知日期"
-    return SimpleDateFormat("yyyy年M月d日", Locale.getDefault()).format(Date(timestamp))
+    if (timestamp <= 0) return stringResource(R.string.photo_info_unknown_date)
+    return SimpleDateFormat(stringResource(R.string.photo_info_date_format_zh), Locale.getDefault()).format(Date(timestamp))
 }
 
 private fun infoTime(timestamp: Long): String {
