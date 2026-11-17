@@ -1,6 +1,7 @@
 package app.acloudroid.qwq
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -40,6 +41,11 @@ class MainActivity : AppCompatActivity() {
     private val driveViewModel: app.acloudroid.qwq.feature.drive.ui.DriveViewModel by viewModels()
 
     /**
+     * Set to true when launched via [Intent.ACTION_APPLICATION_PREFERENCES] from system App Info.
+     */
+    private val openSettingsRequested = mutableStateOf(false)
+
+    /**
      * Asks for POST_NOTIFICATIONS once (Android 13+), so the background scan can show its
      * progress notification (P2-016).
      *
@@ -55,6 +61,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         requestNotificationPermissionIfNeeded()
+        checkPreferencesIntent(intent)
         val container = (applicationContext as IClouDroidApp).container
         val appSettings = container.appSettings
 
@@ -74,8 +81,9 @@ class MainActivity : AppCompatActivity() {
                     var showAccountDialog by remember { mutableStateOf(false) }
 
                     // Settings is a full-screen overlay owned by the shell, but the entry point
-                    // (账号信息 sheet) lives one level up, so the request is hoisted here.
-                    var openSettings by remember { mutableStateOf(false) }
+                    // (账号信息 sheet or system ACTION_APPLICATION_PREFERENCES) lives one level up.
+                    var openSettingsFromAccountDialog by remember { mutableStateOf(false) }
+                    val openSettings = openSettingsRequested.value || openSettingsFromAccountDialog
 
                     when (val state = authState) {
                         // P2-013: 'else -> AuthScreen' used to swallow this transient state and
@@ -102,7 +110,10 @@ class MainActivity : AppCompatActivity() {
                                 driveViewModel = driveViewModel,
                                 windowSizeClass = windowSizeClass,
                                 openSettings = openSettings,
-                                onOpenSettingsHandled = { openSettings = false },
+                                onOpenSettingsHandled = {
+                                    openSettingsRequested.value = false
+                                    openSettingsFromAccountDialog = false
+                                },
                                 onOpenAccountInfo = { showAccountDialog = true }
                             )
 
@@ -112,7 +123,7 @@ class MainActivity : AppCompatActivity() {
                                     onDismiss = { showAccountDialog = false },
                                     onOpenSettings = {
                                         showAccountDialog = false
-                                        openSettings = true
+                                        openSettingsFromAccountDialog = true
                                     },
                                     onLogout = {
                                         showAccountDialog = false
@@ -127,6 +138,19 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        checkPreferencesIntent(intent)
+    }
+
+    private fun checkPreferencesIntent(intent: Intent?) {
+        if (intent?.action == Intent.ACTION_APPLICATION_PREFERENCES) {
+            Log.i(TAG, "Opened via ACTION_APPLICATION_PREFERENCES from system App Info")
+            openSettingsRequested.value = true
         }
     }
 
