@@ -13,17 +13,20 @@ import androidx.compose.ui.graphics.vector.ImageVector
  * Adding an iCloud feature means adding an entry here plus a branch in
  * [app.acloudroid.qwq.ui.AppShell] — no changes to authentication or to the other features.
  */
+import androidx.annotation.StringRes
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.LocationOn
+import app.acloudroid.qwq.R
 
 enum class AppDestination(
     val label: String,
-    val icon: ImageVector
+    val icon: ImageVector,
+    @get:StringRes val labelRes: Int
 ) {
-    Photos("照片", Icons.Default.Photo),
-    Albums("备份", Icons.Default.PhotoAlbum),
-    Drive("云盘", Icons.Default.Folder),
-    Notes("备忘录", Icons.AutoMirrored.Filled.Note),
-    Reminders("提醒", Icons.Default.CheckCircle),
-    FindMy("查找", Icons.Default.LocationOn)
+    Photos("照片", Icons.Default.Photo, R.string.nav_photos),
+    Albums("备份", Icons.Default.PhotoAlbum, R.string.nav_albums),
+    Drive("云盘", Icons.Default.Folder, R.string.nav_drive),
+    Notes("备忘录", Icons.AutoMirrored.Filled.Note, R.string.nav_notes),
+    Reminders("提醒", Icons.Default.CheckCircle, R.string.nav_reminders),
+    FindMy("查找", Icons.Default.LocationOn, R.string.nav_find_my)
 }

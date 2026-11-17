@@ -12,6 +12,9 @@ enum class SettingsItem {
     /** Open iCloud web version in an in-app WebView. */
     ICLOUD_WEB,
 
+    /** Application language: System / Simplified Chinese / Traditional Chinese / English. */
+    APP_LANGUAGE,
+
     /** Theme mode: Follow system / Light / Dark. */
     THEME_MODE,
 
@@ -113,7 +116,7 @@ object SettingsCatalog {
         SettingsGroup(
             title = "外观与个性化",
             description = "设置应用的深浅主题模式与 Android 12+ Monet 动态壁纸取色效果。",
-            items = listOf(SettingsItem.THEME_MODE, SettingsItem.DYNAMIC_COLOR)
+            items = listOf(SettingsItem.APP_LANGUAGE, SettingsItem.THEME_MODE, SettingsItem.DYNAMIC_COLOR)
         ),
         SettingsGroup(
             title = "系统整合",

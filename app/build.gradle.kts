@@ -61,6 +61,7 @@ android {
 dependencies {
     implementation(files("libs/icloudcore.aar"))
 
+    implementation(libs.androidx.appcompat)
     implementation(libs.material)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

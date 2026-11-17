@@ -39,24 +39,41 @@ internal object MonthBucketing {
     /** Extracts the month (`yyyyMM` → `MM`); 0 for [UNBUCKETED]. */
     fun monthOf(yearMonth: Int): Int = if (yearMonth <= 0) 0 else yearMonth % 100
 
-    /** Label shown in the sticky header, e.g. `2026年8月`. */
-    fun labelOf(yearMonth: Int): String {
-        if (yearMonth <= 0) return "未分组"
-        return "${yearOf(yearMonth)}年${monthOf(yearMonth)}月"
+    /** Label shown in the sticky header, e.g. `2026年8月` or `August 2026`. */
+    fun labelOf(yearMonth: Int, locale: java.util.Locale = java.util.Locale.getDefault()): String {
+        if (yearMonth <= 0) return if (locale.language.equals("zh", ignoreCase = true)) "未分组" else "Unorganized"
+        val year = yearOf(yearMonth)
+        val month = monthOf(yearMonth)
+        return if (locale.language.equals("zh", ignoreCase = true)) {
+            "${year}年${month}月"
+        } else {
+            val monthName = try {
+                java.text.DateFormatSymbols.getInstance(locale).months.getOrNull(month - 1)
+            } catch (_: Exception) { null } ?: month.toString()
+            "$monthName $year"
+        }
     }
 
     /** Label shown in the year jump bar, e.g. `2026`. */
-    fun yearLabelOf(yearMonth: Int): String {
-        if (yearMonth <= 0) return "未分组"
+    fun yearLabelOf(yearMonth: Int, locale: java.util.Locale = java.util.Locale.getDefault()): String {
+        if (yearMonth <= 0) return if (locale.language.equals("zh", ignoreCase = true)) "未分组" else "Unorganized"
         return yearOf(yearMonth).toString()
     }
 
-    /** Label shown in the month grid of the jump panel, e.g. `8月`. */
-    fun monthLabelOf(yearMonth: Int): String {
-        if (yearMonth <= 0) return "未分组"
-        return "${monthOf(yearMonth)}月"
+    /** Label shown in the month grid of the jump panel, e.g. `8月` or `Aug`. */
+    fun monthLabelOf(yearMonth: Int, locale: java.util.Locale = java.util.Locale.getDefault()): String {
+        if (yearMonth <= 0) return if (locale.language.equals("zh", ignoreCase = true)) "未分组" else "Unorganized"
+        return monthNumberLabelOf(monthOf(yearMonth), locale)
     }
 
     /** Label for a bare month number (1..12), used by the grid's placeholder cells. */
-    fun monthNumberLabelOf(month: Int): String = "${month}月"
+    fun monthNumberLabelOf(month: Int, locale: java.util.Locale = java.util.Locale.getDefault()): String {
+        if (locale.language.equals("zh", ignoreCase = true)) {
+            return "${month}月"
+        }
+        val shortMonth = try {
+            java.text.DateFormatSymbols.getInstance(locale).shortMonths.getOrNull(month - 1)
+        } catch (_: Exception) { null } ?: month.toString()
+        return shortMonth
+    }
 }

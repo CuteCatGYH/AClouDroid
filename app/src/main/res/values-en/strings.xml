@@ -1,0 +1,57 @@
+<resources>
+    <string name="app_name">AClouDroid</string>
+    <string name="share_to_icloud_label">Send to iCloud</string>
+    <string name="share_upload_title">Send to iCloud</string>
+    <string name="share_option_icloud_photo">Upload to iCloud Photo</string>
+    <string name="share_option_icloud_drive">Upload to iCloud Drive</string>
+    <string name="share_drive_select_target_folder">Select iCloud Drive destination</string>
+    <string name="share_drive_root_folder">iCloud Drive (Root)</string>
+    <string name="share_upload_confirm">Upload</string>
+    <string name="share_upload_cancel">Cancel</string>
+    <string name="share_upload_enqueued">Added to iCloud upload queue</string>
+    <string name="share_upload_enqueued_photo">Added to iCloud Photo upload queue</string>
+    <string name="share_upload_enqueued_drive">Added to iCloud Drive upload queue</string>
+    <string name="share_upload_unreadable">Cannot read file: %1$s</string>
+    <string name="share_upload_not_logged_in">Please sign in to your AClouDroid account first</string>
+    <string name="share_upload_login_now">Sign in</string>
+    <string name="share_upload_no_items">No uploadable files received</string>
+    <string name="share_upload_location_hint">Please grant \"Media Location Permission\" to sync EXIF location metadata for photos and videos.</string>
+    <string name="share_upload_grant_location">Grant</string>
+    <string name="documents_provider_label">iCloud</string>
+    <string name="icloud_photo_folder_name">iCloud Photo</string>
+    <string name="icloud_drive_folder_name">iCloud Drive</string>
+
+    <!-- Language Settings -->
+    <string name="language_system_default">System default</string>
+    <string name="language_zh_hans">简体中文</string>
+    <string name="language_zh_hant">繁體中文</string>
+    <string name="language_en">English</string>
+    <string name="settings_item_language">Language</string>
+    <string name="settings_dialog_choose_language">Choose App Language</string>
+
+    <!-- Navigation Destinations -->
+    <string name="nav_photos">Photos</string>
+    <string name="nav_albums">Backup</string>
+    <string name="nav_drive">Drive</string>
+    <string name="nav_notes">Notes</string>
+    <string name="nav_reminders">Reminders</string>
+    <string name="nav_find_my">Find My</string>
+
+    <!-- Appearance & Theme -->
+    <string name="theme_title">Theme</string>
+    <string name="theme_subtitle">Switch between light, dark, or follow system</string>
+    <string name="theme_system">Follow system</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_dynamic_color">Dynamic Color</string>
+    <string name="theme_dynamic_color_desc">Extract palette from wallpaper (Android 12+)</string>
+    <string name="theme_dynamic_color_unsupported">Not supported on this Android version</string>
+
+    <!-- Common Actions -->
+    <string name="action_confirm">OK</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_close">Close</string>
+    <string name="action_back">Back</string>
+    <string name="action_settings">Settings</string>
+    <string name="action_sign_out">Sign Out</string>
+</resources>

@@ -21,4 +21,38 @@
     <string name="documents_provider_label">iCloud</string>
     <string name="icloud_photo_folder_name">iCloud Photo</string>
     <string name="icloud_drive_folder_name">iCloud Drive</string>
+
+    <!-- Language Settings -->
+    <string name="language_system_default">跟随系统</string>
+    <string name="language_zh_hans">简体中文</string>
+    <string name="language_zh_hant">繁體中文</string>
+    <string name="language_en">English</string>
+    <string name="settings_item_language">应用语言</string>
+    <string name="settings_dialog_choose_language">选择应用语言</string>
+
+    <!-- Navigation Destinations -->
+    <string name="nav_photos">照片</string>
+    <string name="nav_albums">备份</string>
+    <string name="nav_drive">云盘</string>
+    <string name="nav_notes">备忘录</string>
+    <string name="nav_reminders">提醒</string>
+    <string name="nav_find_my">查找</string>
+
+    <!-- Appearance & Theme -->
+    <string name="theme_title">主题外观</string>
+    <string name="theme_subtitle">切换应用深色、浅色或跟随系统</string>
+    <string name="theme_system">跟随系统</string>
+    <string name="theme_light">浅色模式</string>
+    <string name="theme_dark">深色模式</string>
+    <string name="theme_dynamic_color">Monet 动态色彩</string>
+    <string name="theme_dynamic_color_desc">从系统壁纸提取主色调 (Android 12+)</string>
+    <string name="theme_dynamic_color_unsupported">当前系统版本不支持</string>
+
+    <!-- Common Actions -->
+    <string name="action_confirm">确定</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_close">关闭</string>
+    <string name="action_back">返回</string>
+    <string name="action_settings">设置</string>
+    <string name="action_sign_out">退出登录</string>
 </resources>

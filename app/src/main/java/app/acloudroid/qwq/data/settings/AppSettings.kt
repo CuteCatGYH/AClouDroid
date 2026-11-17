@@ -107,6 +107,22 @@ class AppSettings(context: Context) {
     }
 
     // ---------------------------------------------------------------------------------------
+    // Language
+    // ---------------------------------------------------------------------------------------
+
+    private val _appLanguage = MutableStateFlow(AppLanguage.current())
+    val appLanguage: StateFlow<AppLanguage> = _appLanguage.asStateFlow()
+
+    fun setAppLanguage(value: AppLanguage) {
+        AppLanguage.applyLanguage(value)
+        _appLanguage.value = value
+    }
+
+    fun syncAppLanguageFromSystem() {
+        _appLanguage.value = AppLanguage.current()
+    }
+
+    // ---------------------------------------------------------------------------------------
     // Gallery View Mode (Day / Month)
     // ---------------------------------------------------------------------------------------
 

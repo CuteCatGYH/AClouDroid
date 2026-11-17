@@ -96,10 +96,16 @@ class MonthBucketingTest {
 
     @Test
     fun `labels`() {
-        assertEquals("2026年8月", MonthBucketing.labelOf(202608))
-        assertEquals("2025年12月", MonthBucketing.labelOf(202512))
-        assertEquals("2026", MonthBucketing.yearLabelOf(202608))
-        assertEquals("未分组", MonthBucketing.labelOf(0))
-        assertEquals("未分组", MonthBucketing.yearLabelOf(0))
+        assertEquals("2026年8月", MonthBucketing.labelOf(202608, java.util.Locale.SIMPLIFIED_CHINESE))
+        assertEquals("2025年12月", MonthBucketing.labelOf(202512, java.util.Locale.SIMPLIFIED_CHINESE))
+        assertEquals("2026", MonthBucketing.yearLabelOf(202608, java.util.Locale.SIMPLIFIED_CHINESE))
+        assertEquals("未分组", MonthBucketing.labelOf(0, java.util.Locale.SIMPLIFIED_CHINESE))
+        assertEquals("未分组", MonthBucketing.yearLabelOf(0, java.util.Locale.SIMPLIFIED_CHINESE))
+
+        // English locale formatting
+        assertEquals("August 2026", MonthBucketing.labelOf(202608, java.util.Locale.ENGLISH))
+        assertEquals("December 2025", MonthBucketing.labelOf(202512, java.util.Locale.ENGLISH))
+        assertEquals("Aug", MonthBucketing.monthLabelOf(202608, java.util.Locale.ENGLISH))
+        assertEquals("Unorganized", MonthBucketing.labelOf(0, java.util.Locale.ENGLISH))
     }
 }

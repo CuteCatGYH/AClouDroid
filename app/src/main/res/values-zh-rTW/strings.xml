@@ -1,0 +1,57 @@
+<resources>
+    <string name="app_name">AClouDroid</string>
+    <string name="share_to_icloud_label">傳送到 iCloud</string>
+    <string name="share_upload_title">傳送到 iCloud</string>
+    <string name="share_option_icloud_photo">上傳至 iCloud 照片</string>
+    <string name="share_option_icloud_drive">上傳至 iCloud 雲碟</string>
+    <string name="share_drive_select_target_folder">選取 iCloud 雲碟上傳位置</string>
+    <string name="share_drive_root_folder">iCloud 雲碟 (根目錄)</string>
+    <string name="share_upload_confirm">開始上傳</string>
+    <string name="share_upload_cancel">取消</string>
+    <string name="share_upload_enqueued">已加入 iCloud 上傳佇列</string>
+    <string name="share_upload_enqueued_photo">已加入 iCloud 照片上傳佇列</string>
+    <string name="share_upload_enqueued_drive">已加入 iCloud 雲碟上傳佇列</string>
+    <string name="share_upload_unreadable">無法讀取檔案：%1$s</string>
+    <string name="share_upload_not_logged_in">請先登入 AClouDroid 帳號</string>
+    <string name="share_upload_login_now">前往登入</string>
+    <string name="share_upload_no_items">未接收到可上傳的檔案</string>
+    <string name="share_upload_location_hint">請開啟「照片媒體位置權限」，以同步上傳照片與影片的拍攝地點等 EXIF 資訊</string>
+    <string name="share_upload_grant_location">開啟</string>
+    <string name="documents_provider_label">iCloud</string>
+    <string name="icloud_photo_folder_name">iCloud 照片</string>
+    <string name="icloud_drive_folder_name">iCloud 雲碟</string>
+
+    <!-- Language Settings -->
+    <string name="language_system_default">跟隨系統</string>
+    <string name="language_zh_hans">簡體中文</string>
+    <string name="language_zh_hant">繁體中文</string>
+    <string name="language_en">English</string>
+    <string name="settings_item_language">應用程式語言</string>
+    <string name="settings_dialog_choose_language">選擇應用程式語言</string>
+
+    <!-- Navigation Destinations -->
+    <string name="nav_photos">照片</string>
+    <string name="nav_albums">備份</string>
+    <string name="nav_drive">雲碟</string>
+    <string name="nav_notes">備忘錄</string>
+    <string name="nav_reminders">提醒</string>
+    <string name="nav_find_my">尋找</string>
+
+    <!-- Appearance & Theme -->
+    <string name="theme_title">主題外觀</string>
+    <string name="theme_subtitle">切換深色、淺色或跟隨系統</string>
+    <string name="theme_system">跟隨系統</string>
+    <string name="theme_light">淺色模式</string>
+    <string name="theme_dark">深色模式</string>
+    <string name="theme_dynamic_color">Monet 動態色彩</string>
+    <string name="theme_dynamic_color_desc">從系統桌布擷取主色調 (Android 12+)</string>
+    <string name="theme_dynamic_color_unsupported">目前系統版本不支援</string>
+
+    <!-- Common Actions -->
+    <string name="action_confirm">確定</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_close">關閉</string>
+    <string name="action_back">返回</string>
+    <string name="action_settings">設定</string>
+    <string name="action_sign_out">登出</string>
+</resources>

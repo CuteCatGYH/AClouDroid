@@ -43,6 +43,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import app.acloudroid.qwq.IClouDroidApp
+import app.acloudroid.qwq.R
+import app.acloudroid.qwq.data.settings.AppLanguage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -117,8 +119,16 @@ fun SettingsScreen(
     val maxConcurrentUploads by settings.maxConcurrentUploads.collectAsStateWithLifecycle()
     val showBackupNotification by settings.showBackupNotification.collectAsStateWithLifecycle()
     val periodicBackupInterval by settings.periodicBackupInterval.collectAsStateWithLifecycle()
+    val appLanguage by settings.appLanguage.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val lifecycleState by lifecycleOwner.lifecycle.currentStateFlow.collectAsStateWithLifecycle()
+    androidx.compose.runtime.LaunchedEffect(lifecycleState) {
+        if (lifecycleState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+            settings.syncAppLanguageFromSystem()
+        }
+    }
     val batchDownloadManager = remember(context) {
         (context.applicationContext as IClouDroidApp).container.batchDownloadManager
     }
@@ -227,6 +237,7 @@ fun SettingsScreen(
                                 SettingsRow(
                                     item = item,
                                     settings = settings,
+                                    appLanguage = appLanguage,
                                     themeMode = themeMode,
                                     useDynamicColor = useDynamicColor,
                                     monthCoverEnabled = monthCoverEnabled,
@@ -381,6 +392,7 @@ private fun FullScanWarningDialog(
 private fun SettingsRow(
     item: SettingsItem,
     settings: AppSettings,
+    appLanguage: AppLanguage,
     themeMode: ThemeMode,
     useDynamicColor: Boolean,
     monthCoverEnabled: Boolean,
@@ -778,11 +790,24 @@ private fun SettingsRow(
             }
         }
 
+        SettingsItem.APP_LANGUAGE -> {
+            val systemDefaultLabel = stringResource(R.string.language_system_default)
+            DropdownRow(
+                title = stringResource(R.string.settings_item_language),
+                subtitle = "",
+                current = if (appLanguage == AppLanguage.SYSTEM) systemDefaultLabel else appLanguage.nativeName,
+                options = AppLanguage.entries.map {
+                    it to (if (it == AppLanguage.SYSTEM) systemDefaultLabel else it.nativeName)
+                },
+                onSelect = { settings.setAppLanguage(it) }
+            )
+        }
+
         SettingsItem.THEME_MODE -> DropdownRow(
-            title = "主题外观",
-            subtitle = "切换应用深色、浅色或跟随系统",
-            current = themeMode.label,
-            options = ThemeMode.entries.map { it to it.label },
+            title = stringResource(R.string.theme_title),
+            subtitle = "",
+            current = stringResource(themeMode.labelRes),
+            options = ThemeMode.entries.map { it to stringResource(it.labelRes) },
             onSelect = { settings.setThemeMode(it) }
         )
 
@@ -796,12 +821,12 @@ private fun SettingsRow(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Monet 动态色彩",
+                        text = stringResource(R.string.theme_dynamic_color),
                         style = MaterialTheme.typography.bodyLarge,
                         color = if (supported) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                     )
                     Text(
-                        text = if (supported) "从系统壁纸提取主色调 (Android 12+)" else "当前系统版本不支持",
+                        text = if (supported) stringResource(R.string.theme_dynamic_color_desc) else stringResource(R.string.theme_dynamic_color_unsupported),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1068,7 +1093,7 @@ private fun ActionRow(
 @Composable
 private fun <T> DropdownRow(
     title: String,
-    subtitle: String,
+    subtitle: String = "",
     current: String,
     options: List<Pair<T, String>>,
     onSelect: (T) -> Unit,
@@ -1093,11 +1118,13 @@ private fun <T> DropdownRow(
                     MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                 }
             )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            if (subtitle.isNotEmpty()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
         Spacer(Modifier.width(12.dp))
         Text(

@@ -5,11 +5,11 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,7 +32,7 @@ import app.acloudroid.qwq.ui.auth.AuthUiState
 import app.acloudroid.qwq.ui.auth.AuthViewModel
 import app.acloudroid.qwq.feature.photos.ui.PhotosViewModel
 
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
 
     private val authViewModel: AuthViewModel by viewModels()
     private val photosViewModel: PhotosViewModel by viewModels()

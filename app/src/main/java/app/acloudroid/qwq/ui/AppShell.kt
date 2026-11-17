@@ -34,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -151,16 +152,17 @@ fun AppShell(
                 if (!viewerOpen && !settingsOpen) {
                     NavigationBar(modifier = Modifier.align(Alignment.BottomCenter)) {
                         activeDestinations.forEach { destination ->
+                            val destLabel = stringResource(destination.labelRes)
                             NavigationBarItem(
                                 selected = selected == destination,
                                 onClick = { selected = destination },
                                 icon = {
                                     Icon(
                                         imageVector = destination.icon,
-                                        contentDescription = destination.label
+                                        contentDescription = destLabel
                                     )
                                 },
-                                label = { Text(destination.label) }
+                                label = { Text(destLabel) }
                             )
                         }
                     }
@@ -173,16 +175,17 @@ fun AppShell(
                     NavigationRail(modifier = Modifier.fillMaxHeight()) {
                         Spacer(modifier = Modifier.weight(1f))
                         activeDestinations.forEach { destination ->
+                            val destLabel = stringResource(destination.labelRes)
                             NavigationRailItem(
                                 selected = selected == destination,
                                 onClick = { selected = destination },
                                 icon = {
                                     Icon(
                                         imageVector = destination.icon,
-                                        contentDescription = destination.label
+                                        contentDescription = destLabel
                                     )
                                 },
-                                label = { Text(destination.label) }
+                                label = { Text(destLabel) }
                             )
                         }
                         Spacer(modifier = Modifier.weight(1f))
