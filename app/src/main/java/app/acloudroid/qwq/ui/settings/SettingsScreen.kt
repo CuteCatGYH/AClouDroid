@@ -1166,8 +1166,29 @@ private fun CloudMediaActivationDialog(
 
     var isActivating by remember { mutableStateOf(false) }
     var activationStatus by remember { mutableStateOf<String?>(null) }
-    val isShizukuRunning = app.acloudroid.qwq.provider.ShizukuMediaHelper.isShizukuAvailable()
-    val hasPermission = app.acloudroid.qwq.provider.ShizukuMediaHelper.hasShizukuPermission()
+    var isShizukuRunning by remember { mutableStateOf(app.acloudroid.qwq.provider.ShizukuMediaHelper.isShizukuAvailable()) }
+    var hasPermission by remember { mutableStateOf(app.acloudroid.qwq.provider.ShizukuMediaHelper.hasShizukuPermission()) }
+
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        val binderListener = rikka.shizuku.Shizuku.OnBinderReceivedListener {
+            isShizukuRunning = app.acloudroid.qwq.provider.ShizukuMediaHelper.isShizukuAvailable()
+            hasPermission = app.acloudroid.qwq.provider.ShizukuMediaHelper.hasShizukuPermission()
+        }
+        val permissionListener = rikka.shizuku.Shizuku.OnRequestPermissionResultListener { requestCode, grantResult ->
+            if (requestCode == 1001) {
+                isShizukuRunning = app.acloudroid.qwq.provider.ShizukuMediaHelper.isShizukuAvailable()
+                hasPermission = grantResult == android.content.pm.PackageManager.PERMISSION_GRANTED
+            }
+        }
+
+        app.acloudroid.qwq.provider.ShizukuMediaHelper.addBinderReceivedListener(binderListener)
+        app.acloudroid.qwq.provider.ShizukuMediaHelper.addPermissionResultListener(permissionListener)
+
+        onDispose {
+            app.acloudroid.qwq.provider.ShizukuMediaHelper.removeBinderReceivedListener(binderListener)
+            app.acloudroid.qwq.provider.ShizukuMediaHelper.removePermissionResultListener(permissionListener)
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1254,8 +1275,15 @@ private fun CloudMediaActivationDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.action_close))
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                if (isShizukuRunning) {
+                    TextButton(onClick = onOpenSystemSettings) {
+                        Text(stringResource(R.string.settings_cloud_media_go_settings_btn))
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text(stringResource(R.string.action_close))
+                }
             }
         }
     )

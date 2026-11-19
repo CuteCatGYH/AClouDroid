@@ -487,7 +487,7 @@
     <string name="settings_group_appearance">Appearance &amp; Personalization</string>
     <string name="settings_group_appearance_desc">Set the app\'s light/dark theme and Android 12+ Monet dynamic wallpaper color extraction.</string>
     <string name="settings_group_system_integration">System Integration</string>
-    <string name="settings_group_system_integration_desc">Configure deep integration between iClouDroid and Android multimedia ecosystem.</string>
+    <string name="settings_group_system_integration_desc">Configure deep integration between AClouDroid and Android multimedia ecosystem.</string>
     <string name="settings_group_auto_backup">Auto Backup Policy</string>
     <string name="settings_group_auto_backup_desc">Configure network and battery constraints for background local album backup.</string>
     <string name="settings_group_photos_library">Photos Library</string>

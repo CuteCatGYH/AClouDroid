@@ -1,8 +1,6 @@
 package app.acloudroid.qwq.provider
 
-import android.content.Context
 import android.content.pm.PackageManager
-import android.os.IBinder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
@@ -61,6 +59,38 @@ object ShizukuMediaHelper {
         }
     }
 
+    fun addBinderReceivedListener(listener: Shizuku.OnBinderReceivedListener) {
+        try {
+            Shizuku.addBinderReceivedListener(listener)
+        } catch (e: Throwable) {
+            // Ignored
+        }
+    }
+
+    fun removeBinderReceivedListener(listener: Shizuku.OnBinderReceivedListener) {
+        try {
+            Shizuku.removeBinderReceivedListener(listener)
+        } catch (e: Throwable) {
+            // Ignored
+        }
+    }
+
+    fun addPermissionResultListener(listener: Shizuku.OnRequestPermissionResultListener) {
+        try {
+            Shizuku.addRequestPermissionResultListener(listener)
+        } catch (e: Throwable) {
+            // Ignored
+        }
+    }
+
+    fun removePermissionResultListener(listener: Shizuku.OnRequestPermissionResultListener) {
+        try {
+            Shizuku.removeRequestPermissionResultListener(listener)
+        } catch (e: Throwable) {
+            // Ignored
+        }
+    }
+
     suspend fun executeActivation(): Result<String> = withContext(Dispatchers.IO) {
         try {
             if (!isShizukuAvailable()) {
@@ -70,7 +100,7 @@ object ShizukuMediaHelper {
                 return@withContext Result.failure(IllegalStateException("未授予 Shizuku 权限"))
             }
 
-            // Using reflection to invoke Shizuku.newProcess (standard way for shell exec in Shizuku)
+            // In dev.rikka.shizuku:api 13.x, newProcess is private static
             val method = Shizuku::class.java.getDeclaredMethod(
                 "newProcess",
                 Array<String>::class.java,

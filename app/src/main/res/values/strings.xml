@@ -489,7 +489,7 @@
     <string name="settings_group_appearance">外观与个性化</string>
     <string name="settings_group_appearance_desc">设置应用的深浅主题模式与 Android 12+ Monet 动态壁纸取色效果。</string>
     <string name="settings_group_system_integration">系统整合</string>
-    <string name="settings_group_system_integration_desc">配置 iClouDroid 与 Android 系统的多媒体生态深度联动。</string>
+    <string name="settings_group_system_integration_desc">配置 AClouDroid 与 Android 系统的多媒体生态深度联动。</string>
     <string name="settings_group_auto_backup">自动备份策略</string>
     <string name="settings_group_auto_backup_desc">配置本地相册后台备份时的网络与电量运行约束条件。</string>
     <string name="settings_group_photos_library">照片库</string>
