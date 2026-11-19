@@ -111,8 +111,16 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
         if (monthCoverEnabled.value) repository.observeMonthCovers(year)
         else kotlinx.coroutines.flow.flowOf(emptyList())
 
-    private val _gridColumns = MutableStateFlow(4)
-    val gridColumns: StateFlow<Int> = _gridColumns.asStateFlow()
+    val dayGridColumns: StateFlow<Int> = container.appSettings.dayGridColumns
+    val monthGridColumns: StateFlow<Int> = container.appSettings.monthGridColumns
+
+    fun setDayGridColumns(columns: Int) {
+        container.appSettings.setDayGridColumns(columns)
+    }
+
+    fun setMonthGridColumns(columns: Int) {
+        container.appSettings.setMonthGridColumns(columns)
+    }
 
     private val _isSyncing = MutableStateFlow(false)
     val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
@@ -320,15 +328,11 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setGridColumns(columns: Int) {
-        _gridColumns.value = columns.coerceIn(2, 6)
-    }
-
-    fun toggleGridColumns() {
-        _gridColumns.value = when (_gridColumns.value) {
-            3 -> 4
-            4 -> 5
-            5 -> 3
-            else -> 4
+        val mode = galleryViewMode.value
+        if (mode == app.acloudroid.qwq.data.settings.GalleryViewMode.MONTH) {
+            setMonthGridColumns(columns)
+        } else {
+            setDayGridColumns(columns)
         }
     }
 

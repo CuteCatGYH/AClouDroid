@@ -12,12 +12,13 @@ import app.acloudroid.qwq.feature.photos.data.db.PhotoMonthIndexEntity
 data class VisibleAnchor(
     val yearMonth: Int,
     val dayKey: Int? = null,
-    val photoIndexInMonth: Int? = null
+    val photoIndexInMonth: Int? = null,
+    val firstVisibleItemScrollOffset: Int = 0
 )
 
 /**
  * Utility functions to calculate LazyColumn item indices across Month and Day view modes
- * to ensure smooth scroll position synchronization on view mode toggles.
+ * to ensure smooth scroll position synchronization on view mode toggles and pinch column changes.
  */
 object GalleryViewModeSync {
 
@@ -91,15 +92,17 @@ object GalleryViewModeSync {
         months: List<PhotoMonthIndexEntity>,
         monthPhotos: Map<Int, List<PhotoAssetEntity>>,
         monthDaysMap: Map<Int, List<DayBucketing.DayGroup>>,
-        viewMode: GalleryViewMode
+        viewMode: GalleryViewMode,
+        columns: Int = if (viewMode == GalleryViewMode.MONTH) 5 else 3
     ): VisibleAnchor {
         val fallbackYearMonth = months.firstOrNull()?.yearMonth ?: 0
+        val scrollOffset = state.firstVisibleItemScrollOffset
         val layout = state.layoutInfo
         val firstVisible = layout.visibleItemsInfo.firstOrNull { info ->
             val top = maxOf(info.offset, layout.viewportStartOffset)
             val bottom = minOf(info.offset + info.size, layout.viewportEndOffset)
             bottom - top >= 24
-        } ?: return VisibleAnchor(yearMonth = fallbackYearMonth)
+        } ?: return VisibleAnchor(yearMonth = fallbackYearMonth, firstVisibleItemScrollOffset = scrollOffset)
 
         val key = firstVisible.key.toString()
 
@@ -107,28 +110,33 @@ object GalleryViewModeSync {
             when {
                 key.startsWith("h_") -> {
                     val ym = key.removePrefix("h_").toIntOrNull() ?: fallbackYearMonth
-                    VisibleAnchor(yearMonth = ym, photoIndexInMonth = 0)
+                    VisibleAnchor(yearMonth = ym, photoIndexInMonth = 0, firstVisibleItemScrollOffset = scrollOffset)
                 }
                 key.startsWith("r_") -> {
                     val parts = key.removePrefix("r_").split('_')
                     val ym = parts.getOrNull(0)?.toIntOrNull() ?: fallbackYearMonth
                     val row = parts.getOrNull(1)?.toIntOrNull() ?: 0
-                    val photoIndex = row * 5
+                    val photoIndex = row * columns
                     val photos = monthPhotos[ym].orEmpty()
                     val photo = photos.getOrNull(photoIndex)
                     val dayKey = if (photo != null && photo.assetDate > 0) {
                         DayBucketing.dayKeyOf(photo.assetDate)
                     } else null
-                    VisibleAnchor(yearMonth = ym, dayKey = dayKey, photoIndexInMonth = photoIndex)
+                    VisibleAnchor(
+                        yearMonth = ym,
+                        dayKey = dayKey,
+                        photoIndexInMonth = photoIndex,
+                        firstVisibleItemScrollOffset = scrollOffset
+                    )
                 }
-                else -> VisibleAnchor(yearMonth = fallbackYearMonth)
+                else -> VisibleAnchor(yearMonth = fallbackYearMonth, firstVisibleItemScrollOffset = scrollOffset)
             }
         } else {
             when {
                 key.startsWith("dh_") -> {
                     val dayKey = key.removePrefix("dh_").toIntOrNull() ?: 0
                     val ym = if (dayKey > 0) dayKey / 100 else fallbackYearMonth
-                    VisibleAnchor(yearMonth = ym, dayKey = if (dayKey > 0) dayKey else null)
+                    VisibleAnchor(yearMonth = ym, dayKey = if (dayKey > 0) dayKey else null, firstVisibleItemScrollOffset = scrollOffset)
                 }
                 key.startsWith("dr_") -> {
                     val parts = key.removePrefix("dr_").split('_')
@@ -138,7 +146,7 @@ object GalleryViewModeSync {
 
                     val dayGroups = monthDaysMap[ym].orEmpty()
                     val targetGroup = dayGroups.find { it.dayKey == dayKey }
-                    val firstPhotoInRow = targetGroup?.photos?.getOrNull(row * 3)
+                    val firstPhotoInRow = targetGroup?.photos?.getOrNull(row * columns)
 
                     val photoIndex = if (firstPhotoInRow != null) {
                         val allPhotos = monthPhotos[ym].orEmpty()
@@ -149,10 +157,11 @@ object GalleryViewModeSync {
                     VisibleAnchor(
                         yearMonth = ym,
                         dayKey = if (dayKey > 0) dayKey else null,
-                        photoIndexInMonth = photoIndex
+                        photoIndexInMonth = photoIndex,
+                        firstVisibleItemScrollOffset = scrollOffset
                     )
                 }
-                else -> VisibleAnchor(yearMonth = fallbackYearMonth)
+                else -> VisibleAnchor(yearMonth = fallbackYearMonth, firstVisibleItemScrollOffset = scrollOffset)
             }
         }
     }

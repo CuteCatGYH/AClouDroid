@@ -38,6 +38,7 @@
     <string name="nav_notes">备忘录</string>
     <string name="nav_reminders">提醒</string>
     <string name="nav_find_my">查找</string>
+    <string name="photos_grid_columns_count">%1$d 列</string>
 
     <!-- Appearance & Theme -->
     <string name="theme_title">主题外观</string>

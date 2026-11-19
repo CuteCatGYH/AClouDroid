@@ -77,6 +77,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import app.acloudroid.qwq.data.settings.GalleryViewMode
 import app.acloudroid.qwq.feature.photos.data.DayBucketing
 import app.acloudroid.qwq.feature.photos.data.MonthBucketing
@@ -114,11 +121,51 @@ fun PhotosScreen(
     val viewMode by viewModel.galleryViewMode.collectAsStateWithLifecycle()
     val monthCoverEnabled by viewModel.monthCoverEnabled.collectAsStateWithLifecycle()
 
-    val gridColumns = if (viewMode == GalleryViewMode.DAY) 3 else 5
+    val configuration = LocalConfiguration.current
+    val screenWidthDp = configuration.screenWidthDp
+
+    val savedDayCols by viewModel.dayGridColumns.collectAsStateWithLifecycle()
+    val savedMonthCols by viewModel.monthGridColumns.collectAsStateWithLifecycle()
+
+    val defaultDayCols = when {
+        screenWidthDp > 840 -> 5
+        screenWidthDp >= 600 -> 4
+        else -> 3
+    }
+
+    val defaultMonthCols = when {
+        screenWidthDp > 840 -> 9
+        screenWidthDp >= 600 -> 7
+        else -> 5
+    }
+
+    val minDayCols = 2
+    val maxDayCols = when {
+        screenWidthDp > 840 -> 10
+        screenWidthDp >= 600 -> 8
+        else -> 6
+    }
+
+    val minMonthCols = 3
+    val maxMonthCols = when {
+        screenWidthDp > 840 -> 14
+        screenWidthDp >= 600 -> 12
+        else -> 10
+    }
+
+    val effectiveDayCols = if (savedDayCols in minDayCols..maxDayCols) savedDayCols else defaultDayCols
+    val effectiveMonthCols = if (savedMonthCols in minMonthCols..maxMonthCols) savedMonthCols else defaultMonthCols
+
+    val gridColumns = if (viewMode == GalleryViewMode.DAY) effectiveDayCols else effectiveMonthCols
+    val minColumns = if (viewMode == GalleryViewMode.DAY) minDayCols else minMonthCols
+    val maxColumns = if (viewMode == GalleryViewMode.DAY) maxDayCols else maxMonthCols
 
     val listState = rememberLazyListState()
     val thumbnailBounds = rememberThumbnailBoundsTracker()
     val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+
+    var isPinching by remember { mutableStateOf(false) }
 
     val monthKeys = remember(monthIndex) { monthIndex.map { it.yearMonth } }
 
@@ -200,13 +247,15 @@ fun PhotosScreen(
                                     months = monthIndex,
                                     monthPhotos = monthPhotos,
                                     monthDaysMap = monthDaysMap,
-                                    viewMode = viewMode
+                                    viewMode = viewMode,
+                                    columns = gridColumns
                                 )
                                 viewModel.setGalleryViewMode(newMode)
+                                val newColumns = if (newMode == GalleryViewMode.DAY) effectiveDayCols else effectiveMonthCols
                                 val targetIdx = if (newMode == GalleryViewMode.MONTH) {
                                     GalleryViewModeSync.listIndexOfMonthView(
                                         months = monthIndex,
-                                        columns = 5,
+                                        columns = newColumns,
                                         targetYearMonth = anchor.yearMonth,
                                         targetPhotoIndexInMonth = anchor.photoIndexInMonth ?: 0
                                     )
@@ -214,13 +263,13 @@ fun PhotosScreen(
                                     GalleryViewModeSync.listIndexOfDayView(
                                         months = monthIndex,
                                         monthDaysMap = monthDaysMap,
-                                        columns = 3,
+                                        columns = newColumns,
                                         targetYearMonth = anchor.yearMonth,
                                         targetDayKey = anchor.dayKey
                                     )
                                 }
                                 if (targetIdx >= 0) {
-                                    scope.launch { listState.scrollToItem(targetIdx) }
+                                    scope.launch { listState.scrollToItem(targetIdx, anchor.firstVisibleItemScrollOffset) }
                                 }
                             }
                         }
@@ -358,9 +407,117 @@ fun PhotosScreen(
                 }
 
                 // 2. Main content (photo stream and jump bar), translated downward following the pull gesture
+                val pinchGestureModifier = Modifier.pointerInput(
+                    viewMode, gridColumns, minColumns, maxColumns, monthIndex, monthPhotos, monthDaysMap
+                ) {
+                    awaitEachGesture {
+                        var accumulatedZoom = 1.0f
+                        var pinchingStarted = false
+
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val activePointers = event.changes.filter { it.pressed }
+                            if (activePointers.size >= 2) {
+                                if (!pinchingStarted) {
+                                    pinchingStarted = true
+                                    isPinching = true
+                                }
+                                val zoomChange = event.calculateZoom()
+                                accumulatedZoom *= zoomChange
+
+                                if (accumulatedZoom > 1.22f && gridColumns > minColumns) {
+                                    val newCols = gridColumns - 1
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+
+                                    val anchor = GalleryViewModeSync.currentVisibleAnchor(
+                                        state = listState,
+                                        months = monthIndex,
+                                        monthPhotos = monthPhotos,
+                                        monthDaysMap = monthDaysMap,
+                                        viewMode = viewMode,
+                                        columns = gridColumns
+                                    )
+
+                                    if (viewMode == GalleryViewMode.DAY) {
+                                        viewModel.setDayGridColumns(newCols)
+                                    } else {
+                                        viewModel.setMonthGridColumns(newCols)
+                                    }
+
+                                    val targetIdx = if (viewMode == GalleryViewMode.MONTH) {
+                                        GalleryViewModeSync.listIndexOfMonthView(
+                                            months = monthIndex,
+                                            columns = newCols,
+                                            targetYearMonth = anchor.yearMonth,
+                                            targetPhotoIndexInMonth = anchor.photoIndexInMonth ?: 0
+                                        )
+                                    } else {
+                                        GalleryViewModeSync.listIndexOfDayView(
+                                            months = monthIndex,
+                                            monthDaysMap = monthDaysMap,
+                                            columns = newCols,
+                                            targetYearMonth = anchor.yearMonth,
+                                            targetDayKey = anchor.dayKey
+                                        )
+                                    }
+
+                                    if (targetIdx >= 0) {
+                                        scope.launch { listState.scrollToItem(targetIdx, anchor.firstVisibleItemScrollOffset) }
+                                    }
+                                    accumulatedZoom = 1.0f
+                                } else if (accumulatedZoom < 0.80f && gridColumns < maxColumns) {
+                                    val newCols = gridColumns + 1
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+
+                                    val anchor = GalleryViewModeSync.currentVisibleAnchor(
+                                        state = listState,
+                                        months = monthIndex,
+                                        monthPhotos = monthPhotos,
+                                        monthDaysMap = monthDaysMap,
+                                        viewMode = viewMode,
+                                        columns = gridColumns
+                                    )
+
+                                    if (viewMode == GalleryViewMode.DAY) {
+                                        viewModel.setDayGridColumns(newCols)
+                                    } else {
+                                        viewModel.setMonthGridColumns(newCols)
+                                    }
+
+                                    val targetIdx = if (viewMode == GalleryViewMode.MONTH) {
+                                        GalleryViewModeSync.listIndexOfMonthView(
+                                            months = monthIndex,
+                                            columns = newCols,
+                                            targetYearMonth = anchor.yearMonth,
+                                            targetPhotoIndexInMonth = anchor.photoIndexInMonth ?: 0
+                                        )
+                                    } else {
+                                        GalleryViewModeSync.listIndexOfDayView(
+                                            months = monthIndex,
+                                            monthDaysMap = monthDaysMap,
+                                            columns = newCols,
+                                            targetYearMonth = anchor.yearMonth,
+                                            targetDayKey = anchor.dayKey
+                                        )
+                                    }
+
+                                    if (targetIdx >= 0) {
+                                        scope.launch { listState.scrollToItem(targetIdx, anchor.firstVisibleItemScrollOffset) }
+                                    }
+                                    accumulatedZoom = 1.0f
+                                }
+                            } else if (pinchingStarted && activePointers.size < 2) {
+                                isPinching = false
+                                break
+                            }
+                        }
+                    }
+                }
+
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .then(pinchGestureModifier)
                         .graphicsLayer {
                             translationY = pullToRefreshState.distanceFraction * thresholdPx
                         }
@@ -473,6 +630,14 @@ fun PhotosScreen(
                         coverRowsOf = if (monthCoverEnabled) viewModel::coverRows else null
                     )
                 }
+
+                PinchColumnIndicator(
+                    columns = gridColumns,
+                    visible = isPinching,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 16.dp)
+                )
 
                 androidx.compose.animation.AnimatedVisibility(
                     visible = showScrollToTop,
@@ -737,4 +902,44 @@ private val ScrollToTopIcon: ImageVector
         }.build()
         return _scrollToTopIcon!!
     }
+
+@Composable
+private fun PinchColumnIndicator(
+    columns: Int,
+    visible: Boolean,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(animationSpec = tween(120)) + scaleIn(initialScale = 0.85f),
+        exit = fadeOut(animationSpec = tween(150)) + scaleOut(targetScale = 0.85f),
+        modifier = modifier
+    ) {
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.95f),
+            tonalElevation = 6.dp,
+            shadowElevation = 4.dp
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.GridView,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = stringResource(R.string.photos_grid_columns_count, columns),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+        }
+    }
+}
 

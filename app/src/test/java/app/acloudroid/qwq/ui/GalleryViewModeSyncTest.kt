@@ -93,4 +93,34 @@ class GalleryViewModeSyncTest {
         // Day 20260930 -> index 4
         assertEquals(4, GalleryViewModeSync.listIndexOfDayView(months, monthDaysMap, 3, 202609, 20260930))
     }
+
+    @Test
+    fun testPinchColumnChangeAnchorPreservation() {
+        val months = listOf(
+            PhotoMonthIndexEntity(yearMonth = 202512, itemCount = 40, firstAssetDate = 1000L, lastAssetDate = 500L),
+            PhotoMonthIndexEntity(yearMonth = 202511, itemCount = 30, firstAssetDate = 1000L, lastAssetDate = 500L),
+            PhotoMonthIndexEntity(yearMonth = 202510, itemCount = 50, firstAssetDate = 1000L, lastAssetDate = 500L)
+        )
+
+        // Scenario: User is viewing photo #15 in month 202511
+        // With 3 columns:
+        // 202512: 1 header + ceil(40/3)=14 rows = 15 items (indices 0..14)
+        // 202511: header = index 15. photo #15 is in row 15/3 = 5 -> index 15 + 1 + 5 = 21
+        val idx3Cols = GalleryViewModeSync.listIndexOfMonthView(months, 3, 202511, 15)
+        assertEquals(21, idx3Cols)
+
+        // When pinching to 6 columns:
+        // 202512: 1 header + ceil(40/6)=7 rows = 8 items (indices 0..7)
+        // 202511: header = index 8. photo #15 is in row 15/6 = 2 -> index 8 + 1 + 2 = 11
+        val idx6Cols = GalleryViewModeSync.listIndexOfMonthView(months, 6, 202511, 15)
+        assertEquals(11, idx6Cols)
+
+        // Verify that in both column layouts, the target index still maps to the exact same month (202511)
+        // rather than jumping to 202512 or 202510!
+        val monthAt3Cols = if (idx3Cols in 0..14) 202512 else if (idx3Cols in 15..25) 202511 else 202510
+        val monthAt6Cols = if (idx6Cols in 0..7) 202512 else if (idx6Cols in 8..13) 202511 else 202510
+
+        assertEquals(202511, monthAt3Cols)
+        assertEquals(202511, monthAt6Cols)
+    }
 }

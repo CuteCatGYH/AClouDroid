@@ -36,6 +36,7 @@
     <string name="nav_notes">Notes</string>
     <string name="nav_reminders">Reminders</string>
     <string name="nav_find_my">Find My</string>
+    <string name="photos_grid_columns_count">%1$d Columns</string>
 
     <!-- Appearance & Theme -->
     <string name="theme_title">Theme</string>

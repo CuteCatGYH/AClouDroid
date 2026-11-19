@@ -122,6 +122,30 @@ class AppSettings(context: Context) {
     }
 
     // ---------------------------------------------------------------------------------------
+    // Photo Grid Columns (Day & Month view column count)
+    // ---------------------------------------------------------------------------------------
+
+    private val _dayGridColumns = MutableStateFlow(
+        prefs.getInt(KEY_DAY_GRID_COLUMNS, 0)
+    )
+    val dayGridColumns: StateFlow<Int> = _dayGridColumns.asStateFlow()
+
+    fun setDayGridColumns(value: Int) {
+        prefs.edit { putInt(KEY_DAY_GRID_COLUMNS, value) }
+        _dayGridColumns.value = value
+    }
+
+    private val _monthGridColumns = MutableStateFlow(
+        prefs.getInt(KEY_MONTH_GRID_COLUMNS, 0)
+    )
+    val monthGridColumns: StateFlow<Int> = _monthGridColumns.asStateFlow()
+
+    fun setMonthGridColumns(value: Int) {
+        prefs.edit { putInt(KEY_MONTH_GRID_COLUMNS, value) }
+        _monthGridColumns.value = value
+    }
+
+    // ---------------------------------------------------------------------------------------
     // Periodic full scan
     // ---------------------------------------------------------------------------------------
 
@@ -369,6 +393,8 @@ class AppSettings(context: Context) {
         private const val KEY_DRIVE_SORT_ORDER = "drive_sort_order"
         private const val KEY_AUTO_CHECK_UPDATE = "auto_check_update"
         private const val KEY_LAST_UPDATE_CHECK_TIMESTAMP = "last_update_check_timestamp"
+        private const val KEY_DAY_GRID_COLUMNS = "day_grid_columns"
+        private const val KEY_MONTH_GRID_COLUMNS = "month_grid_columns"
 
         const val MIN_CUSTOM_DAYS = 1
         const val MAX_CUSTOM_DAYS = 365

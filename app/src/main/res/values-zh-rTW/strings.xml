@@ -36,6 +36,7 @@
     <string name="nav_notes">備忘錄</string>
     <string name="nav_reminders">提醒</string>
     <string name="nav_find_my">尋找</string>
+    <string name="photos_grid_columns_count">%1$d 欄</string>
 
     <!-- Appearance & Theme -->
     <string name="theme_title">主題外觀</string>
