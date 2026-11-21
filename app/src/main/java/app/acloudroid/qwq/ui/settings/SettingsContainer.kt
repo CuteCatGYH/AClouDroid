@@ -61,6 +61,7 @@ fun SettingsContainer(
     onStartFullScan: () -> Unit,
     onFrequencyChanged: (ScanFrequency) -> Unit,
     onCustomIntervalChanged: (Int) -> Unit,
+    onReLogin: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
@@ -143,7 +144,11 @@ fun SettingsContainer(
             isFullScanRunning = isFullScanRunning,
             onStartFullScan = onStartFullScan,
             onFrequencyChanged = onFrequencyChanged,
-            onCustomIntervalChanged = onCustomIntervalChanged
+            onCustomIntervalChanged = onCustomIntervalChanged,
+            onReLogin = {
+                onClose()
+                onReLogin()
+            }
         )
     }
 }

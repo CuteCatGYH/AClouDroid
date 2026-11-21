@@ -14,6 +14,7 @@ enum class SettingsItem {
     CLOUD_MEDIA_PROVIDER,
     FULL_SCAN,
     DOWNLOAD_ALL,
+    RE_LOGIN,
     MONTH_COVER_PREVIEW,
     SCAN_FREQUENCY,
     CUSTOM_INTERVAL,
@@ -102,7 +103,7 @@ object SettingsCatalog {
         SettingsGroup(
             titleRes = R.string.settings_group_advanced,
             descriptionRes = R.string.settings_group_advanced_desc,
-            items = listOf(SettingsItem.DOWNLOAD_ALL)
+            items = listOf(SettingsItem.DOWNLOAD_ALL, SettingsItem.RE_LOGIN)
         ),
         SettingsGroup(
             titleRes = R.string.settings_group_about,

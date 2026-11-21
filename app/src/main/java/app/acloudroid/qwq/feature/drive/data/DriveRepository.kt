@@ -568,21 +568,36 @@ class DriveRepository(
                     }
 
                     Log.i(TAG, "Rebuilding Go core session for Drive (force=$force)…")
-                    val cookieStr = sessionManager.getCookieString()
+                    var cookieStr = sessionManager.getCookieString()
+                    if (cookieStr.isNullOrBlank()) {
+                        cookieStr = sessionManager.trySyncFreshCookiesFromWeb()
+                    }
                     if (cookieStr.isNullOrBlank()) {
                         return@withContext Result.failure(
-                            Exception("本地缺少 iCloud Cookie 凭证，请重新登录")
+                            Exception(appContext.getString(app.acloudroid.qwq.R.string.auth_err_missing_cookie))
                         )
                     }
 
-                    val jsonResult = Icloudcore.initSession(cookieStr, sessionManager.isChinaMainland())
-                    val json = JSONObject(jsonResult)
+                    var jsonResult = Icloudcore.initSession(cookieStr, sessionManager.isChinaMainland())
+                    var json = JSONObject(jsonResult)
 
                     if (!json.optBoolean("success", false)) {
-                        val errMsg = json.optString(
-                            "errorMessage",
-                            "会话初始化失败，请在“账号”页面重新登录"
-                        )
+                        // Self-healing fallback: probe Android's CookieManager for fresh cookies
+                        val freshWebCookie = sessionManager.trySyncFreshCookiesFromWeb()
+                        if (!freshWebCookie.isNullOrBlank() && freshWebCookie != cookieStr) {
+                            Log.i(TAG, "Retrying Drive Go session init with fresh cookies auto-synced from CookieManager...")
+                            jsonResult = Icloudcore.initSession(freshWebCookie, sessionManager.isChinaMainland())
+                            json = JSONObject(jsonResult)
+                        }
+                    }
+
+                    if (!json.optBoolean("success", false)) {
+                        val rawErr = json.optString("errorMessage", "")
+                        val errMsg = if (rawErr.contains("AUTH_EXPIRED") || rawErr.contains("401")) {
+                            appContext.getString(app.acloudroid.qwq.R.string.auth_err_expired)
+                        } else {
+                            rawErr.ifBlank { appContext.getString(app.acloudroid.qwq.R.string.auth_err_session_init_failed) }
+                        }
                         return@withContext Result.failure(Exception(errMsg))
                     }
 

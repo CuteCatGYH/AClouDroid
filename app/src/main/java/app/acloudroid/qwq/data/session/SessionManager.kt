@@ -64,6 +64,39 @@ class SessionManager(context: Context) {
 
     fun getCookieString(): String? = prefs.getString(KEY_COOKIE_STR, null)
 
+    /**
+     * Attempts to read live cookies from Android's system [android.webkit.CookieManager] for the current region.
+     *
+     * If [android.webkit.CookieManager] contains valid credentials (`isValid == true`), this automatically
+     * updates [SessionManager] if the stored cookie set differed, and returns the fresh cookie string.
+     * Returns null if no fresh valid cookie string could be retrieved.
+     */
+    fun trySyncFreshCookiesFromWeb(): String? {
+        val targetUrl = if (isChinaMainland()) "https://www.icloud.com.cn" else "https://www.icloud.com"
+        val rawWebCookie = try {
+            android.webkit.CookieManager.getInstance().getCookie(targetUrl)
+        } catch (e: Exception) {
+            android.util.Log.w("SessionManager", "Failed to query CookieManager: ${e.message}")
+            null
+        }
+
+        if (rawWebCookie.isNullOrBlank()) return null
+
+        val validation = app.acloudroid.qwq.ui.auth.CookieValidationResult.validate(rawWebCookie)
+        if (!validation.isValid) return null
+
+        val currentStored = getCookieString()
+        if (currentStored != rawWebCookie) {
+            android.util.Log.i(
+                "SessionManager",
+                "Auto-synced fresh cookies from WebView CookieManager (region=${if (isChinaMainland()) "cn" else "global"})"
+            )
+            saveSession(rawWebCookie, isChinaMainland())
+        }
+
+        return rawWebCookie
+    }
+
     fun isChinaMainland(): Boolean = prefs.getBoolean(KEY_IS_CHINA, true)
 
     fun hasShownChinaUploadNotice(): Boolean = prefs.getBoolean(KEY_HAS_SHOWN_CHINA_UPLOAD_NOTICE, false)

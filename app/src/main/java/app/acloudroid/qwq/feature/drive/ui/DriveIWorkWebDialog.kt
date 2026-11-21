@@ -1,6 +1,7 @@
 package app.acloudroid.qwq.feature.drive.ui
 
 import app.acloudroid.qwq.R
+import app.acloudroid.qwq.di.appContainer
 import androidx.compose.ui.res.stringResource
 
 import android.annotation.SuppressLint
@@ -231,6 +232,9 @@ fun DriveIWorkWebDialog(
                                     override fun onPageFinished(view: WebView?, url: String?) {
                                         isLoading = false
                                         view?.evaluateJavascript(desktopJsOverride, null)
+                                        try {
+                                            context.appContainer().sessionManager.trySyncFreshCookiesFromWeb()
+                                        } catch (_: Exception) { }
                                     }
                                 }
 

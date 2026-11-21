@@ -103,6 +103,7 @@ fun SettingsScreen(
     onStartFullScan: () -> Unit,
     onFrequencyChanged: (ScanFrequency) -> Unit,
     onCustomIntervalChanged: (Int) -> Unit,
+    onReLogin: () -> Unit = {},
     contentPadding: androidx.compose.foundation.layout.PaddingValues =
         androidx.compose.foundation.layout.PaddingValues(),
     modifier: Modifier = Modifier
@@ -137,6 +138,7 @@ fun SettingsScreen(
     var showScanWarning by remember { mutableStateOf(false) }
     var showDownloadDialog by remember { mutableStateOf(false) }
     var showCancelDownloadDialog by remember { mutableStateOf(false) }
+    var showReloginDialog by remember { mutableStateOf(false) }
     var libraryEstimate by remember { mutableStateOf<LibraryEstimate?>(null) }
     var showAboutScreen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -266,6 +268,7 @@ fun SettingsScreen(
                                     },
                                     onFrequencyChanged = onFrequencyChanged,
                                     onCustomIntervalChanged = onCustomIntervalChanged,
+                                    onRequestRelogin = { showReloginDialog = true },
                                     onOpenAbout = { showAboutScreen = true }
                                 )
                             }
@@ -337,6 +340,39 @@ fun SettingsScreen(
                     onDismiss = { showCancelDownloadDialog = false }
                 )
             }
+        }
+
+        if (showReloginDialog) {
+            AlertDialog(
+                onDismissRequest = { showReloginDialog = false },
+                title = {
+                    Text(
+                        text = stringResource(R.string.settings_dialog_re_login_title),
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    Text(text = stringResource(R.string.settings_dialog_re_login_msg))
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showReloginDialog = false
+                            onReLogin()
+                        }
+                    ) {
+                        Text(
+                            text = stringResource(R.string.settings_dialog_re_login_confirm),
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showReloginDialog = false }) {
+                        Text(text = stringResource(R.string.action_cancel))
+                    }
+                }
+            )
         }
 
         if (showAboutScreen) {
@@ -411,6 +447,7 @@ private fun SettingsRow(
     onRequestDownloadAll: () -> Unit,
     onFrequencyChanged: (ScanFrequency) -> Unit,
     onCustomIntervalChanged: (Int) -> Unit,
+    onRequestRelogin: () -> Unit,
     onOpenAbout: () -> Unit
 ) {
     val context = LocalContext.current
@@ -955,6 +992,18 @@ private fun SettingsRow(
                     }
                 },
                 onClick = onRequestDownloadAll
+            )
+        }
+
+        SettingsItem.RE_LOGIN -> {
+            ActionRow(
+                title = stringResource(R.string.settings_item_re_login),
+                subtitle = stringResource(R.string.settings_item_re_login_desc),
+                enabled = true,
+                trailing = {
+                    Icon(Icons.Default.ChevronRight, contentDescription = null)
+                },
+                onClick = onRequestRelogin
             )
         }
 

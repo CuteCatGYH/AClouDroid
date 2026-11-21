@@ -148,7 +148,7 @@ func (s *Session) ValidateSession() (*SessionInitResult, error) {
 		return remedyResult, nil
 	}
 
-	return nil, fmt.Errorf("AUTH_EXPIRED: iCloud 登录凭证已失效或 2FA 信任到期，请重新登录。")
+	return nil, fmt.Errorf("AUTH_EXPIRED: iCloud login credentials or 2FA trust expired, please sign in again.")
 }
 
 func (s *Session) doValidate() (*SessionInitResult, error) {

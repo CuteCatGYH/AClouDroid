@@ -68,6 +68,7 @@ fun AppShell(
     localAlbumsViewModel: app.acloudroid.qwq.feature.local.ui.LocalAlbumsViewModel,
     driveViewModel: app.acloudroid.qwq.feature.drive.ui.DriveViewModel,
     onOpenAccountInfo: () -> Unit,
+    onReLogin: () -> Unit = {},
     modifier: Modifier = Modifier,
     windowSizeClass: WindowSizeClass? = null,
     openSettings: Boolean = false,
@@ -233,6 +234,7 @@ fun AppShell(
         if (settingsOpen) {
             SettingsContainer(
                 onClose = { settingsOpen = false },
+                onReLogin = onReLogin,
                 onStartFullScan = { photosViewModel.startFullScan() },
                 settings = settings,
                 fullScanMessage = syncMessage,

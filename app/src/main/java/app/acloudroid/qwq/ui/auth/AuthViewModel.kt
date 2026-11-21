@@ -225,7 +225,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         if (probeResult == null) {
             _cookieDiagnostic.value = null
             _uiState.value = AuthUiState.Error(
-                errorMessage = "WebView 尚未初始化或已销毁，请重新加载登录页后再试。",
+                errorMessage = getApplication<Application>().getString(app.acloudroid.qwq.R.string.auth_err_webview_uninitialized),
                 isChinaMainland = sessionManager.isChinaMainland()
             )
             return
@@ -315,7 +315,12 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                         hasHsaTrust = hasHsaTrust
                     )
                 } else {
-                    val errMsg = json.optString("errorMessage", "iCloud 登录初始化失败，请重试")
+                    val rawErr = json.optString("errorMessage", "")
+                    val errMsg = if (rawErr.contains("AUTH_EXPIRED") || rawErr.contains("401")) {
+                        getApplication<Application>().getString(app.acloudroid.qwq.R.string.auth_err_expired)
+                    } else {
+                        rawErr.ifBlank { getApplication<Application>().getString(app.acloudroid.qwq.R.string.auth_err_login_init_failed) }
+                    }
                     Log.w(AUTH_LOG_TAG, "Go InitSession reported failure: $errMsg")
                     _uiState.value = AuthUiState.Error(errMsg, isChinaMainland)
                 }
@@ -350,6 +355,35 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
      * cleanup itself continues in the background and is idempotent if it fails part-way (the user
      * can simply log out again).
      */
+    /**
+     * Resets the session cookies/tokens and launches the login screen again,
+     * while preserving all local databases and file caches.
+     */
+    fun relogin() {
+        isLoggingOut = true
+
+        val currentRegion = sessionManager.isChinaMainland()
+        _cookieDiagnostic.value = null
+
+        _uiState.value = AuthUiState.NotLoggedIn(isChinaMainland = currentRegion)
+
+        viewModelScope.launch {
+            try {
+                clearWebViewCookies()
+                sessionManager.clearSession()
+                Log.i(
+                    AUTH_LOG_TAG,
+                    "Relogin session reset complete (region=${if (currentRegion) "cn" else "global"})"
+                )
+            } catch (e: Exception) {
+                Log.e(AUTH_LOG_TAG, "Relogin reset failed", e)
+            } finally {
+                delay(COOKIE_CAPTURE_GRACE_MS)
+                isLoggingOut = false
+            }
+        }
+    }
+
     fun logout() {
         // Nothing may capture or persist credentials from here on: the WebView reloads the login
         // page while `removeAllCookies` is still in flight, which otherwise re-arms the session.

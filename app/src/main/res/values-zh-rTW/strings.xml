@@ -427,6 +427,18 @@
     <string name="notif_scan_done_title">iCloud 照片掃描完成</string>
     <string name="notif_scan_done_text">共整理 %1$s 項照片與影片</string>
 
+    <!-- Authentication Errors -->
+    <string name="auth_err_expired">iCloud 登入憑證已失效或 2FA 信任到期，請重新登入。</string>
+    <string name="auth_err_missing_cookie">本地缺少 iCloud Cookie 憑證，請重新登入</string>
+    <string name="auth_err_session_init_failed">工作階段初始化失敗，請在「帳號」頁面重新登入</string>
+    <string name="auth_err_login_init_failed">iCloud 登入初始化失敗，請重試</string>
+    <string name="auth_err_webview_uninitialized">WebView 尚未初始化或已銷毀，請重新載入登入頁後再試。</string>
+    <string name="settings_item_re_login">重新登入</string>
+    <string name="settings_item_re_login_desc">重置目前工作階段 Cookie 與憑證，重新開啟登入頁面（保留本地資料庫與快取）</string>
+    <string name="settings_dialog_re_login_title">確認重新登入？</string>
+    <string name="settings_dialog_re_login_msg">將重置您的登入憑證並重新開啟登入頁面。本地照片資料庫和已下載檔案將被保留。</string>
+    <string name="settings_dialog_re_login_confirm">確認</string>
+
     <!-- Drive Download Errors -->
     <string name="drive_err_dl_generic">下載失敗</string>
     <string name="drive_err_dl_iwork">該檔案類型（如 iWork 包）暫不支援直接下載</string>

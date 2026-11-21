@@ -551,19 +551,43 @@ class PhotoRepository(
 
                 Log.i(TAG, "Rebuilding Go core session (force=$force)...")
                 app.acloudroid.qwq.util.AppLogger.i(TAG, "Rebuilding Go core session (force=$force)...")
-                val cookieStr = sessionManager.getCookieString()
+                var cookieStr = sessionManager.getCookieString()
                 if (cookieStr.isNullOrBlank()) {
-                    return@withContext Result.failure(Exception("本地缺少 iCloud Cookie 凭证，请重新登录"))
+                    // Try to auto-heal from WebView's CookieManager if local stored cookies are missing
+                    cookieStr = sessionManager.trySyncFreshCookiesFromWeb()
+                }
+                if (cookieStr.isNullOrBlank()) {
+                    return@withContext Result.failure(
+                        Exception(appContext.getString(app.acloudroid.qwq.R.string.auth_err_missing_cookie))
+                    )
                 }
 
                 val isChina = sessionManager.isChinaMainland()
-                val jsonResult = Icloudcore.initSession(cookieStr, isChina)
+                var jsonResult = Icloudcore.initSession(cookieStr, isChina)
                 Log.d(TAG, "Rebuilt Go session result: $jsonResult")
 
-                val json = JSONObject(jsonResult)
-                val success = json.optBoolean("success", false)
+                var json = JSONObject(jsonResult)
+                var success = json.optBoolean("success", false)
+
                 if (!success) {
-                    val errMsg = json.optString("errorMessage", "会话初始化失败，请在“账号”页面重新登录")
+                    // Self-healing fallback: probe Android's CookieManager to see if WebKit holds updated valid cookies
+                    val freshWebCookie = sessionManager.trySyncFreshCookiesFromWeb()
+                    if (!freshWebCookie.isNullOrBlank() && freshWebCookie != cookieStr) {
+                        Log.i(TAG, "Retrying Go session init with fresh cookies auto-synced from CookieManager...")
+                        jsonResult = Icloudcore.initSession(freshWebCookie, isChina)
+                        Log.d(TAG, "Retried Go session result: $jsonResult")
+                        json = JSONObject(jsonResult)
+                        success = json.optBoolean("success", false)
+                    }
+                }
+
+                if (!success) {
+                    val rawErr = json.optString("errorMessage", "")
+                    val errMsg = if (rawErr.contains("AUTH_EXPIRED") || rawErr.contains("401")) {
+                        appContext.getString(app.acloudroid.qwq.R.string.auth_err_expired)
+                    } else {
+                        rawErr.ifBlank { appContext.getString(app.acloudroid.qwq.R.string.auth_err_session_init_failed) }
+                    }
                     return@withContext Result.failure(Exception(errMsg))
                 }
 

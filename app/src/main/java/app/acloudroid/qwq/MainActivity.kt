@@ -114,7 +114,8 @@ class MainActivity : AppCompatActivity() {
                                     openSettingsRequested.value = false
                                     openSettingsFromAccountDialog = false
                                 },
-                                onOpenAccountInfo = { showAccountDialog = true }
+                                onOpenAccountInfo = { showAccountDialog = true },
+                                onReLogin = { authViewModel.relogin() }
                             )
 
                             if (showAccountDialog) {

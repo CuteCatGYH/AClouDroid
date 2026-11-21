@@ -427,6 +427,18 @@
     <string name="notif_scan_done_title">iCloud Photo Scan Complete</string>
     <string name="notif_scan_done_text">Organized %1$s photos and videos in total</string>
 
+    <!-- Authentication Errors -->
+    <string name="auth_err_expired">iCloud login credentials or 2FA trust expired, please sign in again.</string>
+    <string name="auth_err_missing_cookie">Missing local iCloud login credentials, please sign in again</string>
+    <string name="auth_err_session_init_failed">Session initialization failed, please sign in again on the Account page</string>
+    <string name="auth_err_login_init_failed">iCloud login initialization failed, please try again</string>
+    <string name="auth_err_webview_uninitialized">WebView is not initialized or destroyed, please reload the login page and try again.</string>
+    <string name="settings_item_re_login">Re-login</string>
+    <string name="settings_item_re_login_desc">Reset current session cookies and credentials, and re-launch login screen (preserves local database and cache)</string>
+    <string name="settings_dialog_re_login_title">Confirm Re-login?</string>
+    <string name="settings_dialog_re_login_msg">This will reset your login credentials and re-open the login screen. Your local photo database and downloaded files will be preserved.</string>
+    <string name="settings_dialog_re_login_confirm">Confirm</string>
+
     <!-- Drive Download Errors -->
     <string name="drive_err_dl_generic">Download failed</string>
     <string name="drive_err_dl_iwork">This file type (such as iWork packages) is currently not supported for direct download</string>
