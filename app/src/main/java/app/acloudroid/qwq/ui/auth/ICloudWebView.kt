@@ -23,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import app.acloudroid.qwq.BuildConfig
+import app.acloudroid.qwq.di.appContainer
 
 /** Logcat tag used for every auth / cookie diagnostic log line. */
 const val AUTH_LOG_TAG = "ICloudAuth"
@@ -97,7 +98,10 @@ data class CookieValidationResult(
         if (present) "OK   $name (len=${valueLength(name)})" else "MISS $name"
 
     companion object {
-        fun validate(cookieStr: String?): CookieValidationResult {
+        fun validate(
+            cookieStr: String?,
+            sessionManager: app.acloudroid.qwq.data.session.SessionManager? = null
+        ): CookieValidationResult {
             if (cookieStr.isNullOrBlank()) {
                 return CookieValidationResult(
                     isValid = false,
@@ -122,8 +126,20 @@ data class CookieValidationResult(
             val hasPcsCloudKit = has(COOKIE_PCS_CLOUDKIT)
             val hasPcsPhotos = has(COOKIE_PCS_PHOTOS)
 
-            // A usable session requires the short-lived token AND the PCS-CloudKit key.
-            val isValid = hasAuthToken && hasPcsCloudKit
+            // Extract the actual token value to verify it hasn't been invalidated by 401/AUTH_EXPIRED
+            val tokenVal = cookieStr.split(';')
+                .asSequence()
+                .map { it.trim() }
+                .firstOrNull { it.startsWith("$COOKIE_AUTH_TOKEN=", ignoreCase = true) }
+                ?.substringAfter('=')
+                ?.trim()
+                ?.trim('"')
+
+            val isInvalidated = sessionManager?.isTokenInvalidated(tokenVal) == true
+
+            // A usable session requires the short-lived token AND the PCS-CloudKit key,
+            // and the token MUST NOT have been rejected by the server (invalidated).
+            val isValid = hasAuthToken && hasPcsCloudKit && !isInvalidated
 
             // Check for Max-Age or Expires hints if present
             var expiresSummary: String? = null
@@ -319,10 +335,11 @@ fun ICloudWebView(
                         }
                     }
 
+                    val sessionManager = context.appContainer().sessionManager
+
                     webViewClient = object : WebViewClient() {
                         override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                             super.onPageStarted(view, url, favicon)
-                            checkCookies("onPageStarted", url)
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {
@@ -338,7 +355,7 @@ fun ICloudWebView(
                         private fun checkCookies(source: String, pageUrl: String?) {
                             if (pageUrl == null) return
                             val raw = cookieManager.getCookie(pageUrl)
-                            val validation = CookieValidationResult.validate(raw)
+                            val validation = CookieValidationResult.validate(raw, sessionManager)
                             Log.d(AUTH_LOG_TAG, "checkCookies source=$source")
                             validation.logToLogcat(pageUrl)
 

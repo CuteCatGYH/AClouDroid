@@ -439,7 +439,9 @@
     <string name="settings_dialog_re_login_msg">將重置您的登入憑證並重新開啟登入頁面。本地照片資料庫和已下載檔案將被保留。</string>
     <string name="settings_dialog_re_login_confirm">確認</string>
 
-    <!-- Drive Download Errors -->
+    <!-- Drive Download & Network Errors -->
+    <string name="err_msg_network_timeout">網路連線逾時 (30s)，請檢查網路或代理設定</string>
+    <string name="err_msg_network_timeout_cn">網路連線逾時 (30s)。提示：雲上貴州節點 (icloud.com.cn) 可能會攔截海外 VPN 節點，請嘗試關閉 VPN 或為該功能設定直連規則重試。</string>
     <string name="drive_err_dl_generic">下載失敗</string>
     <string name="drive_err_dl_iwork">該檔案類型（如 iWork 包）暫不支援直接下載</string>
     <string name="drive_err_dl_auth">iCloud 登入憑證已過期，請重新登入</string>

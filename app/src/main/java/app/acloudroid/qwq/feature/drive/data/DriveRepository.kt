@@ -594,6 +594,8 @@ class DriveRepository(
                     if (!json.optBoolean("success", false)) {
                         val rawErr = json.optString("errorMessage", "")
                         val errMsg = if (rawErr.contains("AUTH_EXPIRED") || rawErr.contains("401")) {
+                            val deadToken = sessionManager.extractAuthTokenValue(cookieStr)
+                            sessionManager.invalidateToken(deadToken)
                             appContext.getString(app.acloudroid.qwq.R.string.auth_err_expired)
                         } else {
                             rawErr.ifBlank { appContext.getString(app.acloudroid.qwq.R.string.auth_err_session_init_failed) }

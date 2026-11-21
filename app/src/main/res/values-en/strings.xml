@@ -439,7 +439,9 @@
     <string name="settings_dialog_re_login_msg">This will reset your login credentials and re-open the login screen. Your local photo database and downloaded files will be preserved.</string>
     <string name="settings_dialog_re_login_confirm">Confirm</string>
 
-    <!-- Drive Download Errors -->
+    <!-- Drive Download & Network Errors -->
+    <string name="err_msg_network_timeout">Network request timed out (30s). Please check your connection or VPN/proxy settings.</string>
+    <string name="err_msg_network_timeout_cn">Network request timed out (30s). Hint: China Mainland endpoints (icloud.com.cn) may block overseas VPN proxies. Please turn off VPN or set a bypass rule for *.icloud.com.cn.</string>
     <string name="drive_err_dl_generic">Download failed</string>
     <string name="drive_err_dl_iwork">This file type (such as iWork packages) is currently not supported for direct download</string>
     <string name="drive_err_dl_auth">iCloud login credentials expired, please sign in again</string>

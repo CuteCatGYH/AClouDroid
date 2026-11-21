@@ -171,10 +171,14 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 showSessionExpiredAlert = showExpiredAlert || currentState.showSessionExpiredAlert
             )
         } else if (currentState is AuthUiState.Error) {
-            _uiState.value = AuthUiState.NotLoggedIn(
-                isChinaMainland = isChinaMainland,
-                showSessionExpiredAlert = true
-            )
+            viewModelScope.launch {
+                clearWebViewCookies()
+                sessionManager.clearSession()
+                _uiState.value = AuthUiState.NotLoggedIn(
+                    isChinaMainland = isChinaMainland,
+                    showSessionExpiredAlert = true
+                )
+            }
         }
     }
 
@@ -316,13 +320,23 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 } else {
                     val rawErr = json.optString("errorMessage", "")
-                    val errMsg = if (rawErr.contains("AUTH_EXPIRED") || rawErr.contains("401")) {
-                        getApplication<Application>().getString(app.acloudroid.qwq.R.string.auth_err_expired)
+                    Log.w(AUTH_LOG_TAG, "Go InitSession reported failure: $rawErr")
+                    if (rawErr.contains("AUTH_EXPIRED") || rawErr.contains("401") || rawErr.contains("421")) {
+                        Log.w(AUTH_LOG_TAG, "Auth expired during InitSession. Clearing dead cookies and returning to NotLoggedIn so user can authenticate...")
+                        val deadToken = sessionManager.extractAuthTokenValue(cookieStr)
+                        sessionManager.invalidateToken(deadToken)
+                        clearWebViewCookies()
+                        sessionManager.clearSession()
+                        _uiState.value = AuthUiState.NotLoggedIn(
+                            isChinaMainland = isChinaMainland,
+                            showSessionExpiredAlert = true
+                        )
                     } else {
-                        rawErr.ifBlank { getApplication<Application>().getString(app.acloudroid.qwq.R.string.auth_err_login_init_failed) }
+                        val errMsg = rawErr.ifBlank {
+                            getApplication<Application>().getString(app.acloudroid.qwq.R.string.auth_err_login_init_failed)
+                        }
+                        _uiState.value = AuthUiState.Error(errMsg, isChinaMainland)
                     }
-                    Log.w(AUTH_LOG_TAG, "Go InitSession reported failure: $errMsg")
-                    _uiState.value = AuthUiState.Error(errMsg, isChinaMainland)
                 }
             } catch (e: Exception) {
                 Log.e(AUTH_LOG_TAG, "Go InitSession threw", e)

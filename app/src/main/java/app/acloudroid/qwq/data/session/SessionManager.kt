@@ -64,6 +64,47 @@ class SessionManager(context: Context) {
 
     fun getCookieString(): String? = prefs.getString(KEY_COOKIE_STR, null)
 
+    @Volatile
+    private var invalidatedTokens: Set<String> = emptySet()
+
+    /**
+     * Marks a specific `X-APPLE-WEBAUTH-TOKEN` value as dead (rejected by server with AUTH_EXPIRED / 401).
+     * Once marked, [isTokenInvalidated] will return true for this token value, preventing
+     * [app.acloudroid.qwq.ui.auth.CookieValidationResult.validate] from treating it as valid.
+     */
+    fun invalidateToken(tokenVal: String?) {
+        if (!tokenVal.isNullOrBlank()) {
+            val clean = tokenVal.trim().trim('"')
+            if (clean.isNotBlank()) {
+                invalidatedTokens = invalidatedTokens + clean
+                android.util.Log.i("SessionManager", "Invalidated expired token (len=${clean.length})")
+            }
+        }
+    }
+
+    /**
+     * Checks if a given `X-APPLE-WEBAUTH-TOKEN` value is known to be dead/rejected by Apple server.
+     */
+    fun isTokenInvalidated(tokenVal: String?): Boolean {
+        if (tokenVal.isNullOrBlank()) return false
+        val clean = tokenVal.trim().trim('"')
+        return invalidatedTokens.contains(clean)
+    }
+
+    /**
+     * Extracts the raw `X-APPLE-WEBAUTH-TOKEN` value from a cookie string.
+     */
+    fun extractAuthTokenValue(cookieStr: String?): String? {
+        if (cookieStr.isNullOrBlank()) return null
+        return cookieStr.split(';')
+            .asSequence()
+            .map { it.trim() }
+            .firstOrNull { it.startsWith("X-APPLE-WEBAUTH-TOKEN=", ignoreCase = true) }
+            ?.substringAfter('=')
+            ?.trim()
+            ?.trim('"')
+    }
+
     /**
      * Attempts to read live cookies from Android's system [android.webkit.CookieManager] for the current region.
      *
@@ -82,7 +123,7 @@ class SessionManager(context: Context) {
 
         if (rawWebCookie.isNullOrBlank()) return null
 
-        val validation = app.acloudroid.qwq.ui.auth.CookieValidationResult.validate(rawWebCookie)
+        val validation = app.acloudroid.qwq.ui.auth.CookieValidationResult.validate(rawWebCookie, this)
         if (!validation.isValid) return null
 
         val currentStored = getCookieString()

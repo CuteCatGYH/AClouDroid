@@ -10,6 +10,7 @@ import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.acloudroid.qwq.IClouDroidApp
+import app.acloudroid.qwq.util.AppErrorFormatter
 import app.acloudroid.qwq.feature.photos.data.MediaStoreDownloader
 import app.acloudroid.qwq.feature.photos.data.MonthScanEngine
 import app.acloudroid.qwq.feature.photos.data.ScanProgress
@@ -396,6 +397,12 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
      * The walk is resumable and idempotent, so calling this after an interruption picks up where
      * it stopped rather than starting over.
      */
+    private fun formatError(raw: String?): String {
+        val app = getApplication<Application>()
+        val isChina = repository.sessionManager.isChinaMainland()
+        return AppErrorFormatter.formatError(raw, app, isChina)
+    }
+
     private fun startInitialLoad() {
         val app = getApplication<Application>()
         if (_isSyncing.value) return
@@ -406,7 +413,7 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 val zoneReady = repository.checkZoneReady()
                 if (zoneReady.isFailure) {
-                    val err = zoneReady.exceptionOrNull()?.message ?: app.getString(R.string.photos_msg_zone_not_ready)
+                    val err = formatError(zoneReady.exceptionOrNull()?.message ?: app.getString(R.string.photos_msg_zone_not_ready))
                     _syncMessage.value = app.getString(R.string.photos_msg_err_prefix, err)
                     Log.w(TAG, "checkZoneReady failed: $err")
                     return@launch
@@ -428,7 +435,7 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     Log.i(TAG, "Scan finished, complete=${progress.isComplete}, scanned=${progress.scanned}")
                 } else {
-                    val err = result.exceptionOrNull()?.message ?: "扫描出现异常"
+                    val err = formatError(result.exceptionOrNull()?.message)
                     _syncMessage.value = app.getString(R.string.photos_msg_scan_failed, err)
                     Log.w(TAG, "scanAll failed: $err")
                 }
@@ -438,7 +445,7 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
                     throw e
                 }
                 Log.e(TAG, "initial load exception", e)
-                _syncMessage.value = "异常: ${e.message}"
+                _syncMessage.value = app.getString(R.string.photos_msg_err_prefix, formatError(e.message))
             } finally {
                 _isSyncing.value = false
             }
@@ -463,7 +470,7 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 val zoneReady = repository.checkZoneReady()
                 if (zoneReady.isFailure) {
-                    val err = zoneReady.exceptionOrNull()?.message ?: app.getString(R.string.photos_msg_zone_not_ready)
+                    val err = formatError(zoneReady.exceptionOrNull()?.message ?: app.getString(R.string.photos_msg_zone_not_ready))
                     _syncMessage.value = app.getString(R.string.photos_msg_err_prefix, err)
                     return@launch
                 }
@@ -481,12 +488,12 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
                     }
                     Log.i(TAG, "Incremental sync finished, count=$count")
                 } else {
-                    val err = result.exceptionOrNull()?.message ?: "同步出现异常"
+                    val err = formatError(result.exceptionOrNull()?.message)
                     _syncMessage.value = app.getString(R.string.photos_msg_sync_failed, err)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "syncPhotos exception", e)
-                _syncMessage.value = app.getString(R.string.photos_msg_err_prefix, e.message)
+                _syncMessage.value = app.getString(R.string.photos_msg_err_prefix, formatError(e.message))
             } finally {
                 _isSyncing.value = false
             }
@@ -501,6 +508,7 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
      * than restarting.
      */
     fun startFullScan() {
+        val app = getApplication<Application>()
         if (_isSyncing.value) return
         _isSyncing.value = true
         _syncMessage.value = "正在扫描照片库..."
@@ -509,8 +517,8 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
             try {
                 val zoneReady = repository.checkZoneReady()
                 if (zoneReady.isFailure) {
-                    val err = zoneReady.exceptionOrNull()?.message ?: "PrimarySync 分区未就绪"
-                    _syncMessage.value = "错误: $err"
+                    val err = formatError(zoneReady.exceptionOrNull()?.message ?: "PrimarySync 分区未就绪")
+                    _syncMessage.value = app.getString(R.string.photos_msg_err_prefix, err)
                     return@launch
                 }
 
@@ -524,11 +532,11 @@ class PhotosViewModel(application: Application) : AndroidViewModel(application) 
                         _syncMessage.value = "已扫描 ${progress.scanned} 项，稍后自动继续"
                     }
                 } else {
-                    _syncMessage.value = "扫描失败: ${result.exceptionOrNull()?.message}"
+                    _syncMessage.value = "扫描失败: ${formatError(result.exceptionOrNull()?.message)}"
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "startFullScan exception", e)
-                _syncMessage.value = "异常: ${e.message}"
+                _syncMessage.value = app.getString(R.string.photos_msg_err_prefix, formatError(e.message))
             } finally {
                 _isSyncing.value = false
             }

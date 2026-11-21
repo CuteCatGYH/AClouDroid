@@ -178,6 +178,16 @@ internal fun classifyCoreResponse(jsonStr: String): CoreError {
         if (message.contains("PrimarySync zone not found")) {
             return CoreError(CoreErrorKind.ZONE_MISSING, httpStatus, message)
         }
+        if (message.contains("context deadline exceeded", ignoreCase = true) ||
+            message.contains("Client.Timeout", ignoreCase = true) ||
+            message.contains("timeout", ignoreCase = true) ||
+            message.contains("connection refused", ignoreCase = true) ||
+            message.contains("dial tcp", ignoreCase = true) ||
+            message.contains("no such host", ignoreCase = true) ||
+            message.contains("network is unreachable", ignoreCase = true)
+        ) {
+            return CoreError(CoreErrorKind.TIMEOUT, httpStatus, message)
+        }
 
         CoreError(CoreErrorKind.UNKNOWN, httpStatus, message)
     } catch (e: Exception) {
@@ -220,7 +230,7 @@ data class LocalUploadResult(
 
 class PhotoRepository(
     private val database: PhotoDatabase,
-    private val sessionManager: SessionManager,
+    val sessionManager: SessionManager,
     /**
      * Read for [monthCoverEnabled] only.
      *
@@ -584,6 +594,8 @@ class PhotoRepository(
                 if (!success) {
                     val rawErr = json.optString("errorMessage", "")
                     val errMsg = if (rawErr.contains("AUTH_EXPIRED") || rawErr.contains("401")) {
+                        val deadToken = sessionManager.extractAuthTokenValue(cookieStr)
+                        sessionManager.invalidateToken(deadToken)
                         appContext.getString(app.acloudroid.qwq.R.string.auth_err_expired)
                     } else {
                         rawErr.ifBlank { appContext.getString(app.acloudroid.qwq.R.string.auth_err_session_init_failed) }
@@ -1667,12 +1679,11 @@ class PhotoRepository(
                 Log.w(TAG, "fetchMetadata failed (${classified.kind}): ${classified.message}")
                 return@withContext Result.failure(
                     Exception(
-                        when (classified.kind) {
-                            CoreErrorKind.TIMEOUT, CoreErrorKind.NETWORK ->
-                                "网络请求失败，请检查网络后重试"
-                            CoreErrorKind.RATE_LIMITED -> "请求过于频繁，请稍后重试"
-                            else -> classified.message.ifBlank { "获取照片信息失败" }
-                        }
+                        app.acloudroid.qwq.util.AppErrorFormatter.formatError(
+                            classified.message,
+                            appContext,
+                            sessionManager.isChinaMainland()
+                        )
                     )
                 )
             }
