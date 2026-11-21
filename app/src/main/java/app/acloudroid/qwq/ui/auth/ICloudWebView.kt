@@ -174,6 +174,19 @@ data class PhotoCounts(val photos: Int, val videos: Int) {
     val total: Int get() = photos + videos
 }
 
+fun parseJsStringResult(raw: String?): String? {
+    if (raw.isNullOrBlank() || raw == "null" || raw == "\"null\"") return null
+    return try {
+        if (raw.startsWith("\"") && raw.endsWith("\"")) {
+            org.json.JSONTokener(raw).nextValue() as? String
+        } else {
+            raw
+        }
+    } catch (e: Exception) {
+        null
+    }
+}
+
 /**
  * Parses the JSON that the count-scraping snippet returns.
  *
@@ -345,6 +358,61 @@ fun ICloudWebView(
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
                             checkCookies("onPageFinished", url)
+
+                            val scrapeJs = """
+                                (function () {
+                                  try {
+                                    var selectors = [
+                                      '[class*="user-avatar"] img',
+                                      '[class*="profile-picture"] img',
+                                      '[class*="account-menu"] img',
+                                      '[data-test-id*="account"] img',
+                                      '[data-test-id*="avatar"] img',
+                                      '[class*="account-card"] img',
+                                      'ui-avatar img',
+                                      '[class*="avatar"] img'
+                                    ];
+                                    for (var s = 0; s < selectors.length; s++) {
+                                      var el = document.querySelector(selectors[s]);
+                                      if (el && el.src) {
+                                        var src = el.src;
+                                        if (!src.includes('cvws') && !src.includes('icloud-content') && !src.includes('svg') && !src.includes('icon')) {
+                                          return src;
+                                        }
+                                      }
+                                    }
+                                    var bgContainers = document.querySelectorAll('[class*="avatar"], [class*="profile"], [class*="account"]');
+                                    for (var b = 0; b < bgContainers.length; b++) {
+                                      var style = window.getComputedStyle(bgContainers[b]);
+                                      var bg = style ? style.backgroundImage : '';
+                                      if (bg && bg.includes('url(')) {
+                                        var m = bg.match(/url\(["']?(.*?)["']?\)/);
+                                        if (m && m[1] && !m[1].includes('cvws') && !m[1].includes('icloud-content') && !m[1].includes('svg') && !m[1].includes('icon')) {
+                                          return m[1];
+                                        }
+                                      }
+                                    }
+                                    var allImgs = Array.from(document.querySelectorAll('img'));
+                                    for (var i = 0; i < allImgs.length; i++) {
+                                      var url = allImgs[i].src || '';
+                                      if (url && url.startsWith('http') && !url.includes('cvws') && !url.includes('icloud-content') && !url.includes('svg') && !url.includes('icon') && !url.includes('logo')) {
+                                        if (url.includes('avatar') || url.includes('profile') || url.includes('blob:') || url.includes('data:image')) {
+                                          return url;
+                                        }
+                                      }
+                                    }
+                                    return null;
+                                  } catch (e) { return null; }
+                                })()
+                            """.trimIndent()
+
+                            view?.evaluateJavascript(scrapeJs) { raw ->
+                                val cleanUrl = parseJsStringResult(raw)
+                                if (!cleanUrl.isNullOrBlank()) {
+                                    Log.i(AUTH_LOG_TAG, "Scraped user avatar URL from web page: $cleanUrl")
+                                    sessionManager.saveUserAvatarUrl(cleanUrl, context)
+                                }
+                            }
                         }
 
                         override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {

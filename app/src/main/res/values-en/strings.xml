@@ -47,6 +47,9 @@
     <string name="theme_dynamic_color">Dynamic Color</string>
     <string name="theme_dynamic_color_desc">Extract palette from wallpaper (Android 12+)</string>
     <string name="theme_dynamic_color_unsupported">Not supported on this Android version</string>
+    <string name="settings_item_show_account_avatar">Show Account Avatar</string>
+    <string name="settings_item_show_account_avatar_desc_on">Display avatar or initials on top bar account button</string>
+    <string name="settings_item_show_account_avatar_desc_off">Display default vector icon on top bar account button</string>
 
     <!-- Common Actions -->
     <string name="action_confirm">OK</string>

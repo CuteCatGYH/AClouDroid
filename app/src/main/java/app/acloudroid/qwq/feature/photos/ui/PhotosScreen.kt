@@ -121,6 +121,35 @@ fun PhotosScreen(
     val viewMode by viewModel.galleryViewMode.collectAsStateWithLifecycle()
     val monthCoverEnabled by viewModel.monthCoverEnabled.collectAsStateWithLifecycle()
 
+    val container = remember(context) { (context.applicationContext as app.acloudroid.qwq.IClouDroidApp).container }
+    val settings = container.appSettings
+    val showAccountAvatar by settings.showAccountAvatar.collectAsStateWithLifecycle()
+
+    var accountDetails by remember { mutableStateOf(app.acloudroid.qwq.ui.auth.UserAccountDetails.EMPTY) }
+
+    LaunchedEffect(isSyncing) {
+        // Background silent extraction if 30-day cache is expired or missing
+        app.acloudroid.qwq.ui.auth.SilentAvatarExtractor.extractIfDue(context, container.sessionManager)
+
+        val json = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                com.getup.icloudcore.Icloudcore.getAccountInfoJSON()
+            } catch (_: Exception) {
+                ""
+            }
+        }
+        val localPath = container.sessionManager.getLocalAvatarPath(context)
+        val storedAvatarUrl = localPath ?: container.sessionManager.getUserAvatarUrl()
+        var parsed = app.acloudroid.qwq.ui.auth.UserAccountDetails.fromAccountInfoJson(json, storedAvatarUrl)
+        if (parsed == app.acloudroid.qwq.ui.auth.UserAccountDetails.EMPTY) {
+            val dsid = container.sessionManager.getDsid() ?: ""
+            if (dsid.isNotBlank()) {
+                parsed = app.acloudroid.qwq.ui.auth.UserAccountDetails(dsid = dsid, photoUrl = storedAvatarUrl ?: "")
+            }
+        }
+        accountDetails = parsed
+    }
+
     val configuration = LocalConfiguration.current
     val screenWidthDp = configuration.screenWidthDp
 
@@ -297,11 +326,15 @@ fun PhotosScreen(
                     }
 
                     IconButton(onClick = onOpenAccountInfo) {
-                        Icon(
-                            imageVector = Icons.Default.AccountCircle,
-                            contentDescription = stringResource(R.string.photos_action_account),
-                            tint = MaterialTheme.colorScheme.onSurface
-                        )
+                        if (showAccountAvatar) {
+                            AccountAvatarContent(accountDetails = accountDetails)
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.AccountCircle,
+                                contentDescription = stringResource(R.string.photos_action_account),
+                                tint = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -942,4 +975,52 @@ private fun PinchColumnIndicator(
         }
     }
 }
+
+@Composable
+private fun AccountAvatarContent(
+    accountDetails: app.acloudroid.qwq.ui.auth.UserAccountDetails,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val imageRequest = remember(accountDetails.photoUrl) {
+        if (accountDetails.photoUrl.isNotBlank()) {
+            coil.request.ImageRequest.Builder(context)
+                .data(accountDetails.photoUrl)
+                .addHeader("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+                .crossfade(true)
+                .build()
+        } else null
+    }
+
+    Surface(
+        shape = CircleShape,
+        color = MaterialTheme.colorScheme.primaryContainer,
+        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        modifier = modifier.size(28.dp)
+    ) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            if (imageRequest != null) {
+                coil.compose.AsyncImage(
+                    model = imageRequest,
+                    contentDescription = stringResource(R.string.photos_action_account),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape)
+                )
+            } else {
+                Text(
+                    text = accountDetails.getInitials(),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+        }
+    }
+}
+
 

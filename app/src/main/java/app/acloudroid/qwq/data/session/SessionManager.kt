@@ -4,6 +4,9 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class SessionManager(context: Context) {
 
@@ -55,11 +58,14 @@ class SessionManager(context: Context) {
         }
     }
 
-    fun clearSession() {
+    fun clearSession(context: Context? = null) {
         val currentRegion = isChinaMainland()
         prefs.edit().clear().apply()
         setChinaMainland(currentRegion)
         cachedSessionGeneration = null
+        if (context != null) {
+            clearAvatarCache(context)
+        }
     }
 
     fun getCookieString(): String? = prefs.getString(KEY_COOKIE_STR, null)
@@ -146,6 +152,89 @@ class SessionManager(context: Context) {
         prefs.edit().putBoolean(KEY_HAS_SHOWN_CHINA_UPLOAD_NOTICE, shown).apply()
     }
 
+    fun saveUserAvatarUrl(url: String?, context: Context) {
+        if (url.isNullOrBlank()) return
+        val clean = url.trim()
+
+        prefs.edit().apply {
+            putString(KEY_USER_AVATAR_URL, clean)
+            putLong(KEY_AVATAR_LAST_UPDATED, System.currentTimeMillis())
+            apply()
+        }
+
+        downloadAndCacheAvatarImage(context, clean)
+    }
+
+    fun getUserAvatarUrl(): String? = prefs.getString(KEY_USER_AVATAR_URL, null)
+
+    fun getAvatarFile(context: Context): java.io.File {
+        return java.io.File(context.cacheDir, "user_avatar_cache.png")
+    }
+
+    fun isAvatarExpired(context: Context, maxAgeMs: Long = 30L * 24 * 3600 * 1000): Boolean {
+        val lastUpdated = prefs.getLong(KEY_AVATAR_LAST_UPDATED, 0L)
+        val file = getAvatarFile(context)
+        if (!file.exists() || file.length() <= 500) return true
+        return (System.currentTimeMillis() - lastUpdated) > maxAgeMs
+    }
+
+    fun downloadAndCacheAvatarImage(context: Context, imageUrl: String) {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                val targetFile = getAvatarFile(context)
+                val tempFile = java.io.File(context.cacheDir, "user_avatar_cache.tmp")
+
+                val cookieStr = getCookieString()
+                val isChina = isChinaMainland()
+                val origin = if (isChina) "https://www.icloud.com.cn" else "https://www.icloud.com"
+
+                val reqBuilder = okhttp3.Request.Builder()
+                    .url(imageUrl)
+                    .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+                    .header("Origin", origin)
+                    .header("Referer", "$origin/")
+
+                if (!cookieStr.isNullOrBlank()) {
+                    reqBuilder.header("Cookie", cookieStr)
+                }
+
+                val client = okhttp3.OkHttpClient()
+                val resp = client.newCall(reqBuilder.build()).execute()
+                if (resp.isSuccessful) {
+                    val bytes = resp.body?.bytes()
+                    if (bytes != null && bytes.size > 200) {
+                        val isImage = (bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte()) ||
+                                      (bytes[0] == 0x89.toByte() && bytes[1] == 'P'.code.toByte()) ||
+                                      (bytes[0] == 'R'.code.toByte() && bytes[1] == 'I'.code.toByte())
+                        if (isImage) {
+                            tempFile.writeBytes(bytes)
+                            if (targetFile.exists()) targetFile.delete()
+                            tempFile.renameTo(targetFile)
+                            android.util.Log.i("SessionManager", "Successfully downloaded avatar image to local cache (${targetFile.length()} bytes)")
+                        } else {
+                            android.util.Log.w("SessionManager", "Avatar response was not an image (head=${bytes.take(8).joinToString("") { "%02x".format(it) }})")
+                        }
+                    }
+                } else {
+                    android.util.Log.w("SessionManager", "Avatar download HTTP error: ${resp.code}")
+                }
+            } catch (e: Exception) {
+                android.util.Log.w("SessionManager", "Failed to cache avatar image locally: ${e.message}")
+            }
+        }
+    }
+
+    fun getLocalAvatarPath(context: Context): String? {
+        val file = getAvatarFile(context)
+        return if (file.exists() && file.length() > 500) file.absolutePath else null
+    }
+
+    fun clearAvatarCache(context: Context) {
+        prefs.edit().remove(KEY_USER_AVATAR_URL).remove(KEY_AVATAR_LAST_UPDATED).apply()
+        val file = getAvatarFile(context)
+        if (file.exists()) file.delete()
+    }
+
     fun getDsid(): String? = prefs.getString(KEY_DSID, null)
 
     fun getCkDatabaseUrl(): String? = prefs.getString(KEY_CK_DB_URL, null)
@@ -187,5 +276,7 @@ class SessionManager(context: Context) {
         private const val KEY_IS_LOGGED_IN = "is_logged_in"
         private const val KEY_SESSION_GENERATION = "session_generation"
         private const val KEY_HAS_SHOWN_CHINA_UPLOAD_NOTICE = "has_shown_china_upload_notice"
+        private const val KEY_USER_AVATAR_URL = "user_avatar_url"
+        private const val KEY_AVATAR_LAST_UPDATED = "avatar_last_updated"
     }
 }

@@ -49,6 +49,9 @@
     <string name="theme_dynamic_color">Monet 动态色彩</string>
     <string name="theme_dynamic_color_desc">从系统壁纸提取主色调 (Android 12+)</string>
     <string name="theme_dynamic_color_unsupported">当前系统版本不支持</string>
+    <string name="settings_item_show_account_avatar">显示账号头像</string>
+    <string name="settings_item_show_account_avatar_desc_on">在顶栏账号按钮显示当前登录账号的头像或首字母</string>
+    <string name="settings_item_show_account_avatar_desc_off">在顶栏账号按钮显示默认矢量图标</string>
 
     <!-- Common Actions -->
     <string name="action_confirm">确定</string>

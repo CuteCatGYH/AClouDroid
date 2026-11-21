@@ -112,6 +112,7 @@ fun SettingsScreen(
     val customDays by settings.customIntervalDays.collectAsStateWithLifecycle()
     val themeMode by settings.themeMode.collectAsStateWithLifecycle()
     val useDynamicColor by settings.useDynamicColor.collectAsStateWithLifecycle()
+    val showAccountAvatar by settings.showAccountAvatar.collectAsStateWithLifecycle()
     val monthCoverEnabled by settings.monthCoverEnabled.collectAsStateWithLifecycle()
     val navBarDestinations by settings.navBarDestinations.collectAsStateWithLifecycle()
     val allowCellularUpload by settings.allowCellularUpload.collectAsStateWithLifecycle()
@@ -242,6 +243,7 @@ fun SettingsScreen(
                                     appLanguage = appLanguage,
                                     themeMode = themeMode,
                                     useDynamicColor = useDynamicColor,
+                                    showAccountAvatar = showAccountAvatar,
                                     monthCoverEnabled = monthCoverEnabled,
                                     navBarDestinations = navBarDestinations,
                                     allowCellularUpload = allowCellularUpload,
@@ -431,6 +433,7 @@ private fun SettingsRow(
     appLanguage: AppLanguage,
     themeMode: ThemeMode,
     useDynamicColor: Boolean,
+    showAccountAvatar: Boolean,
     monthCoverEnabled: Boolean,
     navBarDestinations: Set<app.acloudroid.qwq.ui.navigation.AppDestination>,
     allowCellularUpload: Boolean,
@@ -875,6 +878,31 @@ private fun SettingsRow(
                     onCheckedChange = { settings.setUseDynamicColor(it) }
                 )
             }
+        }
+
+        SettingsItem.SHOW_ACCOUNT_AVATAR -> Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.settings_item_show_account_avatar),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = if (showAccountAvatar) stringResource(R.string.settings_item_show_account_avatar_desc_on) else stringResource(R.string.settings_item_show_account_avatar_desc_off),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Switch(
+                checked = showAccountAvatar,
+                onCheckedChange = { settings.setShowAccountAvatar(it) }
+            )
         }
 
         SettingsItem.MONTH_COVER_PREVIEW -> Row(

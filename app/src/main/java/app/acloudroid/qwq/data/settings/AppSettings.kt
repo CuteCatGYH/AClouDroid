@@ -89,6 +89,16 @@ class AppSettings(context: Context) {
         _useDynamicColor.value = value
     }
 
+    private val _showAccountAvatar = MutableStateFlow(
+        prefs.getBoolean(KEY_SHOW_ACCOUNT_AVATAR, true)
+    )
+    val showAccountAvatar: StateFlow<Boolean> = _showAccountAvatar.asStateFlow()
+
+    fun setShowAccountAvatar(value: Boolean) {
+        prefs.edit { putBoolean(KEY_SHOW_ACCOUNT_AVATAR, value) }
+        _showAccountAvatar.value = value
+    }
+
     // ---------------------------------------------------------------------------------------
     // Language
     // ---------------------------------------------------------------------------------------
@@ -374,6 +384,7 @@ class AppSettings(context: Context) {
         private const val PREFS_NAME = "icloud_droid_settings"
         private const val KEY_THEME_MODE = "theme_mode"
         private const val KEY_USE_DYNAMIC_COLOR = "use_dynamic_color"
+        private const val KEY_SHOW_ACCOUNT_AVATAR = "show_account_avatar"
         private const val KEY_GALLERY_VIEW_MODE = "gallery_view_mode"
         private const val KEY_SCAN_FREQUENCY = "scan_frequency"
         private const val KEY_CUSTOM_INTERVAL_DAYS = "custom_interval_days"

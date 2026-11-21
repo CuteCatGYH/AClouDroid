@@ -11,6 +11,7 @@ enum class SettingsItem {
     APP_LANGUAGE,
     THEME_MODE,
     DYNAMIC_COLOR,
+    SHOW_ACCOUNT_AVATAR,
     CLOUD_MEDIA_PROVIDER,
     FULL_SCAN,
     DOWNLOAD_ALL,
@@ -60,7 +61,7 @@ object SettingsCatalog {
         SettingsGroup(
             titleRes = R.string.settings_group_appearance,
             descriptionRes = R.string.settings_group_appearance_desc,
-            items = listOf(SettingsItem.APP_LANGUAGE, SettingsItem.THEME_MODE, SettingsItem.DYNAMIC_COLOR)
+            items = listOf(SettingsItem.APP_LANGUAGE, SettingsItem.THEME_MODE, SettingsItem.DYNAMIC_COLOR, SettingsItem.SHOW_ACCOUNT_AVATAR)
         ),
         SettingsGroup(
             titleRes = R.string.settings_group_system_integration,

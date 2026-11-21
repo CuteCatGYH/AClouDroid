@@ -47,6 +47,9 @@
     <string name="theme_dynamic_color">Monet 動態色彩</string>
     <string name="theme_dynamic_color_desc">從系統桌布擷取主色調 (Android 12+)</string>
     <string name="theme_dynamic_color_unsupported">目前系統版本不支援</string>
+    <string name="settings_item_show_account_avatar">顯示帳號頭像</string>
+    <string name="settings_item_show_account_avatar_desc_on">在頂部列帳號按鈕顯示目前登入帳號的頭像或首字母</string>
+    <string name="settings_item_show_account_avatar_desc_off">在頂部列帳號按鈕顯示預設向量圖示</string>
 
     <!-- Common Actions -->
     <string name="action_confirm">確定</string>
