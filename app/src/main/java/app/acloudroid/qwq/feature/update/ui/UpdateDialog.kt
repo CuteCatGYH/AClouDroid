@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.acloudroid.qwq.feature.update.data.ReleaseInfo
+import app.acloudroid.qwq.ui.component.MarkdownText
 
 /**
  * Dialog displaying update notes and action button to open GitHub release page in browser.
@@ -58,7 +59,7 @@ fun UpdateDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 280.dp)
+                    .heightIn(max = 360.dp)
                     .verticalScroll(rememberScrollState())
             ) {
                 if (releaseInfo.publishedAt.isNotBlank()) {
@@ -75,12 +76,19 @@ fun UpdateDialog(
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = releaseInfo.releaseNotes.ifBlank { stringResource(R.string.update_dialog_no_notes) },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Spacer(modifier = Modifier.height(6.dp))
+                if (releaseInfo.releaseNotes.isNotBlank()) {
+                    MarkdownText(
+                        markdown = releaseInfo.releaseNotes,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.update_dialog_no_notes),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         },
         shape = RoundedCornerShape(24.dp)
