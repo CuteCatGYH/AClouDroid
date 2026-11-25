@@ -1233,6 +1233,116 @@ private fun <T> DropdownRow(
     }
 }
 
+private fun isXiaomiDevice(): Boolean {
+    val manufacturer = Build.MANUFACTURER.lowercase()
+    val brand = Build.BRAND.lowercase()
+    return manufacturer.contains("xiaomi") || brand.contains("xiaomi") ||
+           brand.contains("redmi") || brand.contains("poco")
+}
+
+@Composable
+private fun XiaomiPhotoPickerNoticeDialog(
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val rootCommand = stringResource(R.string.xiaomi_privacy_root_cmd)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = stringResource(R.string.xiaomi_privacy_dialog_title),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
+                app.acloudroid.qwq.ui.component.MarkdownText(
+                    markdown = stringResource(R.string.xiaomi_privacy_dialog_desc)
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                Text(
+                    text = stringResource(R.string.xiaomi_privacy_step1_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(4.dp))
+                Image(
+                    painter = painterResource(R.drawable.xiaomi_privacy_step1),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp)),
+                    contentScale = androidx.compose.ui.layout.ContentScale.FillWidth
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                Text(
+                    text = stringResource(R.string.xiaomi_privacy_step2_desc),
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(Modifier.height(4.dp))
+                Image(
+                    painter = painterResource(R.drawable.xiaomi_privacy_step2),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp)),
+                    contentScale = androidx.compose.ui.layout.ContentScale.FillWidth
+                )
+
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(12.dp))
+
+                app.acloudroid.qwq.ui.component.MarkdownText(
+                    markdown = stringResource(R.string.xiaomi_privacy_root_notice_desc)
+                )
+
+                Spacer(Modifier.height(6.dp))
+
+                app.acloudroid.qwq.ui.component.MarkdownText(
+                    markdown = "```bash\n$rootCommand\n```"
+                )
+
+                Spacer(Modifier.height(6.dp))
+
+                TextButton(
+                    onClick = {
+                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        val clip = android.content.ClipData.newPlainText("Root Command", rootCommand)
+                        clipboard.setPrimaryClip(clip)
+                        android.widget.Toast.makeText(
+                            context,
+                            context.getString(R.string.xiaomi_privacy_cmd_copied),
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.xiaomi_privacy_btn_copy_cmd))
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) {
+                Text(stringResource(R.string.xiaomi_privacy_btn_confirm))
+            }
+        }
+    )
+}
+
 @Composable
 private fun CloudMediaActivationDialog(
     onDismiss: () -> Unit,
@@ -1245,6 +1355,16 @@ private fun CloudMediaActivationDialog(
     var activationStatus by remember { mutableStateOf<String?>(null) }
     var isShizukuRunning by remember { mutableStateOf(app.acloudroid.qwq.provider.ShizukuMediaHelper.isShizukuAvailable()) }
     var hasPermission by remember { mutableStateOf(app.acloudroid.qwq.provider.ShizukuMediaHelper.hasShizukuPermission()) }
+    var showXiaomiNoticeDialog by remember { mutableStateOf(false) }
+
+    if (showXiaomiNoticeDialog) {
+        XiaomiPhotoPickerNoticeDialog(
+            onDismiss = {
+                showXiaomiNoticeDialog = false
+                onDismiss()
+            }
+        )
+    }
 
     androidx.compose.runtime.DisposableEffect(Unit) {
         val binderListener = rikka.shizuku.Shizuku.OnBinderReceivedListener {
@@ -1331,9 +1451,16 @@ private fun CloudMediaActivationDialog(
                             scope.launch {
                                 val result = app.acloudroid.qwq.provider.ShizukuMediaHelper.executeActivation()
                                 isActivating = false
-                                activationStatus = result.fold(
-                                    onSuccess = { it },
-                                    onFailure = { context.getString(R.string.settings_cloud_media_failed, it.message) }
+                                result.fold(
+                                    onSuccess = { msg ->
+                                        activationStatus = msg
+                                        if (isXiaomiDevice()) {
+                                            showXiaomiNoticeDialog = true
+                                        }
+                                    },
+                                    onFailure = { err ->
+                                        activationStatus = context.getString(R.string.settings_cloud_media_failed, err.message)
+                                    }
                                 )
                             }
                         }

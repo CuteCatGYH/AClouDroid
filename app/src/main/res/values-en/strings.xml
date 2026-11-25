@@ -641,4 +641,15 @@
     <string name="backup_perm_location_denied_confirm">Got It</string>
     <string name="backup_perm_location_banner">Location permission not granted; backups will lose GPS metadata</string>
     <string name="backup_perm_location_banner_btn">Grant</string>
+
+    <!-- Xiaomi PhotoPicker Guidance Dialog -->
+    <string name="xiaomi_privacy_dialog_title">Xiaomi System Notice</string>
+    <string name="xiaomi_privacy_dialog_desc">Xiaomi HyperOS / MIUI PhotoPicker enables privacy protection (erase location/metadata) by default. Due to a vendor component issue, downloading cloud photos gets stuck at 0% when confirmed.\n\n**Solution**: Please turn off both \"Erase photo location\" and \"Erase photo metadata\" in the picker settings:</string>
+    <string name="xiaomi_privacy_step1_desc">Step 1: Tap the settings icon at top-right of PhotoPicker</string>
+    <string name="xiaomi_privacy_step2_desc">Step 2: Turn off \"Erase photo location\" and \"Erase photo metadata\"</string>
+    <string name="xiaomi_privacy_root_notice_desc">If your device has root privileges, you can enable Xiaomi\'s hidden Cloud Media Provider settings entry via:</string>
+    <string name="xiaomi_privacy_root_cmd">adb shell su -c \'pm enable com.android.providers.media.module/com.android.providers.media.photopicker.PhotoPickerSettingsActivity\'</string>
+    <string name="xiaomi_privacy_btn_copy_cmd">Copy Root Command</string>
+    <string name="xiaomi_privacy_cmd_copied">Root command copied to clipboard</string>
+    <string name="xiaomi_privacy_btn_confirm">Got It</string>
 </resources>

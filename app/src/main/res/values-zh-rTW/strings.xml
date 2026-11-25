@@ -641,4 +641,15 @@
     <string name="backup_perm_location_denied_confirm">知道了</string>
     <string name="backup_perm_location_banner">未授予定位資訊權限，備份將丟失 GPS</string>
     <string name="backup_perm_location_banner_btn">授權</string>
+
+    <!-- Xiaomi PhotoPicker Guidance Dialog -->
+    <string name="xiaomi_privacy_dialog_title">小米系統特別提示</string>
+    <string name="xiaomi_privacy_dialog_desc">小米 HyperOS / MIUI 系統的「安全訪問」選圖彈窗預設開啟了隱私保護（抹去位置/拍攝資訊）。由於系統選圖組件預處理組件缺陷，選圖確認時會導致下載進度卡在 0%。\n\n**解決方法**：請在選圖彈窗中關閉「抹去照片位置」和「抹去照片拍攝資訊」開關：</string>
+    <string name="xiaomi_privacy_step1_desc">步驟 1：點擊選圖彈窗右上角設定圖示</string>
+    <string name="xiaomi_privacy_step2_desc">步驟 2：關閉「抹去照片位置」與「抹去照片拍攝資訊」</string>
+    <string name="xiaomi_privacy_root_notice_desc">如果你的設備具有 root 權限，透過以下命令開啟被小米隱藏的雲端媒體選擇器設定入口：</string>
+    <string name="xiaomi_privacy_root_cmd">adb shell su -c \'pm enable com.android.providers.media.module/com.android.providers.media.photopicker.PhotoPickerSettingsActivity\'</string>
+    <string name="xiaomi_privacy_btn_copy_cmd">複製 Root 命令</string>
+    <string name="xiaomi_privacy_cmd_copied">已複製 Root 命令至剪貼簿</string>
+    <string name="xiaomi_privacy_btn_confirm">我知道了</string>
 </resources>

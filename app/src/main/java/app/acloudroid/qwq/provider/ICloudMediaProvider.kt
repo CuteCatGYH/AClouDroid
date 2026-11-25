@@ -375,9 +375,11 @@ class ICloudMediaProvider : CloudMediaProvider() {
         extras: Bundle?,
         signal: CancellationSignal?
     ): ParcelFileDescriptor {
+        Log.d(TAG, "onOpenMedia ENTER media=$mediaId extras=$extras canceled=${signal?.isCanceled}")
         val mediaFile = getOrDownloadMediaFile(mediaId, signal)
             ?: throw FileNotFoundException("Media not found for $mediaId")
 
+        Log.d(TAG, "onOpenMedia OK media=$mediaId file=${mediaFile.name} size=${mediaFile.length()}")
         return ParcelFileDescriptor.open(mediaFile, ParcelFileDescriptor.MODE_READ_ONLY)
     }
 
@@ -719,35 +721,49 @@ class ICloudMediaProvider : CloudMediaProvider() {
 
     private fun getOrDownloadMediaFile(mediaId: String, signal: CancellationSignal?): File? = runBlocking {
         withContext(Dispatchers.IO) {
+            Log.d(TAG, "getOrDownloadMediaFile START mediaId=$mediaId")
             val mediaDir = File(context?.cacheDir, "cmp_media").apply { mkdirs() }
             val targetFile = File(mediaDir, "$mediaId.full")
             if (targetFile.exists() && targetFile.length() > 0) {
+                Log.d(TAG, "getOrDownloadMediaFile CACHED mediaId=$mediaId file=${targetFile.name} bytes=${targetFile.length()}")
                 return@withContext targetFile
             }
 
-            val appContainer = container ?: return@withContext null
+            val appContainer = container ?: run {
+                Log.w(TAG, "getOrDownloadMediaFile NO AppContainer mediaId=$mediaId")
+                return@withContext null
+            }
             val db = appContainer.photoDatabase
-            val asset = db.photoDao().getPhotoById(mediaId) ?: return@withContext null
+            val asset = db.photoDao().getPhotoById(mediaId) ?: run {
+                Log.w(TAG, "getOrDownloadMediaFile NO DB ROW mediaId=$mediaId")
+                return@withContext null
+            }
 
             var mediaUrl = asset.originalUrl ?: asset.medUrl ?: asset.thumbUrl
             val ageMs = System.currentTimeMillis() - asset.urlFetchedAt
             if (mediaUrl.isNullOrBlank() || ageMs > 12 * 60 * 1000L) {
+                Log.d(TAG, "getOrDownloadMediaFile REFRESHING URL mediaId=$mediaId ageMs=$ageMs masterId=${asset.masterId}")
                 val refreshRes = appContainer.photoRepository.refreshUrlsForMaster(asset.masterId)
                 if (refreshRes.isSuccess) {
                     val fresh = refreshRes.getOrNull()
                     mediaUrl = fresh?.originalUrl ?: fresh?.medUrl ?: fresh?.thumbUrl
+                    Log.d(TAG, "getOrDownloadMediaFile REFRESH OK mediaId=$mediaId urlHost=${hostOf(mediaUrl)}")
+                } else {
+                    Log.w(TAG, "getOrDownloadMediaFile REFRESH FAILED mediaId=$mediaId err=${refreshRes.exceptionOrNull()?.message}")
                 }
             }
 
-            if (mediaUrl.isNullOrBlank()) return@withContext null
+            if (mediaUrl.isNullOrBlank()) {
+                Log.w(TAG, "getOrDownloadMediaFile NO MEDIA URL mediaId=$mediaId")
+                return@withContext null
+            }
 
-            // The full-size transfer is synchronous on purpose: unlike previews, the picker keeps
-            // the binder call open until the bytes are handed to the requesting app, so there is
-            // nothing to gain by returning early.
+            Log.d(TAG, "getOrDownloadMediaFile DOWNLOADING mediaId=$mediaId host=${hostOf(mediaUrl)}")
             if (!downloadToFile(mediaUrl, targetFile)) {
                 Log.w(TAG, "openMedia download failed media=$mediaId")
                 null
             } else {
+                Log.d(TAG, "getOrDownloadMediaFile DOWNLOAD OK mediaId=$mediaId bytes=${targetFile.length()}")
                 targetFile
             }
         }
