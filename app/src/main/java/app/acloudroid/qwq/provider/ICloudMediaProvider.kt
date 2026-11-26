@@ -326,7 +326,7 @@ class ICloudMediaProvider : CloudMediaProvider() {
         var previewFile: File? = null
         if (isVideo) {
             previewFile = try {
-                getOrDownloadMediaFile(mediaId, signal)
+                getVideoPreviewFile(mediaId)
             } catch (e: Exception) {
                 Log.w(TAG, "openPreview video fetch failed media=$mediaId", e)
                 null
@@ -719,7 +719,63 @@ class ICloudMediaProvider : CloudMediaProvider() {
         }
     }
 
-    private fun getOrDownloadMediaFile(mediaId: String, signal: CancellationSignal?): File? = runBlocking {
+    /**
+     * Video container for a grid tile, bounded so it can never starve the process.
+     *
+     * The previous path downloaded the full video on the binder thread and the shared
+     * `Dispatchers.IO` with no size cap. Scrolling into early years (dense with videos) produced
+     * 100 MB - 1.3 GB transfers, several of them concurrently for the same file; those blocked
+     * every IO thread, so `/records/lookup` refreshes timed out (30 s), the stored signatures
+     * expired (HTTP 410) and tiles stayed blank - app-wide, because the repository is shared.
+     *
+     * Now: transfers run on the bounded [previewDownloadPool], are coalesced per asset, are
+     * refused above [VIDEO_PREVIEW_MAX_BYTES] (remembered in [oversizeVideos]), and the caller
+     * waits at most [PREVIEW_SLOW_WAIT_MS]. Returns null to fall back to the still thumbnail.
+     */
+    private fun getVideoPreviewFile(mediaId: String): File? {
+        val mediaDir = File(context?.cacheDir, "cmp_media").apply { mkdirs() }
+        val target = File(mediaDir, "$mediaId.full")
+        if (target.exists() && target.length() > 0) return target
+        if (oversizeVideos.contains(mediaId)) return null
+
+        val key = "video:$mediaId"
+        val task = inFlightDownloads.computeIfAbsent(key) {
+            previewDownloadPool.submit {
+                try {
+                    getOrDownloadMediaFile(mediaId, null, VIDEO_PREVIEW_MAX_BYTES)
+                    trimMediaCache(mediaDir)
+                } finally {
+                    inFlightDownloads.remove(key)
+                }
+            }
+        }
+        try {
+            task.get(PREVIEW_SLOW_WAIT_MS, TimeUnit.MILLISECONDS)
+        } catch (e: TimeoutException) {
+            Log.d(TAG, "video preview AWAIT slow-timeout media=$mediaId")
+        } catch (e: Exception) {
+            Log.w(TAG, "video preview AWAIT failed media=$mediaId", e)
+        }
+        return target.takeIf { it.exists() && it.length() > 0 }
+    }
+
+    /** Keeps `cmp_media` under [MEDIA_CACHE_MAX_BYTES] by deleting the oldest files first. */
+    private fun trimMediaCache(dir: File) {
+        val files = dir.listFiles { f -> f.isFile && !f.name.endsWith(".tmp") } ?: return
+        var total = files.sumOf { it.length() }
+        if (total <= MEDIA_CACHE_MAX_BYTES) return
+        for (f in files.sortedBy { it.lastModified() }) {
+            if (total <= MEDIA_CACHE_MAX_BYTES) break
+            total -= f.length()
+            f.delete()
+        }
+    }
+
+    private fun getOrDownloadMediaFile(
+        mediaId: String,
+        signal: CancellationSignal?,
+        maxBytes: Long = Long.MAX_VALUE
+    ): File? = runBlocking {
         withContext(Dispatchers.IO) {
             Log.d(TAG, "getOrDownloadMediaFile START mediaId=$mediaId")
             val mediaDir = File(context?.cacheDir, "cmp_media").apply { mkdirs() }
@@ -759,7 +815,10 @@ class ICloudMediaProvider : CloudMediaProvider() {
             }
 
             Log.d(TAG, "getOrDownloadMediaFile DOWNLOADING mediaId=$mediaId host=${hostOf(mediaUrl)}")
-            if (!downloadToFile(mediaUrl, targetFile)) {
+            if (!downloadToFile(mediaUrl, targetFile, maxBytes = maxBytes)) {
+                if (maxBytes != Long.MAX_VALUE && lastDownloadOversize.get() == true) {
+                    oversizeVideos.add(mediaId)
+                }
                 Log.w(TAG, "openMedia download failed media=$mediaId")
                 null
             } else {
@@ -798,10 +857,12 @@ class ICloudMediaProvider : CloudMediaProvider() {
     private fun downloadToFile(
         urlStr: String,
         destination: File,
-        requireImage: Boolean = false
+        requireImage: Boolean = false,
+        maxBytes: Long = Long.MAX_VALUE
     ): Boolean {
         val tempFile = File(destination.parentFile, "${destination.name}.tmp")
         var conn: HttpURLConnection? = null
+        lastDownloadOversize.set(false)
         return try {
             val url = URL(urlStr)
             conn = (url.openConnection() as HttpURLConnection).apply {
@@ -817,15 +878,34 @@ class ICloudMediaProvider : CloudMediaProvider() {
                 return false
             }
 
+            if (maxBytes != Long.MAX_VALUE && conn.contentLengthLong > maxBytes) {
+                Log.w(TAG, "download refused: ${conn.contentLengthLong}B > cap ${maxBytes}B dest=${destination.name}")
+                lastDownloadOversize.set(true)
+                return false
+            }
+
+            var exceeded = false
             conn.inputStream.use { input ->
                 FileOutputStream(tempFile).use { output ->
                     val buffer = ByteArray(8192)
                     var read: Int
+                    var total = 0L
                     while (input.read(buffer).also { read = it } != -1) {
+                        total += read
+                        if (total > maxBytes) {
+                            exceeded = true
+                            break
+                        }
                         output.write(buffer, 0, read)
                     }
                     output.flush()
                 }
+            }
+            if (exceeded) {
+                Log.w(TAG, "download aborted: exceeded cap ${maxBytes}B dest=${destination.name}")
+                lastDownloadOversize.set(true)
+                tempFile.delete()
+                return false
             }
 
             if (requireImage && !isPlausiblePreview(tempFile)) {
@@ -997,6 +1077,18 @@ class ICloudMediaProvider : CloudMediaProvider() {
          * CDN connection pool and the process' own image pipeline. Six keeps the pipeline fed.
          */
         private const val PREVIEW_POOL_SIZE = 6
+
+        /** Largest video the grid may fetch whole just to grab a frame from. */
+        private const val VIDEO_PREVIEW_MAX_BYTES = 24L * 1024 * 1024
+
+        /** Upper bound for `cmp_media`; oldest files are evicted beyond this. */
+        private const val MEDIA_CACHE_MAX_BYTES = 300L * 1024 * 1024
+
+        /** Videos known to exceed [VIDEO_PREVIEW_MAX_BYTES]; never re-fetched for tiles. */
+        private val oversizeVideos: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+        /** Set by the last [downloadToFile] call on this thread's behalf (cap hit). */
+        private val lastDownloadOversize: ThreadLocal<Boolean> = ThreadLocal.withInitial { false }
 
         /**
          * Must stay byte-identical to `ICloudPhotoKeyer.key()`:
