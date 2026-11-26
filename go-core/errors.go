@@ -37,6 +37,20 @@ const (
 	ErrCodeZoneMissing = "ZONE_MISSING"
 	// ErrCodeUnknown is the catch-all.
 	ErrCodeUnknown = "UNKNOWN"
+
+	// ErrCodeRegionUploadLimit: the file is over the 云上贵州 1 GiB web limit and native upload
+	// is not logged in. Retrying cannot help; the user must log in under Settings first.
+	ErrCodeRegionUploadLimit = "REGION_UPLOAD_LIMIT"
+	// ErrCodeNativeAuthExpired: the native (device) login no longer works; log in again.
+	ErrCodeNativeAuthExpired = "NATIVE_AUTH_EXPIRED"
+	// ErrCodeNativeUnavailable: native upload could not start (fingerprint provider unreachable,
+	// Apple refused the upload token, ...). Transient more often than not: retry with backoff.
+	ErrCodeNativeUnavailable = "NATIVE_UNAVAILABLE"
+	// ErrCodeNativeUploadFailed: the native byte transfer itself failed.
+	ErrCodeNativeUploadFailed = "NATIVE_UPLOAD_FAILED"
+	// ErrCodeNativeAccountMismatch: the native login is a different Apple ID than the web
+	// session. Uploading would put the original into one account and the record into another.
+	ErrCodeNativeAccountMismatch = "NATIVE_ACCOUNT_MISMATCH"
 )
 
 // ResultBase is embedded in every exported result struct.

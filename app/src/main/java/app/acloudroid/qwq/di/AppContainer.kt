@@ -55,8 +55,12 @@ class AppContainer(private val appContext: Context) {
         PhotoDatabase.getInstance(appContext)
     }
 
+    val nativeUploadRepository: app.acloudroid.qwq.feature.photos.data.NativeUploadRepository by lazy {
+        app.acloudroid.qwq.feature.photos.data.NativeUploadRepository(sessionManager)
+    }
+
     val photoRepository: PhotoRepository by lazy {
-        PhotoRepository(photoDatabase, sessionManager, appSettings, appContext, dataMutationLock)
+        PhotoRepository(photoDatabase, sessionManager, appSettings, appContext, dataMutationLock, nativeUploadRepository)
     }
 
     /**

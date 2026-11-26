@@ -254,7 +254,12 @@ class PhotoRepository(
      * photos' reconcile walk. Two separate locks would each look correct and still let the two
      * features interleave — AGENTS §12 requires one shared lock.
      */
-    private val dataMutationLock: DataMutationLock = DataMutationLock()
+    private val dataMutationLock: DataMutationLock = DataMutationLock(),
+    /**
+     * "大文件上传" login. Only consulted to make sure its credentials are installed in the Go core
+     * before a > 1 GiB upload; the Go core decides whether the file goes native.
+     */
+    private val nativeUploadRepository: NativeUploadRepository? = null
 ) {
     private val photoDao = database.photoDao()
     private val syncStateDao = database.syncStateDao()
@@ -2318,6 +2323,12 @@ class PhotoRepository(
             }
 
             val jsonResultStr = try {
+                // Large originals on 云上贵州 go through native MMCS inside the Go core, which
+                // needs the "大文件上传" credentials installed first (they live only in memory
+                // there and are lost on every process start).
+                if (queueItem.fileSize > NativeUploadRepository.WEB_SINGLE_FILE_LIMIT_BYTES) {
+                    nativeUploadRepository?.ensureRestored()
+                }
                 Icloudcore.uploadPhotoAsset(
                     rawFd.toLong(),
                     queueItem.filename,
@@ -2408,7 +2419,9 @@ class PhotoRepository(
                 val errCode = jsonResult.optString("errorCode", "UPLOAD_FAILED")
                 val errMsg = jsonResult.optString("errorMsg", "Upload failed")
                 val nextRetry = queueItem.retryCount + 1
-                val nextStatus = if (nextRetry <= MAX_AUTO_RETRIES) "PENDING" else "FAILED"
+                // Retrying cannot fix these: the user has to log in under 设置 → 大文件上传.
+                val needsUser = errCode in NON_RETRYABLE_UPLOAD_CODES
+                val nextStatus = if (!needsUser && nextRetry <= MAX_AUTO_RETRIES) "PENDING" else "FAILED"
                 val errorMsg = "$errCode: $errMsg" + if (nextStatus == "PENDING") " (自动重试 $nextRetry/$MAX_AUTO_RETRIES)" else ""
 
                 // Withdraw the pre-upload claim: these bytes are NOT in the cloud.
@@ -2671,6 +2684,12 @@ class PhotoRepository(
 
         private const val MAX_AUTO_RETRIES = 3
 
+        /** Go-core upload error codes (errors.go) that only the user can resolve. */
+        private val NON_RETRYABLE_UPLOAD_CODES = setOf(
+            "REGION_UPLOAD_LIMIT",
+            "NATIVE_AUTH_EXPIRED",
+            "NATIVE_ACCOUNT_MISMATCH"
+        )
         /**
          * Matches an explicit HTTP status token such as `HTTP 401`, `status:421`, `StatusCode=401`.
          * The `\b` word boundary prevents accidental hits inside longer digit/base64 runs.

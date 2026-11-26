@@ -1,0 +1,125 @@
+syntax = "proto3";
+
+package mmcsp;
+
+option go_package = "icloudcore/native/pb";
+
+// Minimal MMCS (Apple chunked content) wire schema, authored from this project's own
+// reverse engineering (see probes/native_ck/NOTES.md). Only the messages and field
+// numbers our uploader actually touches are declared here. NOT copied from any
+// third-party .proto; the field numbers are interop facts.
+
+message AuthorizePut {
+    message PutData {
+        message Chunk {
+            bytes sig = 1;
+            optional bytes encryption_key = 2;
+            uint32 size = 3;
+        }
+        message Footer {
+            uint32 chunk_count = 1;
+            string profile_type = 101;
+            optional uint32 f103 = 103;
+            optional string f102 = 102;
+            optional string f104 = 104;
+        }
+        message FordDesc {
+            uint32 len = 1;
+        }
+        bytes sig = 1;
+        optional string token = 2;
+        repeated Chunk chunks = 3;
+        optional bytes ford_sig = 4;
+        optional FordDesc ford_desc = 6;
+        Footer footer = 8;
+    }
+    repeated PutData data = 1;
+    uint32 f3 = 3;
+}
+
+message ConfirmResponse {
+    message Request {
+        message Metric {
+            string n = 1;
+            string v = 2;
+        }
+        string url = 1;
+        uint32 status = 2;
+        repeated Metric edgeInfo = 4;
+        optional bytes uploadMd5 = 7;
+        repeated Metric metrics = 8;
+        repeated Metric metrics2 = 9;
+        string token = 10;
+        uint32 f13 = 13;
+    }
+    repeated Request inner = 1;
+    optional bytes confirmData = 2;
+}
+
+message HTTPRequest {
+    message Header {
+        string name = 1;
+        string value = 2;
+    }
+    string domain = 1;
+    uint32 port = 2;
+    string method = 3;
+    string path = 4;
+    string protocol = 5;
+    string protocolVer = 6;
+    string scheme = 7;
+    repeated Header headers = 8;
+    string datacenter = 9;
+    uint64 f11 = 11;
+    uint32 f13 = 13;
+}
+
+message FordChunkItem {
+    bytes key = 1;
+    bytes chunk_len = 2;
+}
+
+message FordItem {
+    repeated FordChunkItem chunks = 1;
+    bytes checksum = 2;
+}
+
+message FordChunk {
+    FordItem item = 1;
+}
+
+message PutCompleteResponse {
+    message FinishedObject {
+        bytes signature = 1;
+        string receipt = 3;
+    }
+    repeated FinishedObject finished = 3;
+}
+
+message AuthorizePutResponse {
+    message UploadTarget {
+        message ChunkIdentifier {
+            optional bytes chunk_id = 1;
+            optional uint32 ford_index = 2;
+        }
+        string clAuthP1 = 1;
+        HTTPRequest request = 2;
+        string clAuthP2 = 4;
+        repeated ChunkIdentifier chunks = 5;
+    }
+    message State {
+        bytes signature = 1;
+        optional string receipt = 3;
+        uint32 f2 = 2;
+        optional bytes fordId = 4;
+    }
+    repeated UploadTarget targets = 1;
+    uint32 f3 = 3;
+    repeated State currentStates = 4;
+    optional bytes confirm_data = 6;
+}
+
+message PutFooter {
+    bytes md5_sum = 1;
+    optional bytes confirm_data = 2;
+}

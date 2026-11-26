@@ -11,6 +11,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"icloudcore/native"
 )
 
 // UploadMetadata contains EXIF and file attributes extracted from Android side
@@ -314,6 +316,43 @@ func uploadPhotoAssetFromFile(f *os.File, filename string, mimeType string, meta
 	}
 	fileSize := info.Size()
 
+	// Region gate (ISS-057): on 云上贵州 the web gateway rejects bodies over 1 GiB with 413, so
+	// such files go through native MMCS instead. Decided before any traffic: without a native
+	// login the upload fails here, immediately and with a reason, instead of streaming ~1 GiB
+	// first and collecting a 413 on every retry.
+	useNative := fileSize > MainlandChinaSingleFileLimitBytes && photosRegionLimited(s)
+	var nativeUp *native.PhotosUploader
+	var nativePrep *native.Prepared
+	if useNative {
+		creds, ani := nativeSnapshot()
+		if creds == nil {
+			return makeUploadError(ErrCodeRegionUploadLimit,
+				"文件超过 1 GiB，云上贵州账号需在设置里登录“大文件上传”后才能上传")
+		}
+		s.mu.RLock()
+		webDSID := s.DSID
+		s.mu.RUnlock()
+		if webDSID != "" && creds.DSID != webDSID {
+			return makeUploadError(ErrCodeNativeAccountMismatch,
+				"“大文件上传”登录的 Apple ID 与当前账号不同，请在设置里重新登录")
+		}
+		up, err := native.NewPhotosUploader(ani, creds)
+		if err != nil {
+			return makeUploadError(classifyNativeErr(err), err.Error())
+		}
+		prep, err := up.Prepare(f, fileSize)
+		if err != nil {
+			return makeUploadError("FILE_HASH_ERROR", err.Error())
+		}
+		nativeUp, nativePrep = up, prep
+		// The native fileChecksum is known before upload, so duplicates cost no traffic
+		// (AGENTS Phase 3 / ISS-068: idempotency must come before the bytes).
+		if masterRecordExists(s, prep.FileChecksum()) {
+			b, _ := json.Marshal(UploadResult{Success: true, MasterID: prep.FileChecksum(), FileChecksum: prep.FileChecksum(), Duplicate: true})
+			return string(b)
+		}
+	}
+
 	// Parse metadata
 	var meta UploadMetadata
 	if metadataJson != "" {
@@ -443,13 +482,15 @@ func uploadPhotoAssetFromFile(f *os.File, filename string, mimeType string, meta
 		}
 	}
 
-	// 3. Request /assets/upload token for original + derivatives
-	tokensReq := []map[string]interface{}{
-		{
+	// 3. Request /assets/upload token for original + derivatives. A native upload sends the
+	// original itself; the small derivatives still go through the web path.
+	tokensReq := []map[string]interface{}{}
+	if !useNative {
+		tokensReq = append(tokensReq, map[string]interface{}{
 			"recordType": "CPLMaster",
 			"fieldName":  "resOriginalRes",
 			"signature":  sha256Base64,
-		},
+		})
 	}
 	if vidSha256 != "" {
 		tokensReq = append(tokensReq, map[string]interface{}{
@@ -473,63 +514,48 @@ func uploadPhotoAssetFromFile(f *os.File, filename string, mimeType string, meta
 		})
 	}
 
-	uploadPayload := map[string]interface{}{
-		"tokens": tokensReq,
-		"zoneID": map[string]interface{}{
-			"zoneName": "PrimarySync",
-		},
-	}
-
-	bodyBytes, _ := json.Marshal(uploadPayload)
-	req, err := s.NewRequest("POST", s.photosBaseURL("assets/upload"), string(bodyBytes))
-	if err != nil {
-		return makeUploadError("REQUEST_BUILD_ERROR", err.Error())
-	}
-
-	resp, err := s.Client.Do(req)
-	if err != nil {
-		return makeUploadError("ASSETS_UPLOAD_HTTP_ERROR", err.Error())
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		buf := new(bytes.Buffer)
-		buf.ReadFrom(resp.Body)
-		return makeUploadError("ASSETS_UPLOAD_FAILED", fmt.Sprintf("Status %d: %s", resp.StatusCode, buf.String()))
-	}
-
-	var uploadTokensResult map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&uploadTokensResult); err != nil {
-		return makeUploadError("JSON_DECODE_ERROR", err.Error())
-	}
-
-	tokens, ok := uploadTokensResult["tokens"].([]interface{})
-	if !ok || len(tokens) == 0 {
-		return makeUploadError("NO_TOKENS_RETURNED", fmt.Sprintf("No upload tokens returned: %+v", uploadTokensResult))
-	}
-
-	uploadUrlMap := make(map[string]string)
-	for _, tok := range tokens {
-		tokMap, ok := tok.(map[string]interface{})
-		if !ok {
-			continue
+	// 4a. Native original first: a multi-GiB transfer can outlast the web upload URLs, so those
+	// are only requested once the big bytes are in.
+	var origReceipt *mmcsReceipt
+	if useNative {
+		rc, err := nativeUp.Upload(nativePrep, f, nil)
+		if err != nil {
+			code := ErrCodeNativeUploadFailed
+			if c := classifyNativeErr(err); c == ErrCodeNativeAuthExpired || c == ErrCodeTimeout {
+				code = c
+			}
+			return makeUploadError(code, fmt.Sprintf("resOriginalRes native upload failed: %v", err))
 		}
-		fn, _ := tokMap["fieldName"].(string)
-		u, _ := tokMap["url"].(string)
-		if fn != "" && u != "" {
-			uploadUrlMap[fn] = u
+		origReceipt = &mmcsReceipt{
+			FileChecksum:      rc.FileChecksum,
+			ReferenceChecksum: rc.ReferenceChecksum,
+			WrappingKey:       rc.WrappingKey,
+			Receipt:           rc.Receipt,
+			Size:              rc.Size,
 		}
 	}
 
-	origUploadUrl := uploadUrlMap["resOriginalRes"]
-	if origUploadUrl == "" {
-		return makeUploadError("UNSUPPORTED_UPLOAD_TOKEN", "No singleFileUpload url in token for resOriginalRes")
+	uploadUrlMap := map[string]string{}
+	if len(tokensReq) > 0 {
+		m, errJSON := requestAssetUploadURLs(s, tokensReq)
+		if errJSON != "" {
+			return errJSON
+		}
+		uploadUrlMap = m
 	}
 
-	// 4. Stream upload files to respective MMCS upload URLs
-	origReceipt, err := uploadFileToUrl(f, fileSize, origUploadUrl)
-	if err != nil {
-		return makeUploadError("STREAM_UPLOAD_FAILED", fmt.Sprintf("resOriginalRes upload failed: %v", err))
+	if !useNative {
+		origUploadUrl := uploadUrlMap["resOriginalRes"]
+		if origUploadUrl == "" {
+			return makeUploadError("UNSUPPORTED_UPLOAD_TOKEN", "No singleFileUpload url in token for resOriginalRes")
+		}
+
+		// 4. Stream upload files to respective MMCS upload URLs
+		rec, err := uploadFileToUrl(f, fileSize, origUploadUrl)
+		if err != nil {
+			return makeUploadError("STREAM_UPLOAD_FAILED", fmt.Sprintf("resOriginalRes upload failed: %v", err))
+		}
+		origReceipt = rec
 	}
 
 	var thumbReceipt *mmcsReceipt
@@ -952,4 +978,80 @@ func uploadPhotoAssetFromFile(f *os.File, filename string, mimeType string, meta
 // warning records an optional field that was skipped, so the caller can log it.
 func (r *UploadResult) warning(msg string) {
 	r.Warnings = append(r.Warnings, msg)
+}
+
+// requestAssetUploadURLs asks `/assets/upload` for one single-file upload URL per field.
+// Returns field name -> URL, or a ready-made error JSON.
+func requestAssetUploadURLs(s *Session, tokensReq []map[string]interface{}) (map[string]string, string) {
+	bodyBytes, _ := json.Marshal(map[string]interface{}{
+		"tokens": tokensReq,
+		"zoneID": map[string]interface{}{"zoneName": "PrimarySync"},
+	})
+	req, err := s.NewRequest("POST", s.photosBaseURL("assets/upload"), string(bodyBytes))
+	if err != nil {
+		return nil, makeUploadError("REQUEST_BUILD_ERROR", err.Error())
+	}
+	resp, err := s.Client.Do(req)
+	if err != nil {
+		return nil, makeUploadError("ASSETS_UPLOAD_HTTP_ERROR", err.Error())
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		buf := new(bytes.Buffer)
+		buf.ReadFrom(resp.Body)
+		return nil, makeUploadError("ASSETS_UPLOAD_FAILED", fmt.Sprintf("Status %d: %s", resp.StatusCode, buf.String()))
+	}
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, makeUploadError("JSON_DECODE_ERROR", err.Error())
+	}
+	tokens, ok := result["tokens"].([]interface{})
+	if !ok || len(tokens) == 0 {
+		return nil, makeUploadError("NO_TOKENS_RETURNED", fmt.Sprintf("No upload tokens returned: %+v", result))
+	}
+	urls := make(map[string]string)
+	for _, tok := range tokens {
+		tokMap, ok := tok.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		fn, _ := tokMap["fieldName"].(string)
+		u, _ := tokMap["url"].(string)
+		if fn != "" && u != "" {
+			urls[fn] = u
+		}
+	}
+	return urls, ""
+}
+
+// photosRegionLimited reports whether this session's Photos backend is 云上贵州, where the web
+// upload gateway caps a single body at 1 GiB (ISS-057). Host suffix only, never a substring
+// (AGENTS §6.7.9); an unknown host fails open (false) so the normal path is tried.
+func photosRegionLimited(s *Session) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.RLock()
+	ck := s.CKDatabaseURL
+	docs := docsEndpointFromAccountInfo(s.AccountInfoJSON)
+	s.mu.RUnlock()
+	for _, u := range []string{ck, docs} {
+		if u == "" {
+			continue
+		}
+		host := u
+		if i := strings.Index(host, "://"); i >= 0 {
+			host = host[i+3:]
+		}
+		if i := strings.IndexAny(host, "/?"); i >= 0 {
+			host = host[:i]
+		}
+		if i := strings.LastIndexByte(host, ':'); i >= 0 {
+			host = host[:i]
+		}
+		if strings.HasSuffix(strings.ToLower(host), ".icloud.com.cn") {
+			return true
+		}
+	}
+	return false
 }
