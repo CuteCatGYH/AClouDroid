@@ -25,6 +25,7 @@ enum class SettingsItem {
     BACKUP_BATTERY_NOT_LOW,
     BACKUP_CONCURRENT_LIMIT,
     BACKUP_NOTIFICATION,
+    NATIVE_LARGE_UPLOAD,
     BATTERY_OPTIMIZATION,
     KEEP_BACKGROUND_ALIVE,
     PERIODIC_BACKUP_INTERVAL,
@@ -79,7 +80,8 @@ object SettingsCatalog {
                 SettingsItem.BACKUP_REQUIRE_CHARGING,
                 SettingsItem.BACKUP_BATTERY_NOT_LOW,
                 SettingsItem.BACKUP_CONCURRENT_LIMIT,
-                SettingsItem.BACKUP_NOTIFICATION
+                SettingsItem.BACKUP_NOTIFICATION,
+                SettingsItem.NATIVE_LARGE_UPLOAD
             )
         ),
         SettingsGroup(

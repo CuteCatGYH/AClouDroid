@@ -60,12 +60,48 @@ class SessionManager(context: Context) {
 
     fun clearSession(context: Context? = null) {
         val currentRegion = isChinaMainland()
+        val anisetteUrl = getNativeAnisetteUrl()
         prefs.edit().clear().apply()
         setChinaMainland(currentRegion)
+        // A device setting, not an account credential: keep it so a re-login does not have to
+        // retype it. The native credentials themselves are gone with the clear() above.
+        setNativeAnisetteUrl(anisetteUrl)
+        // ...and the Go core's in-memory copy must go too, or a large upload queued for the new
+        // account would still be sent with the old Apple ID (AGENTS §5.5).
+        runCatching { com.getup.icloudcore.Icloudcore.nativeLogout() }
         cachedSessionGeneration = null
         if (context != null) {
             clearAvatarCache(context)
         }
+    }
+
+    /**
+     * Native ("大文件上传") login blob returned by the Go core. Holds dsid + mmeAuthToken, never the
+     * password. Lives in this encrypted store so [clearSession] wipes it with the web session:
+     * it belongs to one Apple ID (AGENTS §5.5).
+     */
+    fun getNativeCredentials(): String? = prefs.getString(KEY_NATIVE_CREDENTIALS, null)
+
+    fun saveNativeCredentials(json: String?) {
+        prefs.edit().apply {
+            if (json.isNullOrBlank()) remove(KEY_NATIVE_CREDENTIALS) else putString(KEY_NATIVE_CREDENTIALS, json)
+            apply()
+        }
+    }
+
+    /** Whether the user accepted the public-anisette disclaimer. Wiped with the session on purpose. */
+    fun hasPublicAnisetteConsent(): Boolean = prefs.getBoolean(KEY_NATIVE_PUBLIC_CONSENT, false)
+
+    fun setPublicAnisetteConsent(accepted: Boolean) {
+        prefs.edit().putBoolean(KEY_NATIVE_PUBLIC_CONSENT, accepted).apply()
+    }
+
+    /** Where device fingerprints come from (public server by default, or scripts/anisette_server). */
+    fun getNativeAnisetteUrl(): String =
+        prefs.getString(KEY_NATIVE_ANISETTE_URL, null)?.takeIf { it.isNotBlank() } ?: DEFAULT_ANISETTE_URL
+
+    fun setNativeAnisetteUrl(url: String) {
+        prefs.edit().putString(KEY_NATIVE_ANISETTE_URL, url.trim()).apply()
     }
 
     fun getCookieString(): String? = prefs.getString(KEY_COOKIE_STR, null)
@@ -278,5 +314,33 @@ class SessionManager(context: Context) {
         private const val KEY_HAS_SHOWN_CHINA_UPLOAD_NOTICE = "has_shown_china_upload_notice"
         private const val KEY_USER_AVATAR_URL = "user_avatar_url"
         private const val KEY_AVATAR_LAST_UPDATED = "avatar_last_updated"
+        private const val KEY_NATIVE_CREDENTIALS = "native_credentials"
+        private const val KEY_NATIVE_ANISETTE_URL = "native_anisette_url"
+
+        private const val KEY_NATIVE_PUBLIC_CONSENT = "native_public_anisette_consent"
+
+        /**
+         * Default fingerprint provider: SideStore's public anisette server, verified on
+         * 2026-11-25 for native login + a 1.38 GiB upload. Users can point the App at their own
+         * Mac / Windows PC instead (scripts/anisette_server).
+         */
+        const val DEFAULT_ANISETTE_URL = "https://new.ani.sidestore.io/"
+
+        /** Third-party servers: using one needs the user's explicit consent (disclaimer). */
+        private val PUBLIC_ANISETTE_HOSTS = setOf(
+            "new.ani.sidestore.io",
+            "ani.sidestore.io",
+            "ani.sidestore.zip",
+            "ani.sidestore.app",
+            "ani.jkcoxson.com",
+            "mac-ani.jkcoxson.com",
+            "ani.npeg.us"
+        )
+
+        /** True when [url] points at a known public (shared, third-party) anisette server. */
+        fun isPublicAnisetteUrl(url: String): Boolean {
+            val host = runCatching { java.net.URI(url.trim()).host }.getOrNull()?.lowercase() ?: return false
+            return host in PUBLIC_ANISETTE_HOSTS
+        }
     }
 }

@@ -1,0 +1,163 @@
+syntax = "proto2";
+
+package cloudkitp;
+
+option go_package = "icloudcore/native/pb";
+
+// Minimal CloudKit client wire schema, authored from this project's own reverse
+// engineering (see probes/native_ck/NOTES.md). Only the messages and field numbers our
+// native asset-upload-token flow touches are declared. NOT copied from any third-party
+// .proto; the field numbers are interop facts required to talk to the live service.
+
+message NamedHeader {
+  optional string name = 1;
+  optional string value = 2;
+}
+
+message Identifier {
+  enum Type {
+    RECORD = 1;
+    DEVICE = 2;
+    SUBSCRIPTION = 3;
+    SHARE = 4;
+    COMMENT = 5;
+    RECORD_ZONE = 6;
+    USER = 7;
+  }
+  optional string name = 1;
+  optional Type type = 2;
+}
+
+message RecordZoneIdentifier {
+  optional Identifier value = 1;
+  optional Identifier ownerIdentifier = 2;
+  optional RequestOperation.Header.ContainerEnvironment environment = 3;
+}
+
+message RecordIdentifier {
+  optional Identifier value = 1;
+  optional RecordZoneIdentifier zoneIdentifier = 2;
+}
+
+message Record {
+  message Type {
+    optional string name = 1;
+  }
+}
+
+message Operation {
+  enum Type {
+    NONE_TYPE = 0;
+    ASSET_UPLOAD_TOKEN_RETRIEVE_TYPE = 230;
+  }
+  optional string operationUUID = 1;
+  optional Type type = 2;
+  optional bool synchronousMode = 3;
+  optional bool last = 4;
+}
+
+message AssetUploadData {
+  optional string container = 1;
+  optional bytes sig = 2;
+  // uint64, not uint32: same varint on the wire, and the library holds 5.1 GiB videos.
+  optional uint64 size = 4;
+  optional string host = 8;
+  optional string dsid = 9;
+  optional RecordIdentifier associatedRecord = 10;
+  optional bytes fordSig = 17;
+}
+
+message AssetUploadTokenRetrieveRequest {
+  message AssetUpload {
+    message Name {
+      optional string name = 1;
+    }
+    message Asset {
+      optional Name name = 1;
+      optional AssetUploadData data = 2;
+    }
+    optional RecordIdentifier record = 1;
+    optional Record.Type recordType = 2;
+    optional Asset asset = 3;
+  }
+  repeated AssetUpload assetUpload = 4;
+  repeated NamedHeader header = 5;
+  optional bytes authorizePut = 6;
+  optional int32 unk1 = 8;
+}
+
+message AssetUploadTokenRetrieveResponse {
+  message AssetInfo {
+    optional string encodedInnerProto = 1;
+    optional AssetUploadData asset = 2;
+    optional uint64 expiry_timestamp = 3;
+  }
+  repeated AssetInfo assetInfo = 2;
+  optional bytes uploadInfo = 3;
+  repeated NamedHeader header = 4;
+}
+
+message RequestOperation {
+  message Header {
+    enum ContainerEnvironment {
+      PRODUCTION = 1;
+      SANDBOX = 2;
+    }
+    enum Database {
+      PRIVATE_DB = 1;
+      PUBLIC_DB = 2;
+      SHARED_DB = 3;
+    }
+    enum IsolationLevel {
+      ZONE = 1;
+      OPERATION = 2;
+    }
+    optional string applicationContainer = 2;
+    optional string applicationBundle = 3;
+    optional Identifier deviceIdentifier = 7;
+    optional string deviceSoftwareVersion = 8;
+    optional string deviceHardwareVersion = 9;
+    optional string deviceLibraryName = 10;
+    optional string deviceLibraryVersion = 11;
+    optional string deviceFlowControlKey = 12;
+    optional uint64 deviceFlowControlBudget = 13;
+    optional uint64 deviceFlowControlBudgetCap = 14;
+    optional float deviceFlowControlRegeneration = 15;
+    optional string mmcsProtocolVersion = 18;
+    optional ContainerEnvironment applicationContainerEnvironment = 19;
+    optional string deviceAssignedName = 21;
+    optional string deviceHardwareID = 22;
+    optional Database targetDatabase = 23;
+    optional IsolationLevel isolationLevel = 25;
+    optional string group = 26;
+    optional int32 unk1 = 29;
+    optional string unk2 = 32;
+    optional string deviceSerial = 33;
+    optional int32 unk3 = 34;
+    optional int32 unk4 = 35;
+  }
+
+  message Result {
+    message Error {
+      optional int32 retryAfterSeconds = 3;
+      optional string errorDescription = 4;
+      optional string errorKey = 5;
+      optional string errorInternal = 6;
+    }
+    enum Code {
+      SUCCESS = 1;
+    }
+    optional Code code = 1;
+    optional Error error = 2;
+  }
+
+  optional Header header = 1;
+  optional Operation request = 2;
+  optional AssetUploadTokenRetrieveRequest assetUploadTokenRetrieveRequest = 230;
+}
+
+message ResponseOperation {
+  optional uint32 operationCost = 1;
+  optional RequestOperation.Result result = 3;
+  optional AssetUploadTokenRetrieveResponse assetUploadTokenRetrieveResponse = 230;
+}

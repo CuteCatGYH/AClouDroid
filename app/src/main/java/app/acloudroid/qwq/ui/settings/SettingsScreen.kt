@@ -142,6 +142,7 @@ fun SettingsScreen(
     var showReloginDialog by remember { mutableStateOf(false) }
     var libraryEstimate by remember { mutableStateOf<LibraryEstimate?>(null) }
     var showAboutScreen by remember { mutableStateOf(false) }
+    var showNativeUploadDialog by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -271,7 +272,8 @@ fun SettingsScreen(
                                     onFrequencyChanged = onFrequencyChanged,
                                     onCustomIntervalChanged = onCustomIntervalChanged,
                                     onRequestRelogin = { showReloginDialog = true },
-                                    onOpenAbout = { showAboutScreen = true }
+                                    onOpenAbout = { showAboutScreen = true },
+                                    onOpenNativeUpload = { showNativeUploadDialog = true }
                                 )
                             }
                         }
@@ -377,6 +379,15 @@ fun SettingsScreen(
             )
         }
 
+        if (showNativeUploadDialog) {
+            NativeUploadDialog(
+                repository = remember(context) {
+                    (context.applicationContext as IClouDroidApp).container.nativeUploadRepository
+                },
+                onDismiss = { showNativeUploadDialog = false }
+            )
+        }
+
         if (showAboutScreen) {
             AboutSubScreen(onBack = { showAboutScreen = false })
         }
@@ -451,11 +462,28 @@ private fun SettingsRow(
     onFrequencyChanged: (ScanFrequency) -> Unit,
     onCustomIntervalChanged: (Int) -> Unit,
     onRequestRelogin: () -> Unit,
-    onOpenAbout: () -> Unit
+    onOpenAbout: () -> Unit,
+    onOpenNativeUpload: () -> Unit = {}
 ) {
     val context = LocalContext.current
 
     when (item) {
+        SettingsItem.NATIVE_LARGE_UPLOAD -> {
+            val repo = remember(context) {
+                (context.applicationContext as IClouDroidApp).container.nativeUploadRepository
+            }
+            val nativeStatus by repo.status.collectAsStateWithLifecycle()
+            ActionRow(
+                title = stringResource(R.string.settings_item_native_upload),
+                subtitle = if (nativeStatus.loggedIn) {
+                    stringResource(R.string.settings_item_native_upload_desc_on, nativeStatus.appleId.orEmpty())
+                } else {
+                    stringResource(R.string.settings_item_native_upload_desc_off)
+                },
+                trailing = { Icon(Icons.Default.ChevronRight, contentDescription = null) },
+                onClick = onOpenNativeUpload
+            )
+        }
         SettingsItem.BATTERY_OPTIMIZATION -> {
             val powerManager = remember { context.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager }
             
