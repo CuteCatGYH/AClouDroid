@@ -1,5 +1,6 @@
 package app.acloudroid.qwq.provider
 
+import android.provider.CloudMediaProviderContract
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -118,5 +119,25 @@ class MediaMimeTypeTest {
             )
             assertFalse(mime.startsWith("image/"))
         }
+    }
+
+    @Test
+    fun `live photo reports standard motion photo extension while still photo and video report none`() {
+        assertEquals(
+            CloudMediaProviderContract.MediaColumns.STANDARD_MIME_TYPE_EXTENSION_MOTION_PHOTO,
+            ICloudMediaProvider.standardMimeTypeExtensionFor("LIVE_PHOTO", null)
+        )
+        assertEquals(
+            CloudMediaProviderContract.MediaColumns.STANDARD_MIME_TYPE_EXTENSION_MOTION_PHOTO,
+            ICloudMediaProvider.standardMimeTypeExtensionFor("IMAGE", "https://example.com/compl.mov")
+        )
+        assertEquals(
+            CloudMediaProviderContract.MediaColumns.STANDARD_MIME_TYPE_EXTENSION_NONE,
+            ICloudMediaProvider.standardMimeTypeExtensionFor("IMAGE", null)
+        )
+        assertEquals(
+            CloudMediaProviderContract.MediaColumns.STANDARD_MIME_TYPE_EXTENSION_NONE,
+            ICloudMediaProvider.standardMimeTypeExtensionFor("VIDEO", "https://example.com/compl.mov")
+        )
     }
 }

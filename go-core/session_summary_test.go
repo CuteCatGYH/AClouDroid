@@ -2,7 +2,10 @@ package icloudcore
 
 import (
 	"encoding/json"
+	"net/http"
+	"sync"
 	"testing"
+	"time"
 )
 
 // The summary must distinguish "session has drivews" from "session can also transfer".
@@ -56,5 +59,49 @@ func TestSessionStateSummaryReportsMissingDocsEndpoint(t *testing.T) {
 	}
 	if got := summary["hasDocsEndpoint"]; got != false {
 		t.Errorf("hasDocsEndpoint = %v, want false", got)
+	}
+}
+
+// Regression test: GetSessionStateSummary must never recursively acquire s.mu.RLock().
+// Running it concurrently with ExtractAndSaveCookies (which acquires s.mu.Lock()) used to
+// deadlock Go's sync.RWMutex permanently once a writer queued between the outer and inner RLock().
+func TestGetSessionStateSummaryNoDeadlockWithConcurrentCookieWrites(t *testing.T) {
+	s := newTestSession(t)
+	s.CookieMap["X-APPLE-WEBAUTH-TOKEN"] = "token"
+	installSessionForTest(t, s)
+
+	resp := &http.Response{
+		Header: http.Header{
+			"Set-Cookie": []string{"X-APPLE-WEBAUTH-TOKEN=rotated; Path=/"},
+		},
+	}
+
+	done := make(chan struct{})
+	go func() {
+		var wg sync.WaitGroup
+		for i := 0; i < 4; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := 0; j < 200; j++ {
+					_ = GetSessionStateSummary()
+				}
+			}()
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for j := 0; j < 200; j++ {
+					s.ExtractAndSaveCookies(resp)
+				}
+			}()
+		}
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("GetSessionStateSummary deadlocked with concurrent ExtractAndSaveCookies")
 	}
 }

@@ -21,35 +21,48 @@ func GetSessionStateSummary() string {
 		return "No active session in Go core"
 	}
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	var cookieKeys []string
+	cookieKeys := make([]string, 0, len(s.CookieMap))
 	for k := range s.CookieMap {
 		cookieKeys = append(cookieKeys, k)
 	}
+	isChina := s.IsChinaMainland
+	baseURL := s.BaseURL
+	dsid := s.DSID
+	ckDatabaseURL := s.CKDatabaseURL
+	drivewsURL := s.DrivewsURL
+	accountInfoJSON := s.AccountInfoJSON
+	cookieCount := len(s.CookieMap)
+	// Read CookieMap via the locked helper rather than HasCookieIgnoreCase(), which re-acquires
+	// s.mu.RLock(). Recursive RLock deadlocks in Go's sync.RWMutex whenever a concurrent
+	// ExtractAndSaveCookies() calls s.mu.Lock() in between.
+	hasAuthToken := s.hasCookieIgnoreCaseLocked("X-APPLE-WEBAUTH-TOKEN")
+	hasHsaTrust := s.hasCookieIgnoreCaseLocked("X-APPLE-WEBAUTH-HSA-TRUST")
+	hasPcsCloudKit := s.hasCookieIgnoreCaseLocked("X-APPLE-WEBAUTH-PCS-CloudKit")
+	hasPcsPhotos := s.hasCookieIgnoreCaseLocked("X-APPLE-WEBAUTH-PCS-Photos")
+	s.mu.RUnlock()
 
 	// docwsURL is the CloudDocs transfer endpoint. It is exposed separately from drivewsURL
 	// because uploads resolve it from `webservices.docws` and fail with
 	// `AUTH_EXPIRED: docws endpoint is not set` when it is empty — a terminal error the caller
 	// cannot retry. Kotlin needs to see both fields to tell "session ready" apart from
 	// "session has drivews but is not yet usable for transfer".
-	docsURL := docsEndpointFromAccountInfo(s.AccountInfoJSON)
+	docsURL := docsEndpointFromAccountInfo(accountInfoJSON)
 
 	summary := map[string]interface{}{
-		"isChina":          s.IsChinaMainland,
-		"baseURL":          s.BaseURL,
-		"dsid":             s.DSID,
-		"ckDatabaseURL":    s.CKDatabaseURL,
-		"drivewsURL":       s.DrivewsURL,
+		"isChina":          isChina,
+		"baseURL":          baseURL,
+		"dsid":             dsid,
+		"ckDatabaseURL":    ckDatabaseURL,
+		"drivewsURL":       drivewsURL,
 		"docwsURL":         docsURL,
-		"hasDriveEndpoint": s.DrivewsURL != "",
+		"hasDriveEndpoint": drivewsURL != "",
 		"hasDocsEndpoint":  docsURL != "",
-		"cookieCount":      len(s.CookieMap),
+		"cookieCount":      cookieCount,
 		"cookieNames":      cookieKeys,
-		"hasAuthToken":     s.HasCookieIgnoreCase("X-APPLE-WEBAUTH-TOKEN"),
-		"hasHsaTrust":      s.HasCookieIgnoreCase("X-APPLE-WEBAUTH-HSA-TRUST"),
-		"hasPcsCloudKit":   s.HasCookieIgnoreCase("X-APPLE-WEBAUTH-PCS-CloudKit"),
-		"hasPcsPhotos":     s.HasCookieIgnoreCase("X-APPLE-WEBAUTH-PCS-Photos"),
+		"hasAuthToken":     hasAuthToken,
+		"hasHsaTrust":      hasHsaTrust,
+		"hasPcsCloudKit":   hasPcsCloudKit,
+		"hasPcsPhotos":     hasPcsPhotos,
 	}
 	bytes, _ := json.Marshal(summary)
 	return string(bytes)

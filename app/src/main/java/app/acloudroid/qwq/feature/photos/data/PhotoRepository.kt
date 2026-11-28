@@ -547,7 +547,12 @@ class PhotoRepository(
      * Rebuilds session transparently using stored cookies if Go core's session is missing or expired.
      */
     suspend fun ensureGoSession(force: Boolean = false): Result<Unit> = withContext(Dispatchers.IO) {
+        val lockStart = System.currentTimeMillis()
         sessionMutex.withLock {
+            val lockWaitMs = System.currentTimeMillis() - lockStart
+            if (lockWaitMs > 2000) {
+                Log.w(TAG, "ensureGoSession waited ${lockWaitMs}ms for sessionMutex (force=$force)")
+            }
             try {
                 if (!force) {
                     val summaryStr = Icloudcore.getSessionStateSummary()
@@ -1717,14 +1722,24 @@ class PhotoRepository(
     }
 
     private suspend fun doRefreshUrlsForMaster(masterId: String): Result<RefreshedUrls> = withContext(Dispatchers.IO) {
+        val t0 = System.currentTimeMillis()
         var sessionCheck = ensureGoSession()
+        val tSession = System.currentTimeMillis()
+        if (tSession - t0 > 1000) {
+            Log.w(TAG, "doRefreshUrls ensureGoSession slow (${tSession - t0}ms) master=$masterId")
+        }
         if (sessionCheck.isFailure) {
             return@withContext Result.failure(sessionCheck.exceptionOrNull() ?: Exception("会话建立失败"))
         }
 
         try {
             val payload = JSONArray().apply { put(masterId) }.toString()
+            val tGo0 = System.currentTimeMillis()
             var jsonStr = Icloudcore.refreshAssetUrls(payload)
+            val tGo1 = System.currentTimeMillis()
+            if (tGo1 - tGo0 > 2000) {
+                Log.w(TAG, "doRefreshUrls Go call slow (${tGo1 - tGo0}ms) master=$masterId ok=${!jsonStr.contains("\"success\":false")}")
+            }
             if (isAuthError(jsonStr)) {
                 Log.w(
                     TAG,
@@ -1742,6 +1757,7 @@ class PhotoRepository(
 
             if (!success) {
                 val err = json.optString("errorMessage", "刷新直链失败")
+                Log.w(TAG, "doRefreshUrls server/go failure master=$masterId err=$err")
                 return@withContext Result.failure(Exception(err))
             }
 
@@ -1920,6 +1936,9 @@ class PhotoRepository(
         if (photos.isEmpty()) return
         val merged = mergeWithExistingAssets(photos)
         photoDao.upsertAll(merged)
+        if (photoDao.hasDuplicateMasterRows()) {
+            photoDao.deleteDuplicateMasterRows()
+        }
     }
 
     /**

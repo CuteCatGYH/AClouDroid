@@ -14,11 +14,14 @@ import android.util.Log
 import androidx.annotation.RequiresApi
 import app.acloudroid.qwq.BuildConfig
 import app.acloudroid.qwq.IClouDroidApp
+import app.acloudroid.qwq.feature.photos.data.MediaStoreDownloader
 import app.acloudroid.qwq.feature.photos.data.db.PhotoAssetEntity
 import app.acloudroid.qwq.feature.photos.data.image.ICloudImageLoaderFactory
 import app.acloudroid.qwq.feature.photos.data.image.ICloudImageModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileNotFoundException
@@ -51,6 +54,12 @@ class ICloudMediaProvider : CloudMediaProvider() {
         return true
     }
 
+    private fun currentSyncGeneration(): Long {
+        val sessionGeneration = (container?.sessionManager?.getSessionGeneration()?.toLong() ?: 0L)
+            .coerceAtLeast(0L)
+        return (sessionGeneration + 1L) * SCHEMA_VERSION
+    }
+
     override fun onGetMediaCollectionInfo(extras: Bundle): Bundle {
         val bundle = Bundle()
 
@@ -62,8 +71,7 @@ class ICloudMediaProvider : CloudMediaProvider() {
         // blank (measured: 2540 `setDataSource failed`).
         //
         // SCHEMA_VERSION must be raised by hand whenever `onQueryMedia`'s column values change.
-        val sessionGeneration = container?.sessionManager?.getSessionGeneration()?.toLong() ?: 1L
-        val generation = sessionGeneration * SCHEMA_VERSION
+        val generation = currentSyncGeneration()
 
         bundle.putString(
             CloudMediaProviderContract.MediaCollectionInfo.MEDIA_COLLECTION_ID,
@@ -92,13 +100,13 @@ class ICloudMediaProvider : CloudMediaProvider() {
             CloudMediaProviderContract.MediaColumns.WIDTH,
             CloudMediaProviderContract.MediaColumns.HEIGHT,
             CloudMediaProviderContract.MediaColumns.ORIENTATION,
-            // Required for the picker to know the row is openable. Omitting it made the tile
-            // render but never issue `onOpenPreview`, i.e. a permanently blank grid cell.
+            // Required for the picker to know the row is openable and to deduplicate backed-up
+            // items against their local MediaStore entry when present on-device.
             CloudMediaProviderContract.MediaColumns.MEDIA_STORE_URI
         )
 
         val cursor = MatrixCursor(columns)
-        val generation = container?.sessionManager?.getSessionGeneration()?.toLong() ?: 1L
+        val generation = currentSyncGeneration()
 
         // Pagination is mandatory: the picker asks for `EXTRA_PAGE_SIZE` rows at a time and stops
         // when a page comes back without `EXTRA_PAGE_TOKEN`. Returning the whole library in one
@@ -131,13 +139,29 @@ class ICloudMediaProvider : CloudMediaProvider() {
         runBlocking {
             try {
                 val dao = db.photoDao()
+                if (rawToken == null && dao.hasDuplicateMasterRows()) {
+                    val purged = dao.deleteDuplicateMasterRows()
+                    if (purged > 0) {
+                        Log.i(TAG, "onQueryMedia swept $purged duplicate masterId rows")
+                    }
+                }
+                val localIndex = getOrLoadLocalMediaIndex(forceRefresh = rawToken == null)
                 val page = when {
                     keyset != null -> dao.getMediaPageAfter(pageSize, keyset.first, keyset.second)
                     legacyOffset != null -> dao.getMediaPage(pageSize, legacyOffset)
                     else -> dao.getMediaPageFirst(pageSize)
                 }
+                var localMatches = 0
                 for (asset in page) {
                     val mimeType = resolveMimeType(asset)
+                    val standardExt = standardMimeTypeExtensionFor(asset.mediaType, asset.videoComplUrl)
+                    val localUri = localIndex?.findMatchingUriString(
+                        isVideo = isVideoAsset(asset),
+                        filename = asset.filename,
+                        assetDateMs = asset.assetDate,
+                        sizeBytes = asset.size
+                    )
+                    if (localUri != null) localMatches++
                     cursor.addRow(
                         arrayOf<Any?>(
                             asset.id,
@@ -146,14 +170,13 @@ class ICloudMediaProvider : CloudMediaProvider() {
                             // otherwise the picker treats every row as stale and never syncs it.
                             generation,
                             mimeType,
-                            0, // standard extension
+                            standardExt,
                             asset.size,
                             asset.duration,
                             if (asset.width > 0) asset.width else 1080,
                             if (asset.height > 0) asset.height else 1920,
                             0,
-                            // Cloud-only item: MEDIA_STORE_URI must stay null (AOSP contract).
-                            null
+                            localUri
                         )
                     )
                 }
@@ -176,7 +199,7 @@ class ICloudMediaProvider : CloudMediaProvider() {
                     Log.d(
                         TAG,
                         "onQueryMedia token=${rawToken ?: "first"} size=${page.size} gen=$generation " +
-                            "videos=$videos sampleMime=${page.firstOrNull()?.let { resolveMimeType(it) }}"
+                            "videos=$videos localMatches=$localMatches sampleMime=${page.firstOrNull()?.let { resolveMimeType(it) }}"
                     )
                 }
 
@@ -191,6 +214,19 @@ class ICloudMediaProvider : CloudMediaProvider() {
         }
 
         return cursor
+    }
+
+    private fun getOrLoadLocalMediaIndex(forceRefresh: Boolean): LocalMediaStoreIndex? {
+        val resolver = context?.contentResolver ?: return null
+        val now = System.currentTimeMillis()
+        val cached = cachedLocalIndex
+        if (!forceRefresh && cached != null && now - cachedLocalIndexAt <= LOCAL_INDEX_TTL_MS) {
+            return cached
+        }
+        val fresh = LocalMediaStoreIndex.load(resolver)
+        cachedLocalIndex = fresh
+        cachedLocalIndexAt = now
+        return fresh
     }
 
     /**
@@ -307,6 +343,18 @@ class ICloudMediaProvider : CloudMediaProvider() {
      * read. Only if the download is not available in time do we fall back to the JPEG thumbnail,
      * which at least paints something instead of an empty square.
      */
+    /**
+     * Returns either a grid thumbnail or full-resolution preview bytes for [mediaId].
+     *
+     * The system PhotoPicker routes **both** grid tiles and full-screen previews through
+     * `onOpenPreview` (not `onOpenMedia`, which only runs when the user confirms selection):
+     * - Grid tiles pass `EXTRA_MEDIASTORE_THUMB=true` (or `EXTRA_PREVIEW_THUMBNAIL=true` with a
+     *   small box `size`) and are always served from the lightweight `thumbUrl` JPEG cache for both
+     *   photos and videos so scrolling never triggers video downloads.
+     * - Full-screen previews pass `EXTRA_MEDIASTORE_THUMB=false` (or omit thumbnail flags / ask
+     *   for display-sized bounds) and fetch full media via [getOrDownloadMediaFile], giving photos
+     *   high-resolution bytes and ExoPlayer a real playable video container without any size cap.
+     */
     override fun onOpenPreview(
         mediaId: String,
         size: Point,
@@ -317,44 +365,53 @@ class ICloudMediaProvider : CloudMediaProvider() {
         val thumbRequested = extras?.getBoolean(
             CloudMediaProviderContract.EXTRA_PREVIEW_THUMBNAIL, false
         ) ?: false
+        val mediaStoreThumb = if (extras?.containsKey(EXTRA_MEDIASTORE_THUMB) == true) {
+            extras.getBoolean(EXTRA_MEDIASTORE_THUMB, false)
+        } else {
+            null
+        }
+        val isGridThumbnail = isGridThumbnailRequest(size.x, size.y, thumbRequested, mediaStoreThumb)
 
         logPreviewExtras(mediaId, extras, size)
 
         val isVideo = isVideoAsset(mediaId)
 
-        // Video: prefer the real container so `VideoDecoder` can extract a frame.
-        var previewFile: File? = null
-        if (isVideo) {
-            previewFile = try {
-                getVideoPreviewFile(mediaId)
-            } catch (e: Exception) {
-                Log.w(TAG, "openPreview video fetch failed media=$mediaId", e)
-                null
-            }
-            if (previewFile == null) {
-                Log.d(
-                    TAG,
-                    "openPreview video falling back to still media=$mediaId " +
-                        "elapsed=${System.currentTimeMillis() - startedAt}ms"
-                )
-            }
-        }
-
-        // Image rows, and any video whose full file was not available in time.
-        if (previewFile == null) {
-            previewFile = try {
+        var previewFile: File? = if (isGridThumbnail) {
+            try {
                 getOrProvidePreviewFile(mediaId, signal)
             } catch (e: Exception) {
                 Log.w(TAG, "openPreview EXCEPTION media=$mediaId", e)
                 null
+            }
+        } else {
+            val fullFile = try {
+                getOrDownloadMediaFile(
+                    mediaId = mediaId,
+                    signal = if (isVideo) signal else null
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "openPreview full-media failed media=$mediaId", e)
+                null
+            }
+            // Only photos may fall back to the still thumbnail; returning a JPEG to ExoPlayer on
+            // full-screen video preview triggers UnrecognizedInputFormatException and endless retries.
+            if (fullFile == null && !isVideo) {
+                try {
+                    getOrProvidePreviewFile(mediaId, signal)
+                } catch (e: Exception) {
+                    Log.w(TAG, "openPreview still fallback EXCEPTION media=$mediaId", e)
+                    null
+                }
+            } else {
+                fullFile
             }
         }
 
         if (previewFile == null) {
             Log.w(
                 TAG,
-                "openPreview MISS media=$mediaId size=${size.x}x${size.y} video=$isVideo " +
-                    "thumbExtra=$thumbRequested canceled=${signal?.isCanceled} " +
+                "openPreview MISS media=$mediaId size=${size.x}x${size.y} gridThumb=$isGridThumbnail " +
+                    "video=$isVideo thumbExtra=$thumbRequested canceled=${signal?.isCanceled} " +
                     "elapsed=${System.currentTimeMillis() - startedAt}ms"
             )
             throw FileNotFoundException("Preview not found for $mediaId")
@@ -363,8 +420,9 @@ class ICloudMediaProvider : CloudMediaProvider() {
         val length = previewFile.length()
         Log.d(
             TAG,
-            "openPreview OK media=$mediaId size=${size.x}x${size.y} bytes=$length video=$isVideo " +
-                "file=${previewFile.name} elapsed=${System.currentTimeMillis() - startedAt}ms"
+            "openPreview OK media=$mediaId size=${size.x}x${size.y} gridThumb=$isGridThumbnail " +
+                "bytes=$length video=$isVideo file=${previewFile.name} " +
+                "elapsed=${System.currentTimeMillis() - startedAt}ms"
         )
         val pfd = ParcelFileDescriptor.open(previewFile, ParcelFileDescriptor.MODE_READ_ONLY)
         return AssetFileDescriptor(pfd, 0, length)
@@ -616,10 +674,16 @@ class ICloudMediaProvider : CloudMediaProvider() {
                 // than accepting the dedup window's cached answer.
                 val needRefresh = thumbUrl.isNullOrBlank() || ageMs > PREVIEW_URL_MAX_AGE_MS
                 if (needRefresh) {
-                    val refreshRes = appContainer.photoRepository.refreshUrlsForMaster(
-                        asset.masterId,
-                        force = isVideo && thumbUrl.isNullOrBlank()
-                    )
+                    val forceVideoThumb = isVideo && thumbUrl.isNullOrBlank()
+                    val refreshRes = if (forceVideoThumb) {
+                        appContainer.photoRepository.refreshUrlsForMaster(
+                            asset.masterId,
+                            force = true
+                        )
+                    } else {
+                        // Coalesce burst refreshes into a single `/records/lookup` when scrolling.
+                        appContainer.photoRepository.requestUrlRefresh(asset.masterId)
+                    }
                     if (refreshRes.isSuccess) {
                         val fresh = refreshRes.getOrNull()
                         thumbUrl = pick(fresh?.thumbUrl, fresh?.medUrl, fresh?.originalUrl)
@@ -719,53 +783,15 @@ class ICloudMediaProvider : CloudMediaProvider() {
         }
     }
 
-    /**
-     * Video container for a grid tile, bounded so it can never starve the process.
-     *
-     * The previous path downloaded the full video on the binder thread and the shared
-     * `Dispatchers.IO` with no size cap. Scrolling into early years (dense with videos) produced
-     * 100 MB - 1.3 GB transfers, several of them concurrently for the same file; those blocked
-     * every IO thread, so `/records/lookup` refreshes timed out (30 s), the stored signatures
-     * expired (HTTP 410) and tiles stayed blank - app-wide, because the repository is shared.
-     *
-     * Now: transfers run on the bounded [previewDownloadPool], are coalesced per asset, are
-     * refused above [VIDEO_PREVIEW_MAX_BYTES] (remembered in [oversizeVideos]), and the caller
-     * waits at most [PREVIEW_SLOW_WAIT_MS]. Returns null to fall back to the still thumbnail.
-     */
-    private fun getVideoPreviewFile(mediaId: String): File? {
-        val mediaDir = File(context?.cacheDir, "cmp_media").apply { mkdirs() }
-        val target = File(mediaDir, "$mediaId.full")
-        if (target.exists() && target.length() > 0) return target
-        if (oversizeVideos.contains(mediaId)) return null
-
-        val key = "video:$mediaId"
-        val task = inFlightDownloads.computeIfAbsent(key) {
-            previewDownloadPool.submit {
-                try {
-                    getOrDownloadMediaFile(mediaId, null, VIDEO_PREVIEW_MAX_BYTES)
-                    trimMediaCache(mediaDir)
-                } finally {
-                    inFlightDownloads.remove(key)
-                }
-            }
-        }
-        try {
-            task.get(PREVIEW_SLOW_WAIT_MS, TimeUnit.MILLISECONDS)
-        } catch (e: TimeoutException) {
-            Log.d(TAG, "video preview AWAIT slow-timeout media=$mediaId")
-        } catch (e: Exception) {
-            Log.w(TAG, "video preview AWAIT failed media=$mediaId", e)
-        }
-        return target.takeIf { it.exists() && it.length() > 0 }
-    }
-
-    /** Keeps `cmp_media` under [MEDIA_CACHE_MAX_BYTES] by deleting the oldest files first. */
-    private fun trimMediaCache(dir: File) {
+    /** Keeps `cmp_media` under [MEDIA_CACHE_MAX_BYTES] by deleting the oldest files first, never evicting [protectFile]. */
+    private fun trimMediaCache(dir: File, protectFile: File? = null) {
         val files = dir.listFiles { f -> f.isFile && !f.name.endsWith(".tmp") } ?: return
         var total = files.sumOf { it.length() }
         if (total <= MEDIA_CACHE_MAX_BYTES) return
+        val protectPath = protectFile?.absolutePath
         for (f in files.sortedBy { it.lastModified() }) {
             if (total <= MEDIA_CACHE_MAX_BYTES) break
+            if (protectPath != null && f.absolutePath == protectPath) continue
             total -= f.length()
             f.delete()
         }
@@ -773,57 +799,129 @@ class ICloudMediaProvider : CloudMediaProvider() {
 
     private fun getOrDownloadMediaFile(
         mediaId: String,
-        signal: CancellationSignal?,
-        maxBytes: Long = Long.MAX_VALUE
+        signal: CancellationSignal?
     ): File? = runBlocking {
         withContext(Dispatchers.IO) {
-            Log.d(TAG, "getOrDownloadMediaFile START mediaId=$mediaId")
-            val mediaDir = File(context?.cacheDir, "cmp_media").apply { mkdirs() }
-            val targetFile = File(mediaDir, "$mediaId.full")
-            if (targetFile.exists() && targetFile.length() > 0) {
-                Log.d(TAG, "getOrDownloadMediaFile CACHED mediaId=$mediaId file=${targetFile.name} bytes=${targetFile.length()}")
-                return@withContext targetFile
-            }
+            val mediaLock = mediaMutexes.computeIfAbsent(mediaId) { Mutex() }
+            mediaLock.withLock {
+                if (signal?.isCanceled == true) {
+                    Log.d(TAG, "getOrDownloadMediaFile CANCELED before start mediaId=$mediaId")
+                    return@withContext null
+                }
 
-            val appContainer = container ?: run {
-                Log.w(TAG, "getOrDownloadMediaFile NO AppContainer mediaId=$mediaId")
-                return@withContext null
-            }
-            val db = appContainer.photoDatabase
-            val asset = db.photoDao().getPhotoById(mediaId) ?: run {
-                Log.w(TAG, "getOrDownloadMediaFile NO DB ROW mediaId=$mediaId")
-                return@withContext null
-            }
+                Log.d(TAG, "getOrDownloadMediaFile START mediaId=$mediaId")
+                val ctx = context
+                val mediaDir = File(ctx?.cacheDir, "cmp_media").apply { mkdirs() }
+                val appContainer = container ?: run {
+                    Log.w(TAG, "getOrDownloadMediaFile NO AppContainer mediaId=$mediaId")
+                    return@withContext null
+                }
+                val db = appContainer.photoDatabase
+                val asset = db.photoDao().getPhotoById(mediaId) ?: run {
+                    Log.w(TAG, "getOrDownloadMediaFile NO DB ROW mediaId=$mediaId")
+                    return@withContext null
+                }
 
-            var mediaUrl = asset.originalUrl ?: asset.medUrl ?: asset.thumbUrl
-            val ageMs = System.currentTimeMillis() - asset.urlFetchedAt
-            if (mediaUrl.isNullOrBlank() || ageMs > 12 * 60 * 1000L) {
-                Log.d(TAG, "getOrDownloadMediaFile REFRESHING URL mediaId=$mediaId ageMs=$ageMs masterId=${asset.masterId}")
-                val refreshRes = appContainer.photoRepository.refreshUrlsForMaster(asset.masterId)
-                if (refreshRes.isSuccess) {
-                    val fresh = refreshRes.getOrNull()
-                    mediaUrl = fresh?.originalUrl ?: fresh?.medUrl ?: fresh?.thumbUrl
-                    Log.d(TAG, "getOrDownloadMediaFile REFRESH OK mediaId=$mediaId urlHost=${hostOf(mediaUrl)}")
+                val isVideo = isVideoAsset(asset)
+                val isLivePhoto = !isVideo && (
+                    asset.mediaType.equals("LIVE_PHOTO", ignoreCase = true) ||
+                        !asset.videoComplUrl.isNullOrBlank()
+                    )
+
+                // Live Photos use a separate `.motion.jpg` cache suffix so pre-existing static
+                // `.full` cache files are never mistaken for converted Motion Photos.
+                val motionFile = File(mediaDir, "$mediaId.motion.jpg")
+                if (isLivePhoto && motionFile.exists() && motionFile.length() > 0) {
+                    motionFile.setLastModified(System.currentTimeMillis())
+                    Log.d(
+                        TAG,
+                        "getOrDownloadMediaFile CACHED MOTION mediaId=$mediaId " +
+                            "file=${motionFile.name} bytes=${motionFile.length()}"
+                    )
+                    return@withContext motionFile
+                }
+
+                if (isLivePhoto && ctx != null) {
+                    val packedRes = MediaStoreDownloader.downloadMotionPhotoToFile(
+                        context = ctx,
+                        photo = asset,
+                        repository = appContainer.photoRepository,
+                        destFile = motionFile,
+                        isCanceled = { signal?.isCanceled == true }
+                    )
+                    if (packedRes.isSuccess) {
+                        motionFile.setLastModified(System.currentTimeMillis())
+                        trimMediaCache(mediaDir, protectFile = motionFile)
+                        Log.d(
+                            TAG,
+                            "getOrDownloadMediaFile MOTION OK mediaId=$mediaId " +
+                                "bytes=${motionFile.length()}"
+                        )
+                        return@withContext motionFile
+                    }
+                    Log.w(
+                        TAG,
+                        "getOrDownloadMediaFile MOTION failed mediaId=$mediaId, falling back to still: " +
+                            "${packedRes.exceptionOrNull()?.message}"
+                    )
+                    if (signal?.isCanceled == true) return@withContext null
+                }
+
+                val targetFile = File(mediaDir, "$mediaId.full")
+                if (targetFile.exists() && targetFile.length() > 0) {
+                    targetFile.setLastModified(System.currentTimeMillis())
+                    Log.d(TAG, "getOrDownloadMediaFile CACHED mediaId=$mediaId file=${targetFile.name} bytes=${targetFile.length()}")
+                    return@withContext targetFile
+                }
+
+                // Re-read in case downloadMotionPhotoToFile refreshed URLs above.
+                val currentAsset = db.photoDao().getPhotoById(mediaId) ?: asset
+                var mediaUrl = currentAsset.originalUrl ?: currentAsset.medUrl ?: currentAsset.thumbUrl
+                val ageMs = System.currentTimeMillis() - currentAsset.urlFetchedAt
+                var refreshed = false
+                if (mediaUrl.isNullOrBlank() || ageMs > PREVIEW_URL_MAX_AGE_MS) {
+                    refreshed = true
+                    Log.d(TAG, "getOrDownloadMediaFile REFRESHING URL mediaId=$mediaId ageMs=$ageMs masterId=${currentAsset.masterId}")
+                    val refreshRes = appContainer.photoRepository.refreshUrlsForMaster(currentAsset.masterId)
+                    if (refreshRes.isSuccess) {
+                        val fresh = refreshRes.getOrNull()
+                        mediaUrl = fresh?.originalUrl ?: fresh?.medUrl ?: fresh?.thumbUrl
+                        Log.d(TAG, "getOrDownloadMediaFile REFRESH OK mediaId=$mediaId urlHost=${hostOf(mediaUrl)}")
+                    } else {
+                        Log.w(TAG, "getOrDownloadMediaFile REFRESH FAILED mediaId=$mediaId err=${refreshRes.exceptionOrNull()?.message}")
+                    }
+                }
+
+                if (mediaUrl.isNullOrBlank()) {
+                    Log.w(TAG, "getOrDownloadMediaFile NO MEDIA URL mediaId=$mediaId")
+                    return@withContext null
+                }
+
+                Log.d(TAG, "getOrDownloadMediaFile DOWNLOADING mediaId=$mediaId host=${hostOf(mediaUrl)}")
+                var ok = downloadToFile(mediaUrl, targetFile, signal = signal)
+                if (!ok && signal?.isCanceled != true && !refreshed) {
+                    val refreshRes = appContainer.photoRepository.refreshUrlsForMaster(
+                        asset.masterId,
+                        force = true
+                    )
+                    if (refreshRes.isSuccess) {
+                        val fresh = refreshRes.getOrNull()
+                        val retryUrl = fresh?.originalUrl ?: fresh?.medUrl ?: fresh?.thumbUrl
+                        if (!retryUrl.isNullOrBlank()) {
+                            Log.d(TAG, "getOrDownloadMediaFile RETRY mediaId=$mediaId host=${hostOf(retryUrl)}")
+                            ok = downloadToFile(retryUrl, targetFile, signal = signal)
+                        }
+                    }
+                }
+                if (!ok) {
+                    Log.w(TAG, "openMedia download failed media=$mediaId canceled=${signal?.isCanceled}")
+                    null
                 } else {
-                    Log.w(TAG, "getOrDownloadMediaFile REFRESH FAILED mediaId=$mediaId err=${refreshRes.exceptionOrNull()?.message}")
+                    targetFile.setLastModified(System.currentTimeMillis())
+                    trimMediaCache(mediaDir, protectFile = targetFile)
+                    Log.d(TAG, "getOrDownloadMediaFile DOWNLOAD OK mediaId=$mediaId bytes=${targetFile.length()}")
+                    targetFile
                 }
-            }
-
-            if (mediaUrl.isNullOrBlank()) {
-                Log.w(TAG, "getOrDownloadMediaFile NO MEDIA URL mediaId=$mediaId")
-                return@withContext null
-            }
-
-            Log.d(TAG, "getOrDownloadMediaFile DOWNLOADING mediaId=$mediaId host=${hostOf(mediaUrl)}")
-            if (!downloadToFile(mediaUrl, targetFile, maxBytes = maxBytes)) {
-                if (maxBytes != Long.MAX_VALUE && lastDownloadOversize.get() == true) {
-                    oversizeVideos.add(mediaId)
-                }
-                Log.w(TAG, "openMedia download failed media=$mediaId")
-                null
-            } else {
-                Log.d(TAG, "getOrDownloadMediaFile DOWNLOAD OK mediaId=$mediaId bytes=${targetFile.length()}")
-                targetFile
             }
         }
     }
@@ -858,12 +956,12 @@ class ICloudMediaProvider : CloudMediaProvider() {
         urlStr: String,
         destination: File,
         requireImage: Boolean = false,
-        maxBytes: Long = Long.MAX_VALUE
+        signal: CancellationSignal? = null
     ): Boolean {
         val tempFile = File(destination.parentFile, "${destination.name}.tmp")
         var conn: HttpURLConnection? = null
-        lastDownloadOversize.set(false)
         return try {
+            if (signal?.isCanceled == true) return false
             val url = URL(urlStr)
             conn = (url.openConnection() as HttpURLConnection).apply {
                 connectTimeout = 15000
@@ -878,32 +976,25 @@ class ICloudMediaProvider : CloudMediaProvider() {
                 return false
             }
 
-            if (maxBytes != Long.MAX_VALUE && conn.contentLengthLong > maxBytes) {
-                Log.w(TAG, "download refused: ${conn.contentLengthLong}B > cap ${maxBytes}B dest=${destination.name}")
-                lastDownloadOversize.set(true)
-                return false
-            }
-
-            var exceeded = false
+            var canceled = false
             conn.inputStream.use { input ->
                 FileOutputStream(tempFile).use { output ->
                     val buffer = ByteArray(8192)
                     var read: Int
-                    var total = 0L
                     while (input.read(buffer).also { read = it } != -1) {
-                        total += read
-                        if (total > maxBytes) {
-                            exceeded = true
+                        if (signal?.isCanceled == true) {
+                            canceled = true
                             break
                         }
                         output.write(buffer, 0, read)
                     }
-                    output.flush()
+                    if (!canceled) {
+                        output.flush()
+                    }
                 }
             }
-            if (exceeded) {
-                Log.w(TAG, "download aborted: exceeded cap ${maxBytes}B dest=${destination.name}")
-                lastDownloadOversize.set(true)
+            if (canceled) {
+                Log.d(TAG, "download canceled dest=${destination.name}")
                 tempFile.delete()
                 return false
             }
@@ -1032,8 +1123,19 @@ class ICloudMediaProvider : CloudMediaProvider() {
          *  4 — BACK to a real video MIME, with `onOpenPreview` now serving the video container so
          *      `VideoDecoder` can extract a frame. Fixes the type regression from 2 while keeping
          *      the tile decodable.
+         *  5 — Live Photos report `STANDARD_MIME_TYPE_EXTENSION_MOTION_PHOTO` (3) so the picker
+         *      shows the Motion Photo badge and serves converted Motion Photo bytes on selection.
+         *  6 — Populate `MEDIA_STORE_URI` for backed-up/downloaded items present on-device so the
+         *      picker deduplicates local + cloud rows, and ensure `currentSyncGeneration` is non-zero
+         *      even when `sessionGeneration == 0`.
          */
-        private const val SCHEMA_VERSION = 4L
+        private const val SCHEMA_VERSION = 6L
+
+        private const val LOCAL_INDEX_TTL_MS = 10_000L
+        @Volatile
+        private var cachedLocalIndex: LocalMediaStoreIndex? = null
+        @Volatile
+        private var cachedLocalIndexAt: Long = 0L
 
         /**
          * Smallest file we will accept as a cached thumbnail.
@@ -1078,17 +1180,39 @@ class ICloudMediaProvider : CloudMediaProvider() {
          */
         private const val PREVIEW_POOL_SIZE = 6
 
-        /** Largest video the grid may fetch whole just to grab a frame from. */
-        private const val VIDEO_PREVIEW_MAX_BYTES = 24L * 1024 * 1024
-
         /** Upper bound for `cmp_media`; oldest files are evicted beyond this. */
         private const val MEDIA_CACHE_MAX_BYTES = 300L * 1024 * 1024
 
-        /** Videos known to exceed [VIDEO_PREVIEW_MAX_BYTES]; never re-fetched for tiles. */
-        private val oversizeVideos: MutableSet<String> = ConcurrentHashMap.newKeySet()
+        /** Picker extra indicating MediaStore-sized grid thumbnails vs fullscreen preview. */
+        private const val EXTRA_MEDIASTORE_THUMB = "android.provider.extra.MEDIASTORE_THUMB"
 
-        /** Set by the last [downloadToFile] call on this thread's behalf (cap hit). */
-        private val lastDownloadOversize: ThreadLocal<Boolean> = ThreadLocal.withInitial { false }
+        /** Max bounding edge (px) for grid thumbnails when `EXTRA_MEDIASTORE_THUMB` is absent. */
+        private const val THUMB_MAX_EDGE_PX = 768
+
+        /** Per-media mutexes serializing full-resolution / video downloads (shared with `onOpenMedia`). */
+        private val mediaMutexes = ConcurrentHashMap<String, Mutex>()
+
+        /**
+         * Classifies an `onOpenPreview` call as a grid thumbnail (`true`) or a full-screen
+         * preview (`false`).
+         *
+         * - When `EXTRA_MEDIASTORE_THUMB` is present (`com.google.android.photopicker`), it is
+         *   authoritative (`true` for 478x478 grid tiles, `false` for 2256x1818 photo previews and
+         *   2256x2256 ExoPlayer video previews).
+         * - When it is absent (legacy AOSP pickers), only `EXTRA_PREVIEW_THUMBNAIL=true` paired
+         *   with thumbnail-scale bounds (or unspecified bounds) counts as a grid thumbnail.
+         */
+        internal fun isGridThumbnailRequest(
+            width: Int,
+            height: Int,
+            previewThumbnail: Boolean,
+            mediaStoreThumb: Boolean?
+        ): Boolean {
+            if (mediaStoreThumb != null) return mediaStoreThumb
+            if (!previewThumbnail) return false
+            val maxEdge = maxOf(width, height)
+            return maxEdge <= 0 || maxEdge <= THUMB_MAX_EDGE_PX
+        }
 
         /**
          * Must stay byte-identical to `ICloudPhotoKeyer.key()`:
@@ -1156,6 +1280,26 @@ class ICloudMediaProvider : CloudMediaProvider() {
          * That costs nothing: the item is a photo either way, and the original HEIC reaches the
          * caller through `onOpenMedia`.
          */
+        /**
+         * Returns the `STANDARD_MIME_TYPE_EXTENSION` column value for a picker row so Live Photos
+         * display the Motion Photo badge and are treated as Motion Photos on preview & selection.
+         */
+        internal fun standardMimeTypeExtensionFor(
+            mediaType: String,
+            videoComplUrl: String? = null
+        ): Int {
+            if (mediaType.equals("VIDEO", ignoreCase = true)) {
+                return CloudMediaProviderContract.MediaColumns.STANDARD_MIME_TYPE_EXTENSION_NONE
+            }
+            val isLivePhoto = mediaType.equals("LIVE_PHOTO", ignoreCase = true) ||
+                !videoComplUrl.isNullOrBlank()
+            return if (isLivePhoto) {
+                CloudMediaProviderContract.MediaColumns.STANDARD_MIME_TYPE_EXTENSION_MOTION_PHOTO
+            } else {
+                CloudMediaProviderContract.MediaColumns.STANDARD_MIME_TYPE_EXTENSION_NONE
+            }
+        }
+
         internal fun mimeTypeFor(filename: String, mediaType: String): String {
             val name = filename.lowercase()
             val isVideo = mediaType.equals("VIDEO", ignoreCase = true)

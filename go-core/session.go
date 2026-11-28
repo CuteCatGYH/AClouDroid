@@ -254,7 +254,10 @@ func (s *Session) NewRequest(method, reqURL string, body string) (*http.Request,
 func (s *Session) HasCookieIgnoreCase(name string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return s.hasCookieIgnoreCaseLocked(name)
+}
 
+func (s *Session) hasCookieIgnoreCaseLocked(name string) bool {
 	for k := range s.CookieMap {
 		if strings.EqualFold(k, name) {
 			return true

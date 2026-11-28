@@ -30,6 +30,9 @@ interface PhotoDao {
     @Query("DELETE FROM photo_assets WHERE assetDate <= 0 OR id = masterId")
     suspend fun deleteOrphanRows(): Int
 
+    @Query("SELECT EXISTS(SELECT 1 FROM photo_assets GROUP BY masterId HAVING COUNT(*) > 1)")
+    suspend fun hasDuplicateMasterRows(): Boolean
+
     /**
      * Deletes duplicate rows that share one `masterId`, keeping the oldest.
      *

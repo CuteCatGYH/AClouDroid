@@ -140,6 +140,13 @@ class MonthScanEngine(
 
             var state = loadOrCreateState()
 
+            if (photoDao.hasDuplicateMasterRows()) {
+                val purgedDuplicates = photoDao.deleteDuplicateMasterRows()
+                if (purgedDuplicates > 0) {
+                    Log.w(TAG, "Purged $purgedDuplicates duplicate rows sharing one masterId")
+                }
+            }
+
             if (!force && state.isComplete && photoDao.countUnbucketed() == 0 && monthIndexDao.getAll().isNotEmpty()) {
                 Log.d(TAG, "scanAll - library already fully scanned")
                 _progress.value = ScanProgress(
@@ -154,15 +161,6 @@ class MonthScanEngine(
             val purgedOrphans = photoDao.deleteOrphanRows()
             if (purgedOrphans > 0) {
                 Log.i(TAG, "Purged $purgedOrphans legacy orphan rows before scanning")
-            }
-
-            // Upload de-duplication used to be missing, so the same file could land twice as two
-            // `CPLAsset` records sharing one `CPLMaster`. Apple's clients collapse those (they key
-            // on the master) but our grid keys on the asset record name, so the library looked
-            // clean there and duplicated here. Cheap to sweep on every scan.
-            val purgedDuplicates = photoDao.deleteDuplicateMasterRows()
-            if (purgedDuplicates > 0) {
-                Log.w(TAG, "Purged $purgedDuplicates duplicate rows sharing one masterId")
             }
 
             // v4 migration left every pre-existing row at yearMonth = 0, and an interrupted scan

@@ -87,6 +87,13 @@
 | [ISS-072](#iss-072-分享后上传不自动开始content-uri-trigger-污染一次性任务) | **分享后上传不自动开始**：`addContentUriTrigger` 污染一次性任务 | 🔴 P0 | Android / WorkManager | ✅ 已修复 |
 | [ISS-073](#iss-073-系统文件选择器-documentsprovider-对接与照片云盘二级目录浏览缩略图自愈与补零排序) | **系统文件选择器 (DocumentsProvider) 对接**：iCloud Photo / Drive 二级目录、防溢出时间戳、缩略图自愈与补零排序 | 🔴 P0 | Android / Provider + SAF | ✅ 已完成 |
 | [ISS-074](#iss-074-系统分享多目标扩展与层级目录索引选择器) | **系统分享多目标扩展与层级目录索引选择器**：支持分享至 Photo 与 Drive、微信式选项 Sheet 及层级目录选择器 | 🟠 P1 | Android / UI + Share + Drive | ✅ 已完成 |
+| [ISS-076](#iss-076云上贵州账号超过-1-gib-的视频备份永远-413改走原生-mmcs-v2-上传) | **云上贵州账号 >1 GiB 视频备份永远 413**：改走苹果原生 CloudKit + MMCS（V2）上传 | 🔴 P0 | Go 核心层 / native + Android 设置 | ✅ 已修复（仅照片；云盘未通） |
+| [ISS-077](#iss-077原生登录在-android-上证书校验失败apple-root-ca-不受信任) | **原生登录在 Android 上证书校验失败**：`gsa.apple.com` 链到 Apple Root CA，Android 不信任 | 🔴 P0 | Go 核心层 / native TLS | ✅ 已修复 |
+| [ISS-078](#iss-078原生登录跳过双重认证验证码框苹果同时返回-pet-和需要验证码) | **原生登录跳过双重认证验证码框**：苹果同时返回 PET 和"需要验证码" | 🟠 P1 | Go 核心层 / native 登录 | ✅ 已修复 |
+| [ISS-079](#iss-079windows-设备指纹被苹果拒绝随机设备号与-app-改写-client-info) | **Windows 设备指纹被苹果拒绝**：随机设备号（-22410）与 App 改写 Client-Info（403） | 🟠 P1 | Windows 服务端 + Go native | 🟡 部分修复（完整登录未通过） |
+| [ISS-080](#iss-080-系统照片选择器深滑卡死并拖垮全应用同步go-rwmutex-递归读锁死锁与无界视频下载) | **系统照片选择器深滑卡死并拖垮全应用同步**：`GetSessionStateSummary` `sync.RWMutex` 递归读锁死锁 + 并发无界视频下载耗尽线程池 | 🔴 P0 | Go 核心层 & Android / Provider + Repository | ✅ 已修复 |
+| [ISS-081](#iss-081-系统照片选择器大屏预览模糊与大视频无限转圈onopenpreview-未区分宫格与大屏请求) | **系统照片选择器大屏预览模糊与大视频无限转圈**：`onOpenPreview` 未识别 `MEDIASTORE_THUMB=false`，照片只返回 `.thumb`、大视频被 24MB 截断并回退 JPEG | 🔴 P0 | Android / `ICloudMediaProvider` | ✅ 已修复 |
+| [ISS-082](#iss-082-系统照片选择器实况照片缺失动态角标未转-motion-photo-及本地云端重复展示) | **系统照片选择器实况照片无角标、未交付标准 Motion Photo、及本地云端/同 `masterId` 重复展示** | 🔴 P0 | Android / `ICloudMediaProvider` + `LocalMediaStoreMatcher` + `MediaStoreDownloader` + `PhotoDao` | ✅ 已修复 |
 
 ---
 
@@ -6223,3 +6230,263 @@ enqueueUniquePeriodicWork(UNIQUE_WORK_NAME, UPDATE, PeriodicWork(...).setConstra
 ### 验证
 - **单测**：`385 passed, 0 failed`。
 - **实机/模拟器**：在应用内切换语言（Follow System / 简体中文 / 繁體中文 / English）或在 Android 13+ 系统设置中切换 App Language，应用全界面（包含相册 Header、月份跳转浮层、备份队列弹窗、设置分类、导航栏开关、Toast）均瞬间、无缝重组为对应语言，且无会话重建（`ensureGoSession`）或图片缓存失效等副作用。
+
+---
+
+## ISS-076：云上贵州账号超过 1 GiB 的视频备份永远 413（改走原生 MMCS V2 上传）
+
+**优先级**：🔴 P0
+**归属**：Go 核心层 — `go-core/native/`（新包）、`go-core/native_api.go`、`go-core/upload.go`、`go-core/errors.go`；Android — `NativeUploadRepository.kt`、`NativeUploadDialog.kt`、`SessionManager.kt`、`PhotoRepository.kt`、`SettingsScreen.kt`
+**发现时间**：2026-11-25（诊断包 `iClouDroid_Diagnostic_20261125_000600.zip`）
+**合并**：[PR #1](https://github.com/CuteCatGYH/AClouDroid/pull/1)（`b2f4cc3`）
+**详细笔记**：`probes/native_ck/NOTES.md`（未入库）、`docs/HANDOFF_native_upload_2026-11-26.md`
+
+### 现象
+1. 自动备份队列里 1 项（queue 4162，`20261118_104553.mp4`，1.38 GiB）每轮都先传约 10 秒，再收到 `413 Request Entity Too Large`，重试 3 次后 FAILED。点「重试失败」又从头来一遍。
+2. 同一诊断包里另外 4 项是 `No item at .../media/<id>`（原文件已删），见下方「遗留」。
+
+### 根因
+1. 照片备份走网页 `/assets/upload`，整个文件**一次 POST** 到云上贵州 CDN 网关 `cws.icloud-content.com.cn`。这个网关对单次 body 卡 **1 GiB**（与 [ISS-057](#iss-057-drive-上传上限是云上贵州区特有国际区无此限制) 云盘的上限是同一个闸口）。
+2. 照片备份路径没有 Drive 那样的 `checkRegionUploadLimit` 前置检查，所以每轮都先传满 1 GiB 才失败。
+3. 这不是账号或存储配额：同账号照片库里已有 **63 个 >1 GiB** 的视频（最大 5.1 GiB），由苹果设备走原生协议传上去。
+
+### 修复方案
+苹果设备用 MMCS 分块协议上传：文件切 5 MiB 块，约 6 块一个 bucket，各自 PUT 到对象存储（照片区实测为阿里云 OSS `alibaba-cn-pvg-00001.oss-enet.aliyuncs.com`），每个 PUT 都远小于 1 GiB。
+
+链路（每步实测 200）：
+
+```
+GSA SRP 登录 + 2FA (gsa.apple.com)             -> PET
+setup/authenticate + get_account_settings      -> mmeAuthToken, cloudKitToken
+ckAppInit com.apple.photos.cloud               -> cloudKitUserId
+asset/retrieve/token (protobuf)                -> host / container / encodedInnerProto
+MMCS authorizePut                              -> targets[]
+逐 bucket PUT（预签名 URL）                     -> 200
+putComplete                                    -> 回执 receipt
+网页 /records/modify 建 CPLMaster + CPLAsset    -> 照片记录（沿用网页 Cookie）
+```
+
+**踩过的坑（全部实测）：**
+
+| 坑 | 错误表现 | 正确做法 |
+| --- | --- | --- |
+| 2026 版 `asset/retrieve/token` 多数情况不再内嵌 `uploadInfo`（rustpush 2023 假设内嵌） | 解析出 0 个目标 | 单独调 MMCS `authorizePut` |
+| CloudKit **有时**已在回复里内嵌了上传许可 | 再单独 `authorizePut` → 401 | 有内嵌就直接用（`upload.go`） |
+| `authorizePut` 令牌位置 | 放 body → 400；头格式错 → 401 | 只放头 `x-apple-mmcs-auth: <hex(totalSig)> <totalLen> <encodedInnerProto>`，body 里 `token` 留空 |
+| OSS 预签名 URL 的 `Host` | Go 默认发 `host:443` → `SignatureDoesNotMatch` 403 | `req.Host` 设成裸主机名 |
+| `putComplete` 的 `Etag` | 去引号 / 改大小写 → `Content MD5 ... did not match` | 原样带引号，`url` 带完整查询串 |
+| 照片区 `PrimarySync` 是 PCS 保护区，V1 格式 | 最后一个目标 `putComplete` → 400 空 body | 用 **V2（FORD）**：每块随机 33 字节密钥、AES-256-CTR、FORD 块 AES-SIV，`authorizePut` 和 token 请求带 `fordSig` |
+| 建记录字段 | — | `fileChecksum` = V2 文件签名，`referenceChecksum` = FORD 签名，`receipt` = 回执，`wrappingKey` = 原始 FORD key 的 base64 |
+
+**App 侧行为：**
+- 只有 `.icloud.com.cn` 账号 **且** 文件 > 1 GiB 才走原生；其余照旧走网页。缩略图仍走网页上传。
+- 原生登录在 设置 → 自动备份 → 大文件上传，需要设备指纹（anisette）服务器：默认 `https://new.ani.sidestore.io/`（须勾选免责声明），或用户自建 `scripts/anisette_server/`（教程 `docs/ANISETTE_SERVER.md`）。
+- 原生 Apple ID 必须和网页登录一致，否则 `NATIVE_ACCOUNT_MISMATCH`，不传。退出网页登录会一起清掉原生登录。
+- 大文件 + 未原生登录：上传前直接失败 `REGION_UPLOAD_LIMIT`，零流量、不重试。
+- 不可恢复错误（未登录 / 账号不一致 / 登录过期）跳过 3 次重试。
+- protobuf 用**自写**的 `native/proto/*.proto` + 生成代码（AGENTS §3.5），和参考实现逐字节一致；未并入 rustpush 的 SSPL 文件。
+
+**设备指纹的硬约束（实测）：**
+
+| 测试 | 结果 |
+| --- | --- |
+| 全部假指纹 | 401 |
+| 真设备号 + 假一次性码 | 401 |
+| 同一份真指纹，1 分钟内 / 2 分钟后 | 200 / 434 |
+| 用 A 设备指纹登录，换 B 设备指纹上传 | 401 |
+
+所以每次登录、每次上传开始都要现取一份新指纹，而且必须和登录时是同一台"设备"。字节开始传之后不再查指纹。
+
+### 验证
+- Go：RFC 加密向量、SRP、V2 签名、区域门回归（`native_gate_test.go`：大文件无原生登录必须立刻失败、零流量），全部通过。
+- 探针：1.1 GiB 随机文件 37 个目标全 200、无 413；1.38 GiB 4K 视频建记录后网页下载 sha256 一致。
+- **实机（debug 版）**：1.38 GiB 视频经 App 真实备份流程上传，3 分 38 秒，0 次重试，带缩略图；其他设备能播放、能显示缩略图。换用公开指纹服务器并断开 Mac 后再测一次，4 分 03 秒成功。
+
+### 遗留
+1. **iCloud 云盘 >1 GiB 未通**：V2 字节和回执都通过，网页 `update/documents` 返回 `Batch field validation error`。真实云盘文件是 V1 签名（`0x01`）+ 16 字节 `wrapping_key`，怀疑云盘服务器会真解开 `wrapping_key`。决定：云盘暂只放 1 GiB 以下。
+2. **boundary key 是随机的**：照片区目前网页 / iPhone 都能读；若苹果以后校验，需要 iCloud 钥匙串里的真密钥。
+3. 平板自己生成指纹未通：Apple Music 7.0.3（`libstoreapi.so`）和 6.5.2 的库都能加载，苹果审批报 `-29003 environment mismatch`。
+4. 诊断包里 4 项 `No item at` 仍被当普通读取失败重试（`PhotoRepository.kt` 约 2083 行）；同一视频重复入队（4135 / 4162）也未处理。
+
+---
+
+## ISS-077：原生登录在 Android 上证书校验失败（Apple Root CA 不受信任）
+
+**优先级**：🔴 P0
+**归属**：Go 核心层 — `go-core/native/tls.go`、`go-core/native/apple_roots.pem`、`go-core/native/native_test.go`
+**发现时间**：2026-11-25
+
+### 现象
+Mac 上探针登录一切正常；平板（debug 版）在 设置 → 大文件上传 点「登录」，立刻报证书错误。
+
+### 根因
+`gsa.apple.com` 的证书链到 **Apple Root CA**。macOS 默认信任它，Android 系统根证书库里没有。Go 在 Android 上只用系统根，所以拒绝连接。
+
+### 修复方案
+1. 把 Apple Root CA 和 Apple Root CA - G3 两张根证书内嵌进 `apple_roots.pem`（只这两张，去掉了一次误带的重复证书）。
+2. `appleTransport()` 用 `x509.SystemCertPool()` 再追加这两张根，native 包所有请求共用这一个 HTTP 客户端。
+3. **没有关闭任何证书校验**，不使用 `InsecureSkipVerify`。
+
+### 验证
+- 新测试 `TestEmbeddedAppleRootsVerifyLiveHosts`：只用内嵌的两张根（不用 Mac 系统证书库）校验 3 个苹果登录与上传主机的真实证书链，全部通过。
+- 实机：重装 debug 版后平板原生登录成功。
+
+---
+
+## ISS-078：原生登录跳过双重认证验证码框（苹果同时返回 PET 和"需要验证码"）
+
+**优先级**：🟠 P1
+**归属**：Go 核心层 — `go-core/native/login.go`、`go-core/native/gsa.go`
+**发现时间**：2026-11-25（用 Windows 设备指纹登录时）
+
+### 现象
+验证码已经推送到 Mac 上，但平板的登录框没有弹出验证码输入框，紧接着报错 HTTP 401。
+
+### 根因
+1. 苹果把这个 Windows 身份当成新设备，SRP 完成后的回复里**同时**带了 PET 令牌和 `au = trustedDeviceSecondaryAuth`。
+2. 旧代码先看到 PET，就当登录已完成，直接去换 `mmeAuthToken`。
+3. 这个 PET 在验证码校验前不能用，所以 `setup/authenticate` 返回 401。
+4. Mac 指纹登录时设备早已受信任，`au` 为空，所以之前没暴露。
+
+### 修复方案
+`login.go` **先判断 `AuthState`，再看 PET**：
+
+| `au` | 行为 |
+| --- | --- |
+| 空 + 有 PET | 登录完成 |
+| `trustedDeviceSecondaryAuth` | 推送到受信任设备，弹验证码框；推送失败改短信 |
+| `secondaryAuth` | 短信验证码 |
+| 其他未知值 + 有 PET | 尝试完成，并记日志 |
+
+### 验证
+Go 测试通过；重编 AAR 与 debug App 后平板正确弹出验证码框。（之后的完整登录被 ISS-079 的账号锁定挡住。）
+
+---
+
+## ISS-079：Windows 设备指纹被苹果拒绝（随机设备号与 App 改写 Client-Info）
+
+**优先级**：🟠 P1
+**归属**：Windows 服务端 — `scripts/anisette_server/windows/src/anisette.cpp`；Go native — `go-core/native/anisette.go`（`clientInfoFor` / `isWindowsClientInfo`）
+**发现时间**：2026-11-25
+**状态**：🟡 部分修复。登录第一步 `init` 能通过，完整登录未成功。
+
+### 现象
+平板改用自建 Windows 服务端的指纹后，登录第一步 GSA `init` 就失败，报 `-22410`。
+
+### 根因
+
+| Windows 发出的 | 苹果回复 |
+| --- | --- |
+| 随机生成的 `X-Mme-Device-Id` + 伪装成 Mac 的 Client-Info（照抄 AltServer 早期做法） | ❌ -22410 |
+| iCloud 自己的设备号 + 真实 Windows Client-Info，但 App 把结尾改写成 Mac 格式 | ❌ 403 |
+| iCloud 自己的设备号 + 真实 Windows Client-Info，原样发送 | ✅ 通过 |
+
+1. iCloud for Windows 自带一套设备身份，苹果只认这一套：`X-Mme-Device-Id` = AOSKit `_GetDeviceId()`，`X-Apple-I-MD-LU` = `_GetLocalUserUUID()`，Client-Info = AOSKit 原样的 `<PC> <Windows; ...> <com.apple.AOSKit/... (com.apple.iCloud/...)>`。
+2. App 为每个苹果服务把 Client-Info 结尾换成 Mac 的写法，Windows 描述被这么一改就对不上了。
+
+### 修复方案
+1. Windows 服务端改为读取 iCloud 自己的设备号和 LU，并原样输出 AOSKit 的 Client-Info。
+2. `clientInfoFor()` 识别 Windows 描述（`<PC>` 开头或含 `<Windows`）后**原样发送**，只对 Mac 风格的描述替换结尾。有 `TestClientInfoFor` 覆盖。
+
+### 验证与遗留
+- 11-25 21:33 只跑 `init`：✅。
+- 随后用户账号 + 这台 Windows：一次 2FA 没走完，之后连续返回 `-22410`、`503`，重启服务端、等待 15 小时后仍是 `-22410`。
+- 同一时间，**不存在的账号** + Windows 指纹正常返回"账号不对"，用户账号 + 公开指纹服务器正常。说明指纹本身苹果认，被锁的是"该账号 + 这台 PC"这一对。
+- 下一步：换一个 Apple ID 验证完整登录；确认 Windows 上 iCloud 登的账号。教程与 SPEC 中 Windows 版标为"测试中"。
+
+---
+
+## ISS-080：系统照片选择器深滑卡死并拖垮全应用同步（Go `sync.RWMutex` 递归读锁死锁与无界视频下载）
+
+**优先级**：🔴 P0
+**归属**：Go 核心层 — `go-core/core.go`、`go-core/session.go`、`go-core/session_summary_test.go`；Android — `ICloudMediaProvider.kt`、`PhotoRepository.kt`
+**发现时间**：2026-11-26 ~ 2026-11-28（真机 `SM_F9760` + 诊断包 `iClouDroid_Diagnostic_20261126_225140.zip`、`iClouDroid_Diagnostic_20261126_234345.zip`）
+
+### 现象
+1. 系统照片选择器跨年份快速来回拖动滚动条后，缩略图越加载越慢直到全部空白；随后回到 App 本体，相册也停止加载缩略图并一直卡在「正在同步」，只有杀进程重新登录才能恢复。
+2. 第一轮治理无界视频下载后，复现时间从数秒拉长到 ~4 分钟，但高并发拖动后仍会整进程卡死。
+
+### 日志证据
+- 第一份诊断包：视频密集年份触发 3 路并发 100 MB~1.3 GB 整片下载（实测 `1,312,033,543` 字节耗时 100~115s），打满 `Dispatchers.IO` 与连接池。
+- 第二份诊断包（`iClouDroid_Diagnostic_20261126_234345.zip`）：`23:39:34.745` 线程 `13232` 执行 `doRefreshUrls START master=AUoLXKvx+MB2Jz8PrILgtygZtotB` 后永久挂起（既不返回也不触发 30s 超时）；之后所有请求全部在 `ensureGoSession` 的 `sessionMutex.withLock` 处排队并逐个触发 30s `URL refresh timed out`。
+
+### 根因
+1. **Go `sync.RWMutex` 递归读锁死锁（主因）**：`GetSessionStateSummary()` 持有 `s.mu.RLock()` 后在锁内调用 4 次 `s.HasCookieIgnoreCase()`，后者**再次调用 `s.mu.RLock()`**。当任意并发 HTTP 响应触发 `ExtractAndSaveCookies()` → `s.mu.Lock()` 时，Go `sync.RWMutex` 会将写锁排在外层 `RLock` 之后、又将内层重入 `RLock` 阻塞在写锁之后，构成**永久互锁**。由于 Kotlin 在全局 `sessionMutex` 内调用不可取消的 JNI 接口 `Icloudcore.getSessionStateSummary()`，一旦死锁，全应用 `PhotoRepository`、`ICloudPhotoCoil`、`PhotosViewModel` 与 `ICloudMediaProvider` 的锁全部永久饿死。
+2. **选择器突发直链刷新未合并**：`ICloudMediaProvider.resolveThumbUrl()` 此前每格直调 `refreshUrlsForMaster`，滚动瞬间放大锁竞争与网络请求量。
+
+### 修复方案
+1. **消除 Go `RWMutex` 递归读锁**：在 `go-core/session.go` 新增无锁辅助函数 `hasCookieIgnoreCaseLocked()`；`go-core/core.go` 的 `GetSessionStateSummary()` 在单次 `s.mu.RLock()` / `s.mu.RUnlock()` 内拷贝全部字段并检测 Cookie 后释放读锁，再组装 JSON。
+2. **并发合并与慢调用监控**：`ICloudMediaProvider.resolveThumbUrl()` 常规刷新改走 `photoRepository.requestUrlRefresh()` 走 `UrlRefreshCoalescer` 批量合并；`PhotoRepository.kt` 保留 `sessionMutex` 等待 `> 2000ms` 及 Go 调用耗时/失败的 `Log.w` 告警。
+3. **重编 AAR**：`GOSUMDB=off ./scripts/build_aar.sh` 重新生成 `app/libs/icloudcore.aar`。
+
+### 验证
+- Go 测试：`go test -count=1 -shuffle=on ./...` 与 `go test -race -count=1 -run TestGetSessionStateSummaryNoDeadlockWithConcurrentCookieWrites ./...` 全部通过。
+- 真机 `SM_F9760` 验证：跨年份高频拖动手势下不再触发全局同步冻结与缩略图停摆。
+
+---
+
+## ISS-081：系统照片选择器大屏预览模糊与大视频无限转圈（`onOpenPreview` 未区分宫格与大屏请求）
+
+**优先级**：🔴 P0
+**归属**：Android — `provider/ICloudMediaProvider.kt`、`app/src/test/.../provider/PreviewRequestClassificationTest.kt`
+**发现时间**：2026-11-28（真机 `SM_F9760` 实测）
+
+### 现象
+1. 修复卡死后缩略图恢复正常，但此前为防止宫格下载超大视频加上的 `24 MB` 截断上限，使得：
+   - 照片在选择器内点击大屏预览，仍然只显示 ~50 KB 模糊的 `thumbUrl` 缩略图，未下载高清原片；
+   - 小于 24 MB 的视频点击大屏预览可正常播放，大于 24 MB 的视频大屏预览始终转圈加载不出。
+2. 同时宫格浏览小视频时也在下载 `< 24 MB` 的完整视频容器，浪费流量与池线程。
+
+### 日志证据
+真机 `com.google.android.photopicker` 请求 `onOpenPreview` 的真实参数对照：
+- 宫格缩略图：`size=478x478 {android.provider.extra.PREVIEW_THUMBNAIL=true, android.provider.extra.MEDIASTORE_THUMB=true}`（且视频回退 `.thumb` JPEG 后可由 Skia 正常解码，0 次 `setDataSource failed`）。
+- 照片大屏预览：`size=2256x1818 {android.provider.extra.PREVIEW_THUMBNAIL=true, android.provider.extra.MEDIASTORE_THUMB=false}`。
+- 视频大屏预览：`RemoteSurfaceController` + `ExoPlayer` 以 `size=2256x2256 {android.provider.extra.MEDIASTORE_THUMB=false}` 调用 `onOpenPreview`；>24MB 视频被截断后回退 `.thumb` JPEG，导致 `ExoPlayerImplInternal` 连续抛出 `ExoPlaybackException: Source error (UnrecognizedInputFormatException)` 并反复重试。
+
+### 根因
+系统照片选择器的**大屏预览同样走 `onOpenPreview`**（`onOpenMedia` 只在确认选中交付时调用）。旧实现未检查 `android.provider.extra.MEDIASTORE_THUMB` 与请求尺寸 `size`：
+1. 对照片大屏预览直接走了 `getOrProvidePreviewFile()`，4ms 命中 `.thumb` 缓存返回糊图；
+2. 对视频无论宫格还是大屏统一走了带 `24 MB` 上限与 `oversizeVideos` 黑名单的 `getVideoPreviewFile()`，导致大图缩略与大屏播放逻辑互相伤害。
+
+### 修复方案
+1. **精确分流（`isGridThumbnailRequest`）**：优先读取 `android.provider.extra.MEDIASTORE_THUMB`（`true` → 宫格、`false` → 大屏），兼容未带该 key 的旧版选择器（按 `EXTRA_PREVIEW_THUMBNAIL` 与最大边 `<= 768px` 判断）。
+2. **移除 `24 MB` 视频截断与 `oversizeVideos`**：
+   - 宫格缩略图：照片与视频统一直接走 `getOrProvidePreviewFile()` 加载轻量 `thumbUrl` JPEG；
+   - 大屏预览：照片与视频统一走 `getOrDownloadMediaFile()` 下载原片/完整视频；仅照片失败时允许降级到 `.thumb`，视频大屏**绝不回退 JPEG**，并对视频预览响应 `CancellationSignal` 以免滑走后继续白费流量。
+3. **媒体下载并发控制与缓存保护**：`getOrDownloadMediaFile` 增加按 `mediaId` 的协程 `Mutex` 去重（防止 `ExoPlayer` 短时间内 6~9 次探针打开踩坏 `.tmp`），`trimMediaCache` 更新访问时间并保护当前文件不被单文件超 300MB 时自删。
+
+### 验证
+- 单测 `PreviewRequestClassificationTest` 通过；真机实测照片大屏预览可拉取 `originalUrl` 高清原图（日志 `gridThumb=false ... .full`），各体积视频大屏预览可正常缓冲播放。
+
+---
+
+## ISS-082：系统照片选择器实况照片无角标、未交付标准 Motion Photo、及本地云端重复展示
+
+**优先级**：🔴 P0
+**归属**：Android — `provider/ICloudMediaProvider.kt`、`provider/LocalMediaStoreMatcher.kt`、`feature/photos/data/MediaStoreDownloader.kt`、`feature/photos/data/PhotoRepository.kt`、`feature/photos/data/MonthScanEngine.kt`、`feature/photos/data/db/PhotoDao.kt`
+**发现时间**：2026-11-28（真机 `SM_F9760` 实测）
+
+### 现象
+1. 系统照片选择器中所有 iCloud 实况照片右上角没有动态角标（Motion Photo 图标），且选中后下载到外部应用的是静态图而非转换后的标准 Motion Photo。
+2. 开启系统角标与缓存刷新后，选择器网格中同时并排出现大量成对的相同照片与相同实况图（如手机拍摄并已备份到 iCloud 的 `20260925_210741.jpg`~`20260925_210833.jpg` 与部分截图）。
+
+### 日志与数据库证据
+- `ICloudMediaProvider.onQueryMedia` 此前将 `STANDARD_MIME_TYPE_EXTENSION` 写死为 `0`，且 `getOrDownloadMediaFile` 只下载 `originalUrl` 静态图而未拉取 `videoComplUrl` 打包。
+- 实测真机 `icloud_photos.db` 与本地 `MediaStore`：
+  1. 手机本地 `content://media/external/images/media` 存有 `_id=2322..2329`（`20260925_210741.jpg` 等，`datetaken=1790341661246`, `_size=7862450`），云端 `photo_assets` 亦有同名备份条目（`assetDate=1790341661000`, `size=3013635` —— 上传时分离伴随视频导致大小不同）；因 `MEDIA_STORE_URI` 始终返回 `null`，系统将本地与云端展示成相邻两张。
+  2. `photo_assets` 存在 **93 组**同 `masterId` 重复行（`16,933` 行 vs `16,837` 个 `masterId`）：`MonthScanEngine` 在 `state.isComplete` 时提前 return 跳过了 `deleteDuplicateMasterRows()`，增量 `upsertPhotosWithMerge()` 也未清扫。
+  3. 日志显示 `onQueryMedia ... gen=0`：`sessionGeneration` 为 `0` 时 `0 * SCHEMA_VERSION == 0`，且 `onQueryMedia` 未乘 `SCHEMA_VERSION`，导致 `SCHEMA_VERSION` 递增在零代数会话上失效。
+
+### 修复方案
+1. **实况角标与标准 Motion Photo 单文件交付**：
+   - `onQueryMedia` 为非视频且 `mediaType == "LIVE_PHOTO"`（或有 `videoComplUrl`）的条目上报 `STANDARD_MIME_TYPE_EXTENSION_MOTION_PHOTO`（`3`），`MIME_TYPE` 保持 `"image/jpeg"`。
+   - 在 `MediaStoreDownloader.kt` 提取共享方法 `downloadMotionPhotoToFile()` / `packLivePhotoBytesToFile()`（保留 EXIF、物理旋正像素、写入临时 JPEG 后再注入 `GCamera:MotionPhoto` XMP 与伴随视频，确保偏移准确）；`ICloudMediaProvider.getOrDownloadMediaFile()` 为实况照片生成并缓存 `.motion.jpg`（大屏预览与 `onOpenMedia` 均直接交付，缺失伴随视频时安全回退静态原图）。
+2. **本地 `MediaStore` 关联去重（`MEDIA_STORE_URI`）**：
+   - 新增 `LocalMediaStoreMatcher.kt`：每次选择器全量同步首页时扫描本地图片/视频并短期缓存（10s），通过同类型 + 文件名 + 拍摄时间窗（`±2.5s` 兼容 CloudKit 秒级取整及三星 Motion Photo 分离后体积差异）/ 精确体积 / 同基名跨后缀（`.heic` ↔ `.jpg`）匹配并回填 `content://media/external/.../<id>`，让系统选择器自动合并本地与云端拷贝。
+3. **清扫同 `masterId` 重复行 & 修复同步代数计算**：
+   - `PhotoDao` 新增索引探测 `hasDuplicateMasterRows()`，在 `PhotoRepository.upsertPhotosWithMerge()`、`MonthScanEngine.scanAll()`（提前返回前）与 `ICloudMediaProvider.onQueryMedia(token == null)` 同步清扫重复行。
+   - 新增 `currentSyncGeneration()` = `(sessionGeneration + 1L) * SCHEMA_VERSION` 并升 `SCHEMA_VERSION` 至 `6L`，统一用于 `onGetMediaCollectionInfo` 与 `onQueryMedia`。
+
+### 验证
+- 单测：`LocalMediaStoreMatcherTest`、`MediaMimeTypeTest`、`PreviewRequestClassificationTest` 等全部通过，`./gradlew :app:testDebugUnitTest :app:assembleDebug --offline` `BUILD SUCCESSFUL`。
+- 真机 `SM_F9760` 安装最新 Debug APK 等待复测。

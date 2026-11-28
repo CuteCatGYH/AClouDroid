@@ -16,6 +16,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.HttpURLConnection
@@ -198,17 +200,48 @@ object MediaStoreDownloader {
         }
     }
 
-    private suspend fun downloadLivePhotoMotionPhoto(
+    /**
+     * Downloads the still image and paired companion video for a Live Photo and packs them into
+     * [destFile] as a single standard Motion Photo JPEG (pixels rotated upright, EXIF preserved,
+     * `GCamera:MotionPhoto` XMP injected, and companion video appended).
+     */
+    internal suspend fun downloadMotionPhotoToFile(
         context: Context,
-        photoUrl: String,
-        videoUrl: String,
         photo: PhotoAssetEntity,
         repository: PhotoRepository,
-        customRelativePath: String? = null,
-        onProgress: ((progressPercent: Int, downloadedBytes: Long) -> Unit)? = null
-    ): Result<Uri> {
+        destFile: File,
+        photoUrl: String? = photo.originalUrl ?: photo.medUrl ?: photo.thumbUrl,
+        videoUrl: String? = photo.videoComplUrl,
+        refreshIfStale: Boolean = true,
+        onProgress: ((progressPercent: Int, downloadedBytes: Long) -> Unit)? = null,
+        isCanceled: (() -> Boolean)? = null
+    ): Result<File> = withContext(Dispatchers.IO) {
+        var resolvedPhotoUrl = photoUrl
+        var resolvedVideoUrl = videoUrl
+        val isStale = refreshIfStale && (
+            resolvedPhotoUrl.isNullOrBlank() ||
+                resolvedVideoUrl.isNullOrBlank() ||
+                photo.sessionGeneration != repository.currentSessionGeneration() ||
+                (System.currentTimeMillis() - photo.urlFetchedAt > 12 * 60 * 1000L)
+            )
+        if (isStale) {
+            val refreshed = repository.refreshUrlsForMaster(photo.masterId, force = true).getOrNull()
+            if (refreshed != null) {
+                resolvedPhotoUrl = refreshed.originalUrl ?: refreshed.medUrl ?: refreshed.thumbUrl ?: resolvedPhotoUrl
+                if (!refreshed.videoComplUrl.isNullOrBlank()) {
+                    resolvedVideoUrl = refreshed.videoComplUrl
+                }
+            }
+        }
+        if (resolvedPhotoUrl.isNullOrBlank() || resolvedVideoUrl.isNullOrBlank()) {
+            return@withContext Result.failure(Exception("实况照片缺少原图或伴随视频链接"))
+        }
+        if (isCanceled?.invoke() == true) {
+            return@withContext Result.failure(Exception("下载已取消"))
+        }
+
         val photoBytes = fetchUrlBytes(
-            initialUrl = photoUrl,
+            initialUrl = resolvedPhotoUrl,
             masterId = photo.masterId,
             repository = repository,
             isVideo = false,
@@ -216,11 +249,12 @@ object MediaStoreDownloader {
             onProgress = { p, bytes ->
                 val calcPercent = if (p >= 0) (p * 0.3).toInt().coerceIn(0, 30) else -1
                 onProgress?.invoke(calcPercent, bytes)
-            }
-        ) ?: return Result.failure(Exception("无法获取静态原图数据"))
+            },
+            isCanceled = isCanceled
+        ) ?: return@withContext Result.failure(Exception("无法获取静态原图数据"))
 
         val videoBytes = fetchUrlBytes(
-            initialUrl = videoUrl,
+            initialUrl = resolvedVideoUrl,
             masterId = photo.masterId,
             repository = repository,
             isVideo = true,
@@ -228,10 +262,19 @@ object MediaStoreDownloader {
             onProgress = { p, bytes ->
                 val calcPercent = if (p >= 0) (30 + p * 0.7).toInt().coerceIn(30, 100) else -1
                 onProgress?.invoke(calcPercent, photoBytes.size.toLong() + bytes)
-            }
-        ) ?: return Result.failure(Exception("无法获取实况视频数据"))
+            },
+            isCanceled = isCanceled
+        ) ?: return@withContext Result.failure(Exception("无法获取实况视频数据"))
 
-        // Issue 2 & 3 Fix: Read EXIF metadata & orientation from original photoBytes
+        packLivePhotoBytesToFile(photoBytes, videoBytes, destFile, context.cacheDir)
+    }
+
+    private fun packLivePhotoBytesToFile(
+        photoBytes: ByteArray,
+        videoBytes: ByteArray,
+        destFile: File,
+        tempDir: File
+    ): Result<File> {
         val srcExif = try {
             ExifInterface(ByteArrayInputStream(photoBytes))
         } catch (e: Exception) {
@@ -267,66 +310,117 @@ object MediaStoreDownloader {
         val baos = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.JPEG, 95, baos)
         bitmap.recycle()
-        val jpegBytes = baos.toByteArray()
+        var jpegBytes = baos.toByteArray()
 
-        val baseName = photo.filename.substringBeforeLast('.')
-        val motionFilename = "$baseName.jpg"
-        val relativePath = customRelativePath?.takeIf { it.isNotBlank() }
-            ?: (Environment.DIRECTORY_PICTURES + "/iClouDroid")
-
-        val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        } else {
-            MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-        }
-
-        val contentValues = ContentValues().apply {
-            put(MediaStore.MediaColumns.DISPLAY_NAME, motionFilename)
-            put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
-                put(MediaStore.MediaColumns.IS_PENDING, 1)
-            }
-            if (photo.assetDate > 0) {
-                put(MediaStore.MediaColumns.DATE_TAKEN, photo.assetDate)
-                put(MediaStore.MediaColumns.DATE_ADDED, photo.assetDate / 1000)
-                put(MediaStore.MediaColumns.DATE_MODIFIED, photo.assetDate / 1000)
-            }
-        }
-
-        val resolver = context.contentResolver
-        val uri = resolver.insert(collection, contentValues)
-            ?: return Result.failure(Exception("创建 Motion Photo MediaStore 记录失败"))
-
-        try {
-            resolver.openOutputStream(uri)?.use { out ->
-                packJpegMotionPhoto(jpegBytes, videoBytes, out)
-            } ?: return Result.failure(Exception("无法打开 Motion Photo 输出流"))
-        } catch (e: Exception) {
-            resolver.delete(uri, null, null)
-            return Result.failure(e)
-        }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            contentValues.clear()
-            contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-            resolver.update(uri, contentValues, null, null)
-        }
-
-        // Copy original EXIF attributes (Camera Make, Model, ExposureTime, FNumber, ISO, GPS) to the output file
+        // Apply EXIF attributes onto the standalone JPEG before appending XMP & video bytes so the
+        // appended MP4 length in MicroVideoOffset / Item:Length remains exact.
         if (srcExif != null) {
+            tempDir.mkdirs()
+            val exifTemp = File.createTempFile("mp_exif_", ".jpg", tempDir)
             try {
-                resolver.openFileDescriptor(uri, "rw")?.use { pfd ->
-                    val dstExif = ExifInterface(pfd.fileDescriptor)
-                    copyExifAttributes(srcExif, dstExif)
-                }
+                FileOutputStream(exifTemp).use { it.write(jpegBytes) }
+                val dstExif = ExifInterface(exifTemp.absolutePath)
+                copyExifAttributes(srcExif, dstExif)
+                jpegBytes = exifTemp.readBytes()
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to copy EXIF attributes to Motion Photo file", e)
+                Log.w(TAG, "Failed to copy EXIF attributes to Motion Photo JPEG", e)
+            } finally {
+                exifTemp.delete()
             }
         }
 
-        Log.i(TAG, "Successfully saved Live Photo as single Motion Photo $motionFilename to $uri")
-        return Result.success(uri)
+        destFile.parentFile?.mkdirs()
+        val destTemp = File(destFile.parentFile, "${destFile.name}.tmp")
+        return try {
+            FileOutputStream(destTemp).use { out ->
+                packJpegMotionPhoto(jpegBytes, videoBytes, out)
+                out.flush()
+            }
+            if (!destTemp.renameTo(destFile)) {
+                destTemp.copyTo(destFile, overwrite = true)
+                destTemp.delete()
+            }
+            Result.success(destFile)
+        } catch (e: Exception) {
+            destTemp.delete()
+            Result.failure(e)
+        }
+    }
+
+    private suspend fun downloadLivePhotoMotionPhoto(
+        context: Context,
+        photoUrl: String,
+        videoUrl: String,
+        photo: PhotoAssetEntity,
+        repository: PhotoRepository,
+        customRelativePath: String? = null,
+        onProgress: ((progressPercent: Int, downloadedBytes: Long) -> Unit)? = null
+    ): Result<Uri> {
+        val tempMotionFile = File.createTempFile("mp_media_", ".jpg", context.cacheDir)
+        try {
+            val packed = downloadMotionPhotoToFile(
+                context = context,
+                photo = photo,
+                repository = repository,
+                destFile = tempMotionFile,
+                photoUrl = photoUrl,
+                videoUrl = videoUrl,
+                refreshIfStale = false,
+                onProgress = onProgress
+            )
+            if (packed.isFailure) {
+                return Result.failure(packed.exceptionOrNull() ?: Exception("打包 Motion Photo 失败"))
+            }
+
+            val baseName = photo.filename.substringBeforeLast('.')
+            val motionFilename = "$baseName.jpg"
+            val relativePath = customRelativePath?.takeIf { it.isNotBlank() }
+                ?: (Environment.DIRECTORY_PICTURES + "/iClouDroid")
+
+            val collection = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            } else {
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+            }
+
+            val contentValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, motionFilename)
+                put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                if (photo.assetDate > 0) {
+                    put(MediaStore.MediaColumns.DATE_TAKEN, photo.assetDate)
+                    put(MediaStore.MediaColumns.DATE_ADDED, photo.assetDate / 1000)
+                    put(MediaStore.MediaColumns.DATE_MODIFIED, photo.assetDate / 1000)
+                }
+            }
+
+            val resolver = context.contentResolver
+            val uri = resolver.insert(collection, contentValues)
+                ?: return Result.failure(Exception("创建 Motion Photo MediaStore 记录失败"))
+
+            try {
+                resolver.openOutputStream(uri)?.use { out ->
+                    tempMotionFile.inputStream().use { input -> input.copyTo(out) }
+                } ?: return Result.failure(Exception("无法打开 Motion Photo 输出流"))
+            } catch (e: Exception) {
+                resolver.delete(uri, null, null)
+                return Result.failure(e)
+            }
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                contentValues.clear()
+                contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                resolver.update(uri, contentValues, null, null)
+            }
+
+            Log.i(TAG, "Successfully saved Live Photo as single Motion Photo $motionFilename to $uri")
+            return Result.success(uri)
+        } finally {
+            tempMotionFile.delete()
+        }
     }
 
     private fun copyExifAttributes(srcExif: ExifInterface, dstExif: ExifInterface) {
@@ -383,7 +477,8 @@ object MediaStoreDownloader {
         repository: PhotoRepository,
         isVideo: Boolean,
         fallbackSize: Long = 0L,
-        onProgress: ((progressPercent: Int, downloadedBytes: Long) -> Unit)? = null
+        onProgress: ((progressPercent: Int, downloadedBytes: Long) -> Unit)? = null,
+        isCanceled: (() -> Boolean)? = null
     ): ByteArray? {
         var currentUrl = initialUrl
         var connection = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
@@ -435,6 +530,9 @@ object MediaStoreDownloader {
 
             connection.inputStream.use { inStream ->
                 while (inStream.read(buffer).also { bytesRead = it } != -1) {
+                    if (isCanceled?.invoke() == true) {
+                        return null
+                    }
                     out.write(buffer, 0, bytesRead)
                     downloadedBytes += bytesRead
 

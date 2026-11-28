@@ -1,6 +1,6 @@
 # AGENTS.md - AI Agent 协助开发规范指南
 
-本文档为参与 **iClouDroid** 项目协同开发的 AI Agent 提供架构导引、编码约定与编译调试规范。
+本文档为参与 **AClouDroid** 项目协同开发的 AI Agent 提供架构导引、编码约定与编译调试规范。
 Avoid unnecessary secondary labels anddescriptions. Let the layout do the explaining.避免不必要的辅助标签与说明。让布局本身发挥解释
 作用。
 > [!IMPORTANT]
@@ -622,29 +622,27 @@ val generation = sessionGeneration * SCHEMA_VERSION   // 7 → 14
 
 对照片两者一致；对视频它们是冲突的（这是桹障七的根源）。**不能靠报 image 来绕过。**
 
-**正确做法：在契约指定的位置拆开。**
+**正确做法：在契约指定的位置按场景拆开。**
 
-| 列/方法 | 职责 |
+| 场景 / 列 / 方法 | 职责与策略 |
 | --- | --- |
-| `MIME_TYPE` | 媒体**真实类型**：视频报 `video/mp4` / `video/quicktime` / `video/x-m4v` |
-| `onOpenPreview` | 履行契约另一半（“thumbnail 应与 MIME_TYPE 一致”）—— 视频行**返回真实视频容器**，让 `VideoDecoder` 能抓帧 |
+| `MIME_TYPE` | 媒体**真实类型**：视频报 `video/mp4` / `video/quicktime` / `video/x-m4v`；`.heic` 与 `LIVE_PHOTO` 报 `image/jpeg` |
+| `STANDARD_MIME_TYPE_EXTENSION` | `LIVE_PHOTO`（或有 `videoComplUrl` 的非视频条目）必须报 `STANDARD_MIME_TYPE_EXTENSION_MOTION_PHOTO`（`3`），否则选择器不展示右上角动态角标 |
+| `MEDIA_STORE_URI` | 纯云端条目填 `null`；若设备本地 `MediaStore` 已存有同文件（由 `LocalMediaStoreMatcher` 匹配），必须回填 `content://media/external/.../<id>`，避免本地与云端在网格里并排出现两张 |
+| `onOpenPreview`（宫格缩略图） | 由 `EXTRA_MEDIASTORE_THUMB=true`（或 `EXTRA_PREVIEW_THUMBNAIL=true` 且尺寸 `<= 768px`）识别：**无论照片还是视频，统一返回轻量 JPEG `thumbUrl`**（`com.google.android.photopicker` 由 Skia 直接解码，绝不在宫格下载视频） |
+| `onOpenPreview`（大屏预览） | 由 `EXTRA_MEDIASTORE_THUMB=false`（或大尺寸/未带缩略图标记）识别：走 `getOrDownloadMediaFile()` 下载原片 / 完整视频 / 标准单文件 Motion Photo；**视频大屏绝不可回退 JPEG**（会导致 `ExoPlayer` 抛出 `UnrecognizedInputFormatException` 并一直转圈） |
+| `currentSyncGeneration()` | `onGetMediaCollectionInfo` 与 `onQueryMedia` 必须共享同一非零公式 `(sessionGeneration + 1L) * SCHEMA_VERSION`，避免 `sessionGeneration == 0` 时递增 `SCHEMA_VERSION` 失效 |
 
-实现要点（`ICloudMediaProvider`）：
+回归测试：`MediaMimeTypeTest`、`PreviewRequestClassificationTest`、`LocalMediaStoreMatcherTest`。
 
-1. `onOpenPreview` 先查 `isVideoAsset(mediaId)`（主键索引，相对下载很便宜）
-2. 视频 → 直接走 `getOrDownloadMediaFile`（与 `onOpenMedia` 同一份字节）
-3. 取不到 → 才回退到 JPEG 缩略图（宁可画个图，不要空格）
-4. 图片 → 维持原路径
+### 6.7.5e Go `sync.RWMutex` 严禁递归读锁（ISS-080 血泪教训）
 
-`.heic` 仍报 `image/jpeg`：它的 `thumbUrl` 是服务端转码 JPEG，报 `image/heic` 会让
-`BitmapDecoder` 去 JPEG 里找 HEIF 头——同类错误。但照片无论报哪个都是照片，所以没有分类代价。
+> [!CAUTION]
+> **Go 的 `sync.RWMutex` 不可重入。** 若协程 A 持有 `s.mu.RLock()` 后再次调用另一个会请求 `s.mu.RLock()` 的方法，
+> 一旦中间有任何并发请求（如 HTTP 响应的 `ExtractAndSaveCookies()`）排入 `s.mu.Lock()` 写锁，写锁会等外层 `RLock` 释放，
+> 内层 `RLock` 会等写锁完成 → **永久死锁**；再叠加 Kotlin 侧全局 `sessionMutex`，整个 App 的直链刷新与同步将全部卡死。
 
-回归测试：`MediaMimeTypeTest`（含一条“视频永不解析为 image”的穷尽护栏）。
-
-### 6.7.5e `STANDARD_MIME_TYPE_EXTENSION` 救不了这个问题
-
-它只有四个值：`NONE` / `GIF` / `MOTION_PHOTO` / `ANIMATED_WEBP`。
-**没有“视频”这个值**，所以它无法用来把视频标记出来，别指望用它绕过上面的拆分。
+规则：公开方法（如 `HasCookieIgnoreCase`）加读锁后委托给 `*Locked` 内部方法（如 `hasCookieIgnoreCaseLocked`）；持有 `RLock`/`Lock` 的调用链只准调 `*Locked` 版本，并在并发竞态测试（`-race`）中覆盖。
 
 ### 6.7.6 排查时必须看系统进程的日志
 
